@@ -9,7 +9,7 @@ export const Pricing = () => {
   const plans = [
     {
       name: "Standard",
-      price: "2.000",
+      price: "4.000",
       currency: "FC",
       desc: "Idéal pour les petites courses sans urgence.",
       features: ["Livraison en 24h", "Colis jusqu'à 2kg", "Suivi basique", "Support par email"],
@@ -17,7 +17,7 @@ export const Pricing = () => {
     },
     {
       name: "Express",
-      price: "5.000",
+      price: "7.000",
       currency: "FC",
       desc: "La solution la plus populaire pour vos urgences.",
       features: ["Livraison en - de 2h", "Colis jusqu'à 5kg", "Suivi en temps réel", "Support prioritaire WhatsApp", "Preuve de livraison"],
