@@ -112,3 +112,21 @@ export interface SchoolOfficialPrerequisites {
   hasHomeroomSignature: boolean;
   isReadyForValidation: boolean;
 }
+
+export const getReportCardBatchStatusLabel = (status?: ReportCardBatchStatus | string | null): string => {
+  if (!status) return 'Inconnu';
+  switch (status) {
+    case 'draft':
+      return 'Brouillon';
+    case 'submitted_by_homeroom':
+      return 'Soumis par le titulaire';
+    case 'validated_by_admin':
+      return 'Validé par la direction';
+    case 'published':
+      return 'Publié';
+    case 'superseded':
+      return 'Remplacé par une nouvelle révision';
+    default:
+      return status;
+  }
+};

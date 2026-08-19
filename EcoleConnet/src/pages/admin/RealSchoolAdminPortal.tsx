@@ -406,6 +406,14 @@ export const RealSchoolAdminPortal: React.FC = () => {
   const [targetCycleForChange, setTargetCycleForChange] = useState<'primary' | 'secondary' | ''>('');
   const [settingCycle, setSettingCycle] = useState(false);
 
+  // Homeroom Teacher Management Modal States
+  const [showHomeroomModal, setShowHomeroomModal] = useState<boolean>(false);
+  const [selectedClassForHomeroom, setSelectedClassForHomeroom] = useState<ClassRow | null>(null);
+  const [selectedTeacherIdForHomeroom, setSelectedTeacherIdForHomeroom] = useState<string>('');
+  const [savingHomeroom, setSavingHomeroom] = useState<boolean>(false);
+  const [showConfirmRemoveHomeroom, setShowConfirmRemoveHomeroom] = useState<boolean>(false);
+  const [showConfirmReplaceHomeroom, setShowConfirmReplaceHomeroom] = useState<boolean>(false);
+
   // DRC Calendar Configuration States
   const [showDrcConfigModal, setShowDrcConfigModal] = useState(false);
   const [drcConfigCycle, setDrcConfigCycle] = useState<'primary' | 'secondary'>('primary');
@@ -775,7 +783,7 @@ export const RealSchoolAdminPortal: React.FC = () => {
         section: classSection,
         room: classRoom,
         education_cycle: classCycle || null,
-        homeroom_teacher_id: classTeacherId || null,
+        homeroom_teacher_id: null,
         is_active: true
       });
       if (error) throw error;
@@ -833,6 +841,68 @@ export const RealSchoolAdminPortal: React.FC = () => {
       showToast(err.message || 'Erreur lors de la configuration du calendrier scolaire.', 'warning');
     } finally {
       setConfiguringDrc(false);
+    }
+  };
+
+  // Handler - Affecter un Professeur Titulaire via RPC
+  const handleAssignHomeroomTeacher = async () => {
+    if (!selectedClassForHomeroom || !selectedTeacherIdForHomeroom) {
+      showToast('Veuillez sélectionner un enseignant actif.', 'warning');
+      return;
+    }
+
+    setSavingHomeroom(true);
+    try {
+      const { error } = await supabase.rpc('assign_class_homeroom_teacher', {
+        p_class_id: selectedClassForHomeroom.id,
+        p_teacher_id: selectedTeacherIdForHomeroom,
+        p_expected_current_profile_id: selectedClassForHomeroom.homeroom_teacher_id || null
+      });
+
+      if (error) throw error;
+
+      showToast(`Professeur titulaire affecté avec succès à la classe ${selectedClassForHomeroom.name}.`, 'success');
+      setShowHomeroomModal(false);
+      setShowConfirmReplaceHomeroom(false);
+      setSelectedClassForHomeroom(null);
+      setSelectedTeacherIdForHomeroom('');
+      await loadSchoolPortalData();
+    } catch (err: any) {
+      console.error('[RealSchoolAdminPortal] Erreur affectation titulaire:', err);
+      setShowConfirmReplaceHomeroom(false);
+      const friendlyMsg = err?.message || 'Erreur lors de l’affectation du professeur titulaire.';
+      showToast(friendlyMsg, 'warning');
+    } finally {
+      setSavingHomeroom(false);
+    }
+  };
+
+  // Handler - Retirer le Professeur Titulaire via RPC
+  const handleRemoveHomeroomTeacher = async () => {
+    if (!selectedClassForHomeroom || !selectedClassForHomeroom.homeroom_teacher_id) return;
+
+    setSavingHomeroom(true);
+    try {
+      const { error } = await supabase.rpc('remove_class_homeroom_teacher', {
+        p_class_id: selectedClassForHomeroom.id,
+        p_expected_profile_id: selectedClassForHomeroom.homeroom_teacher_id
+      });
+
+      if (error) throw error;
+
+      showToast(`Professeur titulaire retiré de la classe ${selectedClassForHomeroom.name}.`, 'success');
+      setShowHomeroomModal(false);
+      setShowConfirmRemoveHomeroom(false);
+      setSelectedClassForHomeroom(null);
+      setSelectedTeacherIdForHomeroom('');
+      await loadSchoolPortalData();
+    } catch (err: any) {
+      console.error('[RealSchoolAdminPortal] Erreur retrait titulaire:', err);
+      setShowConfirmRemoveHomeroom(false);
+      const friendlyMsg = err?.message || 'Erreur lors du retrait du professeur titulaire.';
+      showToast(friendlyMsg, 'warning');
+    } finally {
+      setSavingHomeroom(false);
     }
   };
 
@@ -2793,6 +2863,7 @@ export const RealSchoolAdminPortal: React.FC = () => {
                   <thead>
                     <tr className="bg-slate-950 text-slate-400 font-bold uppercase border-b border-slate-800">
                       <th className="p-3">Nom Classe</th>
+                      <th className="p-3">Professeur Titulaire</th>
                       <th className="p-3">Cycle Scolaire</th>
                       <th className="p-3">Niveau</th>
                       <th className="p-3">Section</th>
@@ -2806,10 +2877,28 @@ export const RealSchoolAdminPortal: React.FC = () => {
                       const activeClassEnrollments = enrollments.filter(e => e.class_id === c.id && e.status === 'active');
                       const directClassStudents = students.filter(st => st.class_id === c.id);
                       const realCount = activeClassEnrollments.length > 0 ? activeClassEnrollments.length : directClassStudents.length;
+                      const hrTeacher = Boolean(c.homeroom_teacher_id)
+                        ? teachers.find(t => Boolean(t.profile_id) && t.profile_id === c.homeroom_teacher_id && t.school_id === school?.id)
+                        : null;
 
                       return (
                         <tr key={c.id} className="hover:bg-slate-800/40 transition-colors">
                           <td className="p-3 font-extrabold text-white text-sm">{c.name}</td>
+                          <td className="p-3">
+                            {hrTeacher ? (
+                              <div className="space-y-0.5">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-extrabold text-white text-xs">{hrTeacher.first_name} {hrTeacher.last_name}</span>
+                                  <span className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-md font-bold text-[9px]">
+                                    Titulaire
+                                  </span>
+                                </div>
+                                <span className="font-mono text-amber-400 text-[10px] block">{hrTeacher.employee_number}</span>
+                              </div>
+                            ) : (
+                              <span className="text-slate-500 text-xs italic">Aucun titulaire</span>
+                            )}
+                          </td>
                           <td className="p-3">
                             {c.education_cycle === 'primary' ? (
                               <span className="px-2.5 py-1 bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded-full font-bold text-[10px]">
@@ -2843,6 +2932,25 @@ export const RealSchoolAdminPortal: React.FC = () => {
                           </td>
                           <td className="p-3 text-right">
                             <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => {
+                                  setSelectedClassForHomeroom(c);
+                                  const existingTeacher = Boolean(c.homeroom_teacher_id)
+                                    ? teachers.find(t => Boolean(t.profile_id) && t.profile_id === c.homeroom_teacher_id && t.school_id === school?.id)
+                                    : null;
+                                  setSelectedTeacherIdForHomeroom(existingTeacher?.id || '');
+                                  setShowHomeroomModal(true);
+                                }}
+                                className={`px-2.5 py-1 font-bold rounded-lg transition-colors cursor-pointer text-[11px] border ${
+                                  c.homeroom_teacher_id
+                                    ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30'
+                                    : 'bg-slate-800 hover:bg-slate-700 text-amber-400 border-slate-700'
+                                }`}
+                                title={c.homeroom_teacher_id ? "Changer ou retirer le professeur titulaire" : "Affecter un professeur titulaire"}
+                              >
+                                {c.homeroom_teacher_id ? 'Changer Titulaire' : 'Affecter Titulaire'}
+                              </button>
+
                               <button
                                 onClick={() => {
                                   setSelectedClassForCycle(c);
@@ -5982,6 +6090,286 @@ export const RealSchoolAdminPortal: React.FC = () => {
                 <span>{closingCalendar ? 'Clôture en cours...' : 'Confirmer la clôture du calendrier'}</span>
               </button>
             </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* MODAL ADMIN: GESTION DU PROFESSEUR TITULAIRE */}
+      {showHomeroomModal && selectedClassForHomeroom && (
+        <Modal
+          isOpen={showHomeroomModal}
+          onClose={() => {
+            setShowHomeroomModal(false);
+            setShowConfirmRemoveHomeroom(false);
+            setSelectedClassForHomeroom(null);
+            setSelectedTeacherIdForHomeroom('');
+          }}
+          title={`Professeur Titulaire — Classe ${selectedClassForHomeroom.name}`}
+          darkMode={true}
+        >
+          <div className="space-y-4 text-xs">
+            {/* Header info */}
+            <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-400 uppercase">Classe sélectionnée :</span>
+                <span className="font-extrabold text-white text-sm">{selectedClassForHomeroom.name}</span>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Le professeur titulaire est le garant pédagogique officiel de la classe. Il est seul habilité à générer les brouillons de bulletins périodiques, attribuer les mentions de conduite et soumettre les résultats officiels à la direction.
+              </p>
+            </div>
+
+            {/* Current Homeroom status */}
+            {(() => {
+              const currentHr = Boolean(selectedClassForHomeroom.homeroom_teacher_id)
+                ? teachers.find(t => Boolean(t.profile_id) && t.profile_id === selectedClassForHomeroom.homeroom_teacher_id && t.school_id === school?.id)
+                : null;
+              if (!currentHr) {
+                return (
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 flex items-center justify-between">
+                    <span>Aucun professeur titulaire n'est actuellement affecté à cette classe.</span>
+                  </div>
+                );
+              }
+              return (
+                <div className="p-3 bg-slate-950 border border-emerald-500/40 rounded-xl flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-emerald-400 block">Titulaire Actuel :</span>
+                    <span className="font-extrabold text-white text-xs">{currentHr.first_name} {currentHr.last_name}</span>
+                    <span className="font-mono text-slate-400 text-[10px] ml-2">({currentHr.employee_number})</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmRemoveHomeroom(true)}
+                    disabled={savingHomeroom}
+                    className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-xl font-bold cursor-pointer transition-colors"
+                  >
+                    Retirer le titulaire
+                  </button>
+                </div>
+              );
+            })()}
+
+            {/* Confirmation de retrait */}
+            {showConfirmRemoveHomeroom && (
+              <div className="p-4 bg-rose-500/10 border border-rose-500/30 rounded-2xl space-y-3">
+                <p className="font-extrabold text-rose-300 text-xs">
+                  Êtes-vous sûr de vouloir retirer le professeur titulaire de la classe {selectedClassForHomeroom.name} ?
+                </p>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmRemoveHomeroom(false)}
+                    className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded-xl font-bold cursor-pointer"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingHomeroom}
+                    onClick={handleRemoveHomeroomTeacher}
+                    className="px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-extrabold rounded-xl cursor-pointer"
+                  >
+                    {savingHomeroom ? 'Retrait en cours...' : 'Confirmer le retrait'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Confirmation Forte de Remplacement */}
+            {showConfirmReplaceHomeroom && (() => {
+              const oldTeacher = Boolean(selectedClassForHomeroom.homeroom_teacher_id)
+                ? teachers.find(t => Boolean(t.profile_id) && t.profile_id === selectedClassForHomeroom.homeroom_teacher_id && t.school_id === school?.id)
+                : null;
+              const newTeacher = teachers.find(t => t.id === selectedTeacherIdForHomeroom && t.school_id === school?.id);
+              return (
+                <div className="p-4 bg-amber-500/10 border border-amber-500/40 rounded-2xl space-y-3">
+                  <div className="space-y-1">
+                    <h4 className="font-black text-amber-300 text-sm">Confirmation de Remplacement du Titulaire</h4>
+                    <p className="text-slate-300 text-xs">
+                      Vous vous apprêtez à remplacer le garant pédagogique de cette classe. Cette opération sera tracée dans le journal d'audit de l'école.
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Classe :</span>
+                      <strong className="text-white">{selectedClassForHomeroom.name}</strong>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-rose-400">Ancien titulaire :</span>
+                      <strong className="text-rose-300">
+                        {oldTeacher ? `${oldTeacher.first_name} ${oldTeacher.last_name} (${oldTeacher.employee_number})` : 'Aucun'}
+                      </strong>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-emerald-400">Nouveau titulaire :</span>
+                      <strong className="text-emerald-300">
+                        {newTeacher ? `${newTeacher.first_name} ${newTeacher.last_name} (${newTeacher.employee_number})` : 'Sélectionné'}
+                      </strong>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmReplaceHomeroom(false)}
+                      className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded-xl font-bold cursor-pointer"
+                    >
+                      Annuler
+                    </button>
+                    <button
+                      type="button"
+                      disabled={savingHomeroom}
+                      onClick={handleAssignHomeroomTeacher}
+                      className="px-4 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-xl cursor-pointer shadow-md"
+                    >
+                      {savingHomeroom ? 'Remplacement...' : 'Confirmer le Remplacement'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* List of eligible teachers */}
+            {!showConfirmRemoveHomeroom && !showConfirmReplaceHomeroom && (
+              <div className="space-y-2">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                  Sélectionner un enseignant actif de l'établissement :
+                </label>
+
+                {(() => {
+                  const eligibleTeachers = teachers.filter(
+                    t => t.school_id === school?.id && Boolean(t.profile_id) && t.account_status === 'active' && t.employment_status === 'active'
+                  );
+
+                  if (eligibleTeachers.length === 0) {
+                    return (
+                      <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl text-center text-slate-400">
+                        Aucun enseignant actif avec profil numérique trouvé dans cet établissement.
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+                      {eligibleTeachers.map(t => {
+                        const conflictingClass = classes.find(
+                          c => c.id !== selectedClassForHomeroom.id && Boolean(c.homeroom_teacher_id) && Boolean(t.profile_id) && c.homeroom_teacher_id === t.profile_id
+                        );
+                        const isCurrent = Boolean(selectedClassForHomeroom.homeroom_teacher_id) && Boolean(t.profile_id) && selectedClassForHomeroom.homeroom_teacher_id === t.profile_id;
+                        const isSelected = selectedTeacherIdForHomeroom === t.id;
+                        const isDisabled = Boolean(conflictingClass) && !isCurrent;
+
+                        return (
+                          <div
+                            key={t.id}
+                            onClick={() => !isDisabled && setSelectedTeacherIdForHomeroom(t.id)}
+                            className={`p-3 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
+                              isDisabled
+                                ? 'bg-slate-950/40 border-slate-800 opacity-60 cursor-not-allowed'
+                                : isSelected
+                                ? 'bg-amber-500/10 border-amber-500 text-white cursor-pointer shadow-md'
+                                : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-300 cursor-pointer'
+                            }`}
+                          >
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <span className="font-extrabold text-white text-xs">{t.first_name} {t.last_name}</span>
+                                <span className="font-mono text-amber-400 text-[10px]">{t.employee_number}</span>
+                                {isCurrent && (
+                                  <span className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded text-[9px] font-bold">
+                                    Titulaire actuel
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-slate-400 text-[11px]">
+                                Spécialité : <strong className="text-slate-300">{t.speciality || 'Enseignement Général'}</strong>
+                              </p>
+                              {conflictingClass && (
+                                <p className="text-amber-400 text-[10px] font-bold">
+                                  ⚠️ Déjà titulaire de la classe {conflictingClass.name} (un seul titulaire par classe)
+                                </p>
+                              )}
+                            </div>
+
+                            <input
+                              type="radio"
+                              name="homeroomTeacherSelect"
+                              disabled={isDisabled}
+                              checked={isSelected}
+                              onChange={() => setSelectedTeacherIdForHomeroom(t.id)}
+                              className="accent-amber-500 w-4 h-4 cursor-pointer"
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+
+                {/* Replacement confirmation alert */}
+                {(() => {
+                  const selectedTeacher = teachers.find(t => t.id === selectedTeacherIdForHomeroom);
+                  const isReplacing = Boolean(selectedClassForHomeroom.homeroom_teacher_id) &&
+                    Boolean(selectedTeacher?.profile_id) &&
+                    selectedClassForHomeroom.homeroom_teacher_id !== selectedTeacher?.profile_id;
+
+                  if (isReplacing) {
+                    return (
+                      <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-200 text-[11px] leading-relaxed">
+                        ⚠️ <strong>Remplacement de titulaire</strong> : Vous allez remplacer l'ancien titulaire par le professeur sélectionné pour la classe <strong>{selectedClassForHomeroom.name}</strong>.
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+
+                <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowHomeroomModal(false);
+                      setShowConfirmRemoveHomeroom(false);
+                      setShowConfirmReplaceHomeroom(false);
+                      setSelectedClassForHomeroom(null);
+                      setSelectedTeacherIdForHomeroom('');
+                    }}
+                    className="px-4 py-2 bg-slate-800 text-slate-300 hover:text-white rounded-xl font-bold cursor-pointer"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    type="button"
+                    disabled={
+                      savingHomeroom ||
+                      !selectedTeacherIdForHomeroom ||
+                      (Boolean(selectedClassForHomeroom.homeroom_teacher_id) &&
+                        selectedClassForHomeroom.homeroom_teacher_id === teachers.find(t => t.id === selectedTeacherIdForHomeroom)?.profile_id)
+                    }
+                    onClick={() => {
+                      const selectedTeacher = teachers.find(t => t.id === selectedTeacherIdForHomeroom);
+                      const isReplacing = Boolean(selectedClassForHomeroom.homeroom_teacher_id) &&
+                        Boolean(selectedTeacher?.profile_id) &&
+                        selectedClassForHomeroom.homeroom_teacher_id !== selectedTeacher?.profile_id;
+
+                      if (isReplacing) {
+                        setShowConfirmReplaceHomeroom(true);
+                      } else {
+                        handleAssignHomeroomTeacher();
+                      }
+                    }}
+                    className="px-5 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-slate-950 font-black rounded-xl cursor-pointer shadow-lg transition-colors"
+                  >
+                    {savingHomeroom
+                      ? 'Enregistrement...'
+                      : selectedClassForHomeroom.homeroom_teacher_id
+                      ? 'Remplacer le Titulaire'
+                      : 'Enregistrer le Titulaire'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </Modal>
       )}

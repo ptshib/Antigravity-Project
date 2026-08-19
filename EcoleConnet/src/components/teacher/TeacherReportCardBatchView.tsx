@@ -20,6 +20,7 @@ import {
   RotateCw
 } from 'lucide-react';
 import type { ReportCardBatchManagement, PeriodReportCardItem } from '../../types/reportCard';
+import { getReportCardBatchStatusLabel } from '../../types/reportCard';
 
 interface TeacherReportCardBatchViewProps {
   selectedClassId: string;
@@ -232,9 +233,9 @@ export const TeacherReportCardBatchView: React.FC<TeacherReportCardBatchViewProp
     return (
       <div className="p-8 text-center bg-slate-900 rounded-3xl border border-slate-800 space-y-3">
         <Lock className="w-10 h-10 text-amber-500 mx-auto" />
-        <h3 className="font-extrabold text-white text-base">Espace Réservé au Professeur Titulaire</h3>
-        <p className="text-xs text-slate-400 max-w-md mx-auto">
-          La préparation, l'attribution des mentions de conduite et la soumission des bulletins officiels de cette classe sont réservées à son professeur titulaire.
+        <h3 className="font-extrabold text-white text-base">Actions réservées au professeur titulaire</h3>
+        <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
+          La génération des brouillons, l'attribution des mentions globales de conduite et la soumission des bulletins officiels de cette classe sont strictement réservées à son professeur titulaire.
         </p>
       </div>
     );
@@ -293,25 +294,30 @@ export const TeacherReportCardBatchView: React.FC<TeacherReportCardBatchViewProp
                 {batchData.status === 'draft' && (
                   <span className="px-3 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-full text-xs font-extrabold flex items-center gap-1.5">
                     <Clock className="w-3.5 h-3.5" />
-                    <span>Brouillon en Préparation</span>
+                    <span>Brouillon</span>
                   </span>
                 )}
                 {batchData.status === 'submitted_by_homeroom' && (
                   <span className="px-3 py-1 bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 rounded-full text-xs font-extrabold flex items-center gap-1.5">
                     <Send className="w-3.5 h-3.5" />
-                    <span>Soumis à la Direction</span>
+                    <span>Soumis par le titulaire</span>
                   </span>
                 )}
                 {batchData.status === 'validated_by_admin' && (
                   <span className="px-3 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-full text-xs font-extrabold flex items-center gap-1.5">
                     <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Validé par la Direction</span>
+                    <span>Validé par la direction</span>
                   </span>
                 )}
                 {batchData.status === 'published' && (
                   <span className="px-3 py-1 bg-emerald-500 text-slate-950 rounded-full text-xs font-black flex items-center gap-1.5">
                     <Award className="w-3.5 h-3.5" />
-                    <span>Publié Officiellement</span>
+                    <span>Publié</span>
+                  </span>
+                )}
+                {batchData.status === 'superseded' && (
+                  <span className="px-3 py-1 bg-slate-800 text-slate-400 border border-slate-700 rounded-full text-xs font-extrabold flex items-center gap-1.5">
+                    <span>Remplacé par une nouvelle révision</span>
                   </span>
                 )}
               </div>
@@ -349,7 +355,7 @@ export const TeacherReportCardBatchView: React.FC<TeacherReportCardBatchViewProp
 
               {batchData.status !== 'draft' && (
                 <span className="text-xs text-slate-400 font-medium italic">
-                  Lot verrouillé en lecture seule (Statut : {batchData.status}).
+                  Lot verrouillé en lecture seule (Statut : <strong className="text-amber-400">{getReportCardBatchStatusLabel(batchData.status)}</strong>).
                 </span>
               )}
             </div>
@@ -374,21 +380,21 @@ export const TeacherReportCardBatchView: React.FC<TeacherReportCardBatchViewProp
               </span>
             </div>
 
-            {/* Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
+            {/* Desktop Table */}
+            <div className="hidden md:block overflow-hidden rounded-2xl border border-slate-800">
+              <table className="w-full text-left text-xs table-auto border-collapse">
                 <thead>
-                  <tr className="bg-slate-950/80 text-slate-400 border-b border-slate-800 uppercase tracking-wider font-extrabold text-[10px]">
-                    <th className="p-3 text-center">Rang</th>
-                    <th className="p-3">Matricule & Élève</th>
-                    <th className="p-3 text-center">Moyenne</th>
-                    <th className="p-3 text-center">Statut Matières</th>
-                    <th className="p-3">Appréciation Titulaire</th>
-                    <th className="p-3">Conduite</th>
-                    <th className="p-3 text-right">Actions</th>
+                  <tr className="bg-slate-950 text-slate-400 border-b border-slate-800 uppercase tracking-wider font-extrabold text-[10px]">
+                    <th className="p-3 text-center w-16">Rang</th>
+                    <th className="p-3 min-w-[160px]">Matricule & Élève</th>
+                    <th className="p-3 text-center w-24">Moyenne</th>
+                    <th className="p-3 text-center w-36">Statut Matières</th>
+                    <th className="p-3 min-w-[200px] max-w-[320px]">Appréciation Titulaire</th>
+                    <th className="p-3 w-24">Conduite</th>
+                    <th className="p-3 text-right w-28">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800 font-medium">
+                <tbody className="divide-y divide-slate-800 font-medium bg-slate-950/40">
                   {filteredCards.map(card => {
                     const hasHomeroomRemark = Boolean(card.homeroom_teacher_remarks?.trim());
                     return (
@@ -396,7 +402,7 @@ export const TeacherReportCardBatchView: React.FC<TeacherReportCardBatchViewProp
                         {/* Rang */}
                         <td className="p-3 text-center">
                           {card.rank ? (
-                            <span className="px-2.5 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-lg font-mono font-black text-xs">
+                            <span className="px-2.5 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-lg font-mono font-black text-xs inline-block">
                               #{card.rank}
                             </span>
                           ) : (
@@ -406,8 +412,8 @@ export const TeacherReportCardBatchView: React.FC<TeacherReportCardBatchViewProp
 
                         {/* Élève */}
                         <td className="p-3">
-                          <p className="font-extrabold text-white text-xs">{card.student_name}</p>
-                          <span className="font-mono text-slate-500 text-[10px]">{card.student_number}</span>
+                          <p className="font-extrabold text-white text-xs leading-snug">{card.student_name}</p>
+                          <span className="font-mono text-slate-500 text-[10px] block">{card.student_number}</span>
                         </td>
 
                         {/* Moyenne */}
@@ -435,9 +441,11 @@ export const TeacherReportCardBatchView: React.FC<TeacherReportCardBatchViewProp
                         </td>
 
                         {/* Appréciation */}
-                        <td className="p-3 max-w-xs">
+                        <td className="p-3 min-w-[200px] max-w-[320px]">
                           {hasHomeroomRemark ? (
-                            <span className="text-slate-200 text-xs truncate block">{card.homeroom_teacher_remarks}</span>
+                            <p className="text-slate-200 text-xs break-words whitespace-pre-wrap leading-relaxed">
+                              {card.homeroom_teacher_remarks}
+                            </p>
                           ) : (
                             <span className="text-slate-500 italic text-[11px]">En attente de saisie...</span>
                           )}
@@ -446,7 +454,7 @@ export const TeacherReportCardBatchView: React.FC<TeacherReportCardBatchViewProp
                         {/* Conduite */}
                         <td className="p-3">
                           {card.conduct_grade ? (
-                            <span className="px-2 py-0.5 bg-slate-800 text-slate-200 rounded-lg text-[11px] font-bold">
+                            <span className="px-2 py-0.5 bg-slate-800 text-slate-200 rounded-lg text-[11px] font-bold inline-block">
                               {card.conduct_grade}
                             </span>
                           ) : (
@@ -470,6 +478,79 @@ export const TeacherReportCardBatchView: React.FC<TeacherReportCardBatchViewProp
                   })}
                 </tbody>
               </table>
+            </div>
+
+            {/* Mobile Cards View */}
+            <div className="md:hidden space-y-3">
+              {filteredCards.map(card => {
+                const hasHomeroomRemark = Boolean(card.homeroom_teacher_remarks?.trim());
+                return (
+                  <div key={card.report_card_id} className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="font-extrabold text-white text-sm">{card.student_name}</p>
+                        <span className="font-mono text-slate-500 text-xs">{card.student_number}</span>
+                      </div>
+                      <div className="text-right">
+                        {card.rank ? (
+                          <span className="px-2 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-lg font-mono font-bold text-xs">
+                            #{card.rank}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-900">
+                      <div>
+                        <span className="text-slate-400 block text-[10px] uppercase font-bold">Moyenne</span>
+                        {card.overall_percentage !== null ? (
+                          <span className={`font-black text-sm ${card.overall_percentage >= 50 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {Number(card.overall_percentage).toFixed(1)} %
+                          </span>
+                        ) : (
+                          <span className="text-slate-500">Non noté</span>
+                        )}
+                      </div>
+
+                      <div>
+                        <span className="text-slate-400 block text-[10px] uppercase font-bold">Conduite</span>
+                        <span className="font-bold text-slate-200">{card.conduct_grade || '—'}</span>
+                      </div>
+
+                      <div>
+                        <span className="text-slate-400 block text-[10px] uppercase font-bold">Matières</span>
+                        {card.is_incomplete ? (
+                          <span className="text-amber-400 font-bold text-[11px]">Incomplet</span>
+                        ) : (
+                          <span className="text-emerald-400 font-bold text-[11px]">Complet</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-900">
+                      <span className="text-slate-400 block text-[10px] uppercase font-bold mb-1">Appréciation</span>
+                      {hasHomeroomRemark ? (
+                        <p className="text-slate-300 text-xs break-words whitespace-pre-wrap leading-relaxed bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/60">
+                          {card.homeroom_teacher_remarks}
+                        </p>
+                      ) : (
+                        <span className="text-slate-500 italic text-[11px]">En attente de saisie...</span>
+                      )}
+                    </div>
+
+                    <div className="pt-2 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenRemarksModal(card)}
+                        className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5 text-amber-400" />
+                        <span>{batchData.status === 'draft' ? 'Saisir / Modifier Appréciation' : 'Consulter'}</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

@@ -17,6 +17,7 @@ import {
   HelpCircle
 } from 'lucide-react';
 import type { ReportCardBatchManagement, PeriodReportCardItem, SchoolOfficialPrerequisites } from '../../types/reportCard';
+import { getReportCardBatchStatusLabel } from '../../types/reportCard';
 
 interface AdminReportCardsModuleProps {
   classes: any[];
@@ -192,7 +193,7 @@ export const AdminReportCardsModule: React.FC<AdminReportCardsModuleProps> = ({
 
     const currentClass = classes.find(c => c.id === batchDetail.class_id);
     const homeroomTeacher = teachers.find(
-      t => t.id === currentClass?.homeroom_teacher_id || t.profile_id === currentClass?.homeroom_teacher_id
+      t => t.profile_id === currentClass?.homeroom_teacher_id
     );
 
     const hasPrincipalName = Boolean(schoolOfficialData?.principal_name?.trim());
@@ -444,28 +445,28 @@ export const AdminReportCardsModule: React.FC<AdminReportCardsModuleProps> = ({
                           </td>
                           <td className="p-3 text-center">
                             {b.status === 'draft' && (
-                              <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 rounded-md text-[10px] font-bold">
+                              <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 rounded-md text-[10px] font-bold inline-block">
                                 Brouillon
                               </span>
                             )}
                             {b.status === 'submitted_by_homeroom' && (
-                              <span className="px-2 py-0.5 bg-indigo-500/20 text-indigo-300 rounded-md text-[10px] font-bold animate-pulse">
-                                À Valider
+                              <span className="px-2 py-0.5 bg-indigo-500/20 text-indigo-300 rounded-md text-[10px] font-bold inline-block animate-pulse">
+                                Soumis par le titulaire
                               </span>
                             )}
                             {b.status === 'validated_by_admin' && (
-                              <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 rounded-md text-[10px] font-bold">
-                                Validé
+                              <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 rounded-md text-[10px] font-bold inline-block">
+                                Validé par la direction
                               </span>
                             )}
                             {b.status === 'published' && (
-                              <span className="px-2 py-0.5 bg-emerald-500 text-slate-950 rounded-md text-[10px] font-black">
+                              <span className="px-2 py-0.5 bg-emerald-500 text-slate-950 rounded-md text-[10px] font-black inline-block">
                                 Publié
                               </span>
                             )}
                             {b.status === 'superseded' && (
-                              <span className="px-2 py-0.5 bg-slate-800 text-slate-400 rounded-md text-[10px] font-bold">
-                                Archivé
+                              <span className="px-2 py-0.5 bg-slate-800 text-slate-400 rounded-md text-[10px] font-bold inline-block">
+                                Remplacé par une nouvelle révision
                               </span>
                             )}
                           </td>
@@ -521,8 +522,8 @@ export const AdminReportCardsModule: React.FC<AdminReportCardsModuleProps> = ({
                         <h3 className="text-lg font-black text-white">
                           {batchDetail.class_name} — Révision #{batchDetail.revision_number}
                         </h3>
-                        <span className="px-2.5 py-0.5 bg-slate-800 text-amber-400 border border-amber-500/30 rounded-full font-mono text-xs font-bold">
-                          {batchDetail.status}
+                        <span className="px-2.5 py-0.5 bg-slate-800 text-amber-400 border border-amber-500/30 rounded-full text-xs font-bold">
+                          {getReportCardBatchStatusLabel(batchDetail.status)}
                         </span>
                       </div>
                       <p className="text-xs text-slate-400 mt-1">
@@ -626,24 +627,25 @@ export const AdminReportCardsModule: React.FC<AdminReportCardsModuleProps> = ({
                     </span>
                   </div>
 
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse">
+                  {/* Desktop Table */}
+                  <div className="hidden md:block overflow-hidden rounded-2xl border border-slate-800">
+                    <table className="w-full text-left text-xs table-auto border-collapse">
                       <thead>
-                        <tr className="bg-slate-950/80 text-slate-400 border-b border-slate-800 uppercase tracking-wider font-extrabold text-[10px]">
-                          <th className="p-3 text-center">Rang</th>
-                          <th className="p-3">Élève & Matricule</th>
-                          <th className="p-3 text-center">Moyenne</th>
-                          <th className="p-3">Appréciation Titulaire</th>
-                          <th className="p-3">Appréciation Direction</th>
-                          <th className="p-3 text-right">Actions</th>
+                        <tr className="bg-slate-950 text-slate-400 border-b border-slate-800 uppercase tracking-wider font-extrabold text-[10px]">
+                          <th className="p-3 text-center w-16">Rang</th>
+                          <th className="p-3 min-w-[160px]">Élève & Matricule</th>
+                          <th className="p-3 text-center w-24">Moyenne</th>
+                          <th className="p-3 min-w-[180px] max-w-[280px]">Appréciation Titulaire</th>
+                          <th className="p-3 min-w-[180px] max-w-[280px]">Appréciation Direction</th>
+                          <th className="p-3 text-right w-28">Actions</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-800 font-medium">
+                      <tbody className="divide-y divide-slate-800 font-medium bg-slate-950/40">
                         {filteredDetailCards.map(card => (
                           <tr key={card.report_card_id} className="hover:bg-slate-800/40 transition-colors">
                             <td className="p-3 text-center">
                               {card.rank ? (
-                                <span className="px-2 py-0.5 bg-amber-500/10 text-amber-400 font-mono font-black rounded-lg text-xs">
+                                <span className="px-2 py-0.5 bg-amber-500/10 text-amber-400 font-mono font-black rounded-lg text-xs inline-block">
                                   #{card.rank}
                                 </span>
                               ) : (
@@ -652,8 +654,8 @@ export const AdminReportCardsModule: React.FC<AdminReportCardsModuleProps> = ({
                             </td>
 
                             <td className="p-3">
-                              <p className="font-extrabold text-white text-xs">{card.student_name}</p>
-                              <span className="font-mono text-slate-500 text-[10px]">{card.student_number}</span>
+                              <p className="font-extrabold text-white text-xs leading-snug">{card.student_name}</p>
+                              <span className="font-mono text-slate-500 text-[10px] block">{card.student_number}</span>
                             </td>
 
                             <td className="p-3 text-center">
@@ -666,17 +668,21 @@ export const AdminReportCardsModule: React.FC<AdminReportCardsModuleProps> = ({
                               )}
                             </td>
 
-                            <td className="p-3 max-w-xs">
+                            <td className="p-3 min-w-[180px] max-w-[280px]">
                               {card.homeroom_teacher_remarks ? (
-                                <p className="text-slate-300 text-xs truncate">{card.homeroom_teacher_remarks}</p>
+                                <p className="text-slate-300 text-xs break-words whitespace-pre-wrap leading-relaxed">
+                                  {card.homeroom_teacher_remarks}
+                                </p>
                               ) : (
                                 <span className="text-slate-600 italic text-[11px]">Non renseignée</span>
                               )}
                             </td>
 
-                            <td className="p-3 max-w-xs">
+                            <td className="p-3 min-w-[180px] max-w-[280px]">
                               {card.principal_remarks ? (
-                                <p className="text-amber-300 text-xs truncate font-medium">{card.principal_remarks}</p>
+                                <p className="text-amber-300 text-xs break-words whitespace-pre-wrap leading-relaxed font-medium">
+                                  {card.principal_remarks}
+                                </p>
                               ) : (
                                 <span className="text-slate-600 italic text-[11px]">En attente de direction</span>
                               )}
@@ -687,7 +693,7 @@ export const AdminReportCardsModule: React.FC<AdminReportCardsModuleProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => handleOpenRemarkModal(card)}
-                                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 ml-auto cursor-pointer"
+                                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 ml-auto cursor-pointer transition-colors"
                                 >
                                   <MessageSquare className="w-3.5 h-3.5 text-amber-400" />
                                   <span>{card.principal_remarks ? 'Modifier' : 'Apprécier'}</span>
@@ -696,7 +702,7 @@ export const AdminReportCardsModule: React.FC<AdminReportCardsModuleProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => handleOpenRemarkModal(card)}
-                                  className="px-3 py-1.5 bg-slate-800/60 text-slate-300 rounded-xl text-xs font-bold flex items-center gap-1.5 ml-auto"
+                                  className="px-3 py-1.5 bg-slate-800/60 hover:bg-slate-800 text-slate-300 rounded-xl text-xs font-bold flex items-center gap-1.5 ml-auto transition-colors"
                                 >
                                   <Eye className="w-3.5 h-3.5 text-slate-400" />
                                   <span>Voir</span>
@@ -707,6 +713,82 @@ export const AdminReportCardsModule: React.FC<AdminReportCardsModuleProps> = ({
                         ))}
                       </tbody>
                     </table>
+                  </div>
+
+                  {/* Mobile Cards View */}
+                  <div className="md:hidden space-y-3">
+                    {filteredDetailCards.map(card => (
+                      <div key={card.report_card_id} className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="font-extrabold text-white text-sm">{card.student_name}</p>
+                            <span className="font-mono text-slate-500 text-xs">{card.student_number}</span>
+                          </div>
+                          {card.rank && (
+                            <span className="px-2 py-0.5 bg-amber-500/10 text-amber-400 font-mono font-bold rounded-lg text-xs">
+                              #{card.rank}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-900">
+                          <span className="text-slate-400 font-bold uppercase text-[10px]">Moyenne</span>
+                          {card.overall_percentage !== null ? (
+                            <span className={`font-black text-sm ${card.overall_percentage >= 50 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {Number(card.overall_percentage).toFixed(1)} %
+                            </span>
+                          ) : (
+                            <span className="text-slate-500">Non noté</span>
+                          )}
+                        </div>
+
+                        <div className="space-y-2 pt-1 border-t border-slate-900">
+                          <div>
+                            <span className="text-slate-400 block text-[10px] uppercase font-bold mb-0.5">Appréciation Titulaire</span>
+                            {card.homeroom_teacher_remarks ? (
+                              <p className="text-slate-300 text-xs break-words whitespace-pre-wrap leading-relaxed bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/60">
+                                {card.homeroom_teacher_remarks}
+                              </p>
+                            ) : (
+                              <span className="text-slate-600 italic text-[11px]">Non renseignée</span>
+                            )}
+                          </div>
+
+                          <div>
+                            <span className="text-amber-400 block text-[10px] uppercase font-bold mb-0.5">Appréciation Direction</span>
+                            {card.principal_remarks ? (
+                              <p className="text-amber-300 text-xs break-words whitespace-pre-wrap leading-relaxed font-medium bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/60">
+                                {card.principal_remarks}
+                              </p>
+                            ) : (
+                              <span className="text-slate-600 italic text-[11px]">En attente de direction</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="pt-2 flex justify-end">
+                          {batchDetail.status === 'submitted_by_homeroom' ? (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenRemarkModal(card)}
+                              className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5 text-amber-400" />
+                              <span>{card.principal_remarks ? 'Modifier Appréciation' : 'Apprécier le Bulletin'}</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenRemarkModal(card)}
+                              className="w-full py-2 bg-slate-800/60 text-slate-300 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-slate-400" />
+                              <span>Consulter le Bulletin</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>

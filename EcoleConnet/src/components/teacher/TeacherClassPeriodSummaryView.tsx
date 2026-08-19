@@ -3,7 +3,6 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
-import { useRealAuth } from '../../contexts/RealAuthContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { Modal } from '../common/Modal';
 import {
@@ -73,7 +72,6 @@ export const TeacherClassPeriodSummaryView: React.FC<TeacherClassPeriodSummaryVi
   teacherRecord = null,
   isSchoolAdmin = false
 }) => {
-  const { user, profile } = useRealAuth();
   const { showToast } = useNotifications();
 
   // Sub Tab Switcher : "summary" (Résultats de la période) vs "report_cards" (Bulletins périodiques)
@@ -85,12 +83,10 @@ export const TeacherClassPeriodSummaryView: React.FC<TeacherClassPeriodSummaryVi
     const assignedClassIds = new Set(assignments.map(a => a.class_id));
     const matched = classes.filter(c =>
       assignedClassIds.has(c.id) ||
-      c.homeroom_teacher_id === user?.id ||
-      c.homeroom_teacher_id === profile?.id ||
-      (teacherRecord?.id && c.homeroom_teacher_id === teacherRecord.id)
+      (Boolean(teacherRecord?.profile_id) && Boolean(c.homeroom_teacher_id) && c.homeroom_teacher_id === teacherRecord.profile_id)
     );
     return matched.length > 0 ? matched : classes;
-  }, [classes, assignments, user?.id, profile?.id, teacherRecord?.id, isSchoolAdmin]);
+  }, [classes, assignments, teacherRecord?.profile_id, isSchoolAdmin]);
 
   // Filters State
   const [selectedClassId, setSelectedClassId] = useState<string>('');
@@ -131,18 +127,11 @@ export const TeacherClassPeriodSummaryView: React.FC<TeacherClassPeriodSummaryVi
     return filteredTeacherClasses.find(c => c.id === selectedClassId) || classes.find(c => c.id === selectedClassId);
   }, [filteredTeacherClasses, classes, selectedClassId]);
 
-  // Check if current user is homeroom teacher of selected class
+  // Check if current user is homeroom teacher of selected class (Règle canonique : teacherRecord.profile_id)
   const isHomeroomTeacher = useMemo(() => {
     if (isSchoolAdmin) return true;
-    if (!selectedClass) return false;
-    const hrId = selectedClass.homeroom_teacher_id;
-    if (!hrId) return false;
-    return (
-      hrId === user?.id ||
-      hrId === profile?.id ||
-      (teacherRecord?.id && hrId === teacherRecord.id)
-    );
-  }, [selectedClass, user?.id, profile?.id, teacherRecord?.id, isSchoolAdmin]);
+    return Boolean(teacherRecord?.profile_id) && Boolean(selectedClass?.homeroom_teacher_id) && selectedClass?.homeroom_teacher_id === teacherRecord.profile_id;
+  }, [selectedClass, teacherRecord?.profile_id, isSchoolAdmin]);
 
   // Assigned subject IDs for this class
   const assignedSubjectIds = useMemo(() => {
@@ -339,7 +328,7 @@ export const TeacherClassPeriodSummaryView: React.FC<TeacherClassPeriodSummaryVi
               className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white font-bold focus:outline-none focus:border-amber-500 cursor-pointer"
             >
               {filteredTeacherClasses.map(c => {
-                const isHr = isSchoolAdmin || c.homeroom_teacher_id === user?.id || c.homeroom_teacher_id === profile?.id || (teacherRecord?.id && c.homeroom_teacher_id === teacherRecord.id);
+                const isHr = isSchoolAdmin || (Boolean(teacherRecord?.profile_id) && Boolean(c.homeroom_teacher_id) && c.homeroom_teacher_id === teacherRecord.profile_id);
                 return (
                   <option key={c.id} value={c.id}>
                     {c.name} {isHr ? '★ (Titulaire)' : ''} {c.education_cycle ? `[${c.education_cycle === 'primary' ? 'Primaire' : 'Secondaire'}]` : ''}
