@@ -1,5 +1,5 @@
 // Fichier : src/pages/parent/RealParentPortal.tsx
-// Portail Parent Réel : Consultation officielle des résultats scolaires périodiques (Phase 2F.2)
+// Portail Parent Réel : Consultation officielle des résultats et téléchargement du bulletin PDF (Phase 2F.3C)
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRealAuth } from '../../contexts/RealAuthContext';
@@ -17,8 +17,12 @@ import {
   LogOut,
   Eye,
   User,
-  GraduationCap
+  Download,
+  FileCheck,
+  ShieldCheck
 } from 'lucide-react';
+import { downloadReportCardPdfBlob, isPublishedPdfMetadataComplete } from '../../services/reportCardPdfService.ts';
+import { buildGetSchoolCalendarParams, extractAndSortCalendarPeriods } from '../../services/calendarService.ts';
 
 interface LinkedChild {
   link_id: string;
@@ -60,6 +64,18 @@ interface ChildPeriodResult {
   subjects: PeriodResultSubject[];
 }
 
+interface OfficialChildReportCard {
+  id: string;
+  rank: number | null;
+  overall_percentage: number | null;
+  pdf_storage_path: string | null;
+  pdf_version: number | null;
+  pdf_generated_at: string | null;
+  pdf_checksum: string | null;
+  principal_remarks: string | null;
+  homeroom_teacher_remarks: string | null;
+}
+
 export const RealParentPortal: React.FC = () => {
   const { profile, school, signOutReal } = useRealAuth();
   const { showToast } = useNotifications();
@@ -72,9 +88,11 @@ export const RealParentPortal: React.FC = () => {
   const [calendarPeriods, setCalendarPeriods] = useState<any[]>([]);
   const [selectedPeriodId, setSelectedPeriodId] = useState<string>('');
 
-  // Academic Results
+  // Academic Results & Official Report Card (Phase 2F.3C)
   const [loadingResults, setLoadingResults] = useState<boolean>(false);
   const [periodResult, setPeriodResult] = useState<ChildPeriodResult | null>(null);
+  const [officialReportCard, setOfficialReportCard] = useState<OfficialChildReportCard | null>(null);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState<boolean>(false);
 
   // Subject Assessments Detail Modal
   const [selectedSubjectDetail, setSelectedSubjectDetail] = useState<{
@@ -111,16 +129,23 @@ export const RealParentPortal: React.FC = () => {
 
       const list: LinkedChild[] = (data || [])
         .filter((row: any) => row.student && row.can_view_academic)
-        .map((row: any) => ({
-          link_id: row.id,
-          student_id: row.student.id,
-          student_number: row.student.student_number || '',
-          first_name: row.student.first_name || '',
-          last_name: row.student.last_name || '',
-          relationship: row.relationship || 'Parent',
-          can_view_academic: !!row.can_view_academic,
-          enrollment_status: row.student.enrollment_status
-        }));
+        .map((row: any) => {
+          let rel = row.relationship || 'Parent';
+          if (rel.toLowerCase() === 'father') rel = 'Père';
+          else if (rel.toLowerCase() === 'mother') rel = 'Mère';
+          else if (rel.toLowerCase() === 'guardian') rel = 'Tuteur';
+
+          return {
+            link_id: row.id,
+            student_id: row.student.id,
+            student_number: row.student.student_number || '',
+            first_name: row.student.first_name || '',
+            last_name: row.student.last_name || '',
+            relationship: rel,
+            can_view_academic: !!row.can_view_academic,
+            enrollment_status: row.student.enrollment_status
+          };
+        });
 
       setChildrenList(list);
 
@@ -143,70 +168,191 @@ export const RealParentPortal: React.FC = () => {
     return childrenList.find(c => c.student_id === selectedChildId);
   }, [childrenList, selectedChildId]);
 
-  // 2. Fetch School Calendar for Child
-  const loadCalendar = useCallback(async () => {
+  // 2. Fetch School Calendar for Selected Child (Phase 2F.3C / 2F.1)
+  const loadCalendarForChild = useCallback(async (childId: string) => {
+    if (!childId) {
+      setCalendarPeriods([]);
+      setSelectedPeriodId('');
+      setPeriodResult(null);
+      setOfficialReportCard(null);
+      return;
+    }
+
+    // Réinitialiser les états dépendants lors du changement d'enfant pour éviter l'affichage de données obsolètes
+    setSelectedPeriodId('');
+    setPeriodResult(null);
+    setOfficialReportCard(null);
+
     try {
-      const { data, error } = await supabase.rpc('get_school_calendar');
-      if (error) throw error;
+      // 2.1 Récupérer l'inscription active et le cycle de l'enfant
+      const { data: enrollment, error: enrError } = await supabase
+        .from('student_enrollments')
+        .select(`
+          id,
+          school_id,
+          academic_year_id,
+          class_id,
+          class:classes (
+            id,
+            name,
+            education_cycle
+          )
+        `)
+        .eq('student_id', childId)
+        .eq('status', 'active')
+        .maybeSingle();
 
-      if (data && data.terms) {
-        const allPeriods: any[] = [];
-        (data.terms || []).forEach((t: any) => {
-          (t.periods || []).forEach((p: any) => {
-            allPeriods.push({
-              ...p,
-              parent_term_name: t.name,
-              parent_term_id: t.id
-            });
-          });
+      if (enrError) {
+        console.error('[RealParentPortal] Erreur student_enrollments:', enrError, { childId });
+        setCalendarPeriods([]);
+        return;
+      }
+
+      if (!enrollment || !enrollment.class) {
+        console.warn('[RealParentPortal] Aucune classe ou inscription active pour cet enfant.', { childId });
+        setCalendarPeriods([]);
+        return;
+      }
+
+      const cl = enrollment.class as any;
+      const calParams = buildGetSchoolCalendarParams(
+        enrollment.school_id,
+        enrollment.academic_year_id,
+        cl.education_cycle
+      );
+
+      if (!calParams) {
+        console.error('[RealParentPortal] Paramètres calendrier invalides:', {
+          school_id: enrollment.school_id,
+          academic_year_id: enrollment.academic_year_id,
+          cycle: cl.education_cycle
         });
-        setCalendarPeriods(allPeriods);
+        setCalendarPeriods([]);
+        return;
+      }
 
-        if (allPeriods.length > 0) {
-          setSelectedPeriodId(prev => (prev && allPeriods.some(p => p.id === prev) ? prev : allPeriods[0].id));
-        }
+      // 2.2 Appel RPC sécurisé avec les 3 paramètres exacts
+      const { data: calendarData, error: calError } = await supabase.rpc('get_school_calendar', calParams);
+      if (calError) {
+        console.error('[RealParentPortal] Erreur RPC get_school_calendar:', calError, { calParams });
+        setCalendarPeriods([]);
+        showToast('Impossible de charger le calendrier scolaire de cet enfant.', 'warning');
+        return;
+      }
+
+      // 2.3 Extraction et tri stable des périodes
+      const sortedPeriods = extractAndSortCalendarPeriods(calendarData);
+      setCalendarPeriods(sortedPeriods);
+
+      if (sortedPeriods.length > 0) {
+        setSelectedPeriodId(sortedPeriods[0].id);
       }
     } catch (err: any) {
-      console.warn('Calendar error:', err.message);
+      console.error('[RealParentPortal] Erreur chargement calendrier:', err);
+      setCalendarPeriods([]);
     }
-  }, []);
+  }, [showToast]);
 
   useEffect(() => {
-    loadCalendar();
-  }, [loadCalendar]);
+    if (selectedChildId) {
+      loadCalendarForChild(selectedChildId);
+    } else {
+      setCalendarPeriods([]);
+      setSelectedPeriodId('');
+      setPeriodResult(null);
+      setOfficialReportCard(null);
+    }
+  }, [selectedChildId, loadCalendarForChild]);
 
-  // 3. Fetch Official Period Result via RPC get_student_period_result
+  // 3. Fetch Official Period Result & Official Report Card (Phase 2F.3C)
   const loadChildPeriodResults = useCallback(async () => {
     if (!selectedChildId || !selectedPeriodId) {
       setPeriodResult(null);
+      setOfficialReportCard(null);
       return;
     }
 
     setLoadingResults(true);
     try {
+      // 3.1 Charger les résultats académiques périodiques
       const { data, error } = await supabase.rpc('get_student_period_result', {
         p_student_id: selectedChildId,
         p_period_id: selectedPeriodId
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('[RealParentPortal] Erreur get_student_period_result:', error);
+      }
 
-      if (data) {
-        setPeriodResult(data as ChildPeriodResult);
+      setPeriodResult(data ? (data as ChildPeriodResult) : null);
+
+      // 3.2 Vérifier s'il existe un bulletin officiel publié via RLS pour cet enfant
+      const { data: rcData, error: rcErr } = await supabase
+        .from('period_report_cards')
+        .select(`
+          id, rank, overall_percentage, pdf_storage_path, pdf_version, pdf_generated_at, pdf_checksum,
+          principal_remarks, homeroom_teacher_remarks,
+          batch:report_card_batches!inner(status)
+        `)
+        .eq('student_id', selectedChildId)
+        .eq('period_id', selectedPeriodId)
+        .eq('batch.status', 'published')
+        .maybeSingle();
+
+      if (rcErr) {
+        console.error('[RealParentPortal] Erreur chargement bulletin officiel:', rcErr);
+        showToast("Erreur lors de la récupération du bulletin officiel de l'élève.", 'warning');
+        setOfficialReportCard(null);
+      } else if (rcData && isPublishedPdfMetadataComplete(rcData)) {
+        setOfficialReportCard({
+          id: rcData.id,
+          rank: rcData.rank,
+          overall_percentage: rcData.overall_percentage,
+          pdf_storage_path: rcData.pdf_storage_path,
+          pdf_version: rcData.pdf_version,
+          pdf_generated_at: rcData.pdf_generated_at,
+          pdf_checksum: rcData.pdf_checksum,
+          principal_remarks: rcData.principal_remarks,
+          homeroom_teacher_remarks: rcData.homeroom_teacher_remarks
+        });
+      } else {
+        setOfficialReportCard(null);
       }
     } catch (err: any) {
-      showToast(err.message || 'Erreur lors de la récupération des résultats.', 'warning');
+      console.error('[RealParentPortal] Erreur résultats / bulletin:', err);
       setPeriodResult(null);
+      setOfficialReportCard(null);
     } finally {
       setLoadingResults(false);
     }
-  }, [selectedChildId, selectedPeriodId, showToast]);
+  }, [selectedChildId, selectedPeriodId]);
 
   useEffect(() => {
     loadChildPeriodResults();
   }, [loadChildPeriodResults]);
 
-  // 4. Open Subject Assessments Details via RPC get_student_subject_period_result
+  // 4. Téléchargement Sécurisé du Bulletin PDF Officiel (Phase 2F.3C)
+  const handleDownloadOfficialReportCard = async () => {
+    if (!officialReportCard?.pdf_storage_path || isDownloadingPdf || !activeChild) return;
+
+    setIsDownloadingPdf(true);
+    try {
+      const selectedPeriod = calendarPeriods.find(p => p.id === selectedPeriodId);
+      const periodLabel = selectedPeriod?.name?.replace(/[^a-zA-Z0-9_-]/g, '_') || 'Periode';
+      const cleanStudentName = `${activeChild.first_name}_${activeChild.last_name}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const filename = `Bulletin_${cleanStudentName}_${periodLabel}.pdf`;
+
+      await downloadReportCardPdfBlob(officialReportCard.pdf_storage_path, filename);
+      showToast(`Téléchargement du bulletin officiel de ${activeChild.first_name} lancé avec succès.`, 'success');
+    } catch (err: any) {
+      console.error('[RealParentPortal] Erreur téléchargement PDF:', err);
+      showToast(err.message || 'Impossible de télécharger ce bulletin PDF.', 'warning');
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  };
+
+  // 5. Open Subject Assessments Details via RPC get_student_subject_period_result
   const handleOpenSubjectDetail = async (subject: PeriodResultSubject) => {
     if (!selectedChildId || !selectedPeriodId) return;
 
@@ -255,66 +401,69 @@ export const RealParentPortal: React.FC = () => {
             <div className="flex items-center gap-2">
               <span className="text-xs font-black text-indigo-400 uppercase tracking-wider">{school?.name || 'ÉcoleConnect'}</span>
               <span className="px-2 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-full text-[10px] font-bold">
-                Espace Famille Sécurisé
+                Espace Responsable Légal
               </span>
             </div>
-            <p className="text-[11px] text-slate-400">Parent : {profile?.first_name} {profile?.last_name}</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={signOutReal}
-            className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl border border-slate-700 transition-colors cursor-pointer"
-            title="Se déconnecter"
-          >
-            <LogOut className="w-5 h-5" />
-          </button>
-        </div>
-      </header>
-
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-6">
-        {childrenList.length === 0 ? (
-          <div className="p-12 text-center bg-slate-900 rounded-3xl border border-slate-800 space-y-3">
-            <Users className="w-12 h-12 text-slate-600 mx-auto" />
-            <h3 className="text-base font-bold text-white">Aucun élève rattaché</h3>
-            <p className="text-xs text-slate-400 max-w-md mx-auto">
-              Votre compte parent n’a pas encore d’élève approuvé pour la consultation académique. Veuillez contacter la direction de l’établissement.
+            <p className="text-[11px] text-slate-400">
+              Parent : <strong className="text-white">{profile?.first_name} {profile?.last_name}</strong>
             </p>
           </div>
+        </div>
+
+        <button
+          onClick={signOutReal}
+          className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl border border-slate-700 transition-colors cursor-pointer"
+          title="Se déconnecter"
+        >
+          <LogOut className="w-5 h-5" />
+        </button>
+      </header>
+
+      {/* Main Content */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-6">
+        {childrenList.length === 0 ? (
+          <div className="p-12 text-center bg-slate-900 rounded-3xl border border-slate-800 space-y-4 shadow-xl">
+            <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mx-auto">
+              <Users className="w-8 h-8" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-base font-bold text-white">Aucun élève rattaché</h3>
+              <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
+                Votre compte parent n'a actuellement aucun lien actif approuvé avec un dossier élève dans cet établissement.
+              </p>
+            </div>
+          </div>
         ) : (
-          <>
-            {/* Top Selector Bar (Child Switcher & Period Selector) */}
+          <div className="space-y-6">
+            {/* Child and Period Selector Bar */}
             <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-xl backdrop-blur-xl flex flex-col md:flex-row items-center justify-between gap-4">
-              {/* Children Tabs / Switcher */}
-              <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-2 flex items-center gap-1.5">
-                  <User className="w-3.5 h-3.5 text-indigo-400" />
-                  Enfant :
-                </span>
-                {childrenList.map(ch => {
-                  const isSelected = ch.student_id === selectedChildId;
-                  return (
+              {/* Child Switcher */}
+              <div className="w-full md:w-auto flex-1">
+                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                  Enfant Sélectionné
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {childrenList.map(c => (
                     <button
-                      key={ch.student_id}
-                      onClick={() => setSelectedChildId(ch.student_id)}
-                      className={`px-4 py-2 rounded-2xl text-xs font-extrabold transition-all cursor-pointer flex items-center gap-2 ${
-                        isSelected
-                          ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-950/60'
-                          : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800'
+                      key={c.student_id}
+                      type="button"
+                      onClick={() => setSelectedChildId(c.student_id)}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 border transition-all cursor-pointer ${
+                        selectedChildId === c.student_id
+                          ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/20'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
                       }`}
                     >
-                      <GraduationCap className="w-3.5 h-3.5" />
-                      <span>{ch.first_name} {ch.last_name}</span>
-                      <span className="text-[10px] font-mono opacity-70">({ch.student_number})</span>
+                      <User className="w-3.5 h-3.5" />
+                      <span>{c.first_name} {c.last_name}</span>
+                      <span className="text-[10px] opacity-75 font-mono">({c.relationship})</span>
                     </button>
-                  );
-                })}
+                  ))}
+                </div>
               </div>
 
               {/* Period Selector */}
-              <div className="w-full md:w-80">
+              <div className="w-full md:w-72">
                 <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
                   Période Scolaire
                 </label>
@@ -325,12 +474,50 @@ export const RealParentPortal: React.FC = () => {
                 >
                   {calendarPeriods.map(p => (
                     <option key={p.id} value={p.id}>
-                      {p.name} — {p.parent_term_name} {p.starts_on && p.ends_on ? `(${p.starts_on} au ${p.ends_on})` : ''}
+                      {p.name} — {p.parent_term_name}
                     </option>
                   ))}
                 </select>
               </div>
             </div>
+
+            {/* Official Report Card Download Banner (Phase 2F.3C) */}
+            {officialReportCard && activeChild && (
+              <div className="p-6 bg-gradient-to-r from-amber-500/20 via-slate-900 to-indigo-950/40 rounded-3xl border border-amber-500/40 shadow-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
+                    <FileCheck className="w-6 h-6" />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black text-amber-400 uppercase tracking-wider">
+                        Bulletin Officiel Publié pour {activeChild.first_name}
+                      </span>
+                      <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full text-[10px] font-bold flex items-center gap-1">
+                        <ShieldCheck className="w-3 h-3" />
+                        Certifié Conforme
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-300">
+                      {officialReportCard.rank ? (
+                        <span>Rang officiel de l'élève : <strong className="text-white font-mono font-black">#{officialReportCard.rank}</strong> • </span>
+                      ) : null}
+                      Document officiel avec cachet de l'établissement et signatures de la direction.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={isDownloadingPdf}
+                  onClick={handleDownloadOfficialReportCard}
+                  className="w-full md:w-auto px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-amber-500/10 transition-colors disabled:opacity-50"
+                >
+                  <Download className={`w-4 h-4 ${isDownloadingPdf ? 'animate-bounce' : ''}`} />
+                  <span>{isDownloadingPdf ? 'Téléchargement...' : 'Télécharger le Bulletin (PDF)'}</span>
+                </button>
+              </div>
+            )}
 
             {/* Results Section */}
             {loadingResults ? (
@@ -341,9 +528,9 @@ export const RealParentPortal: React.FC = () => {
             ) : !periodResult ? (
               <div className="p-12 text-center bg-slate-900 rounded-3xl border border-slate-800 space-y-3">
                 <Award className="w-12 h-12 text-slate-600 mx-auto" />
-                <h3 className="text-sm font-bold text-white">Résultats non disponibles</h3>
+                <h3 className="text-sm font-bold text-white">Résultats non publiés</h3>
                 <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                  Aucun résultat scolaire ou évaluation publiée n'est disponible pour cette période.
+                  Le bulletin et les évaluations de cette période n'ont pas encore été clôturés ou publiés par l'établissement.
                 </p>
               </div>
             ) : (
@@ -395,7 +582,11 @@ export const RealParentPortal: React.FC = () => {
                     <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-300 text-xs flex items-center gap-2">
                       <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
                       <span>
-                        Certaines notes sont encore en cours de saisie par les enseignants. La moyenne générale sera mise à jour dès la publication complète des évaluations.
+                        {officialReportCard ? (
+                          "Ce bulletin officiel a été publié avec des matières en attente. Toute correction ultérieure fera l’objet d’une nouvelle révision."
+                        ) : (
+                          "Certaines notes sont encore en cours de saisie par les enseignants. La moyenne générale sera mise à jour dès la publication complète des évaluations."
+                        )}
                       </span>
                     </div>
                   )}
@@ -478,7 +669,7 @@ export const RealParentPortal: React.FC = () => {
                 </div>
               </div>
             )}
-          </>
+          </div>
         )}
       </main>
 
@@ -498,8 +689,8 @@ export const RealParentPortal: React.FC = () => {
             <div className="space-y-4 text-xs">
               <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 flex justify-between items-center">
                 <div>
-                  <p className="text-slate-400">Élève : <strong className="text-white">{activeChild?.first_name} {activeChild?.last_name}</strong></p>
-                  <p className="text-slate-400 mt-0.5">Matière : <strong className="text-indigo-400">{selectedSubjectDetail.subject.subject_name}</strong> (Coeff {selectedSubjectDetail.subject.subject_coefficient})</p>
+                  <p className="text-slate-400">Matière : <strong className="text-indigo-400">{selectedSubjectDetail.subject.subject_name}</strong></p>
+                  <p className="text-slate-400 mt-0.5">Coefficient de la matière : <strong className="text-amber-400">{selectedSubjectDetail.subject.subject_coefficient}</strong></p>
                 </div>
                 <div className="text-right">
                   <span className="text-[10px] text-slate-400 font-bold uppercase block">Moyenne Matière</span>
@@ -513,7 +704,7 @@ export const RealParentPortal: React.FC = () => {
               <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
                 {selectedSubjectDetail.assessments.length === 0 ? (
                   <div className="p-6 text-center text-slate-500 bg-slate-950 rounded-xl border border-slate-800">
-                    Aucune évaluation publiée pour cette matière.
+                    Aucune évaluation enregistrée pour cette matière.
                   </div>
                 ) : (
                   selectedSubjectDetail.assessments.map((asmt: any, idx: number) => (
@@ -582,7 +773,7 @@ export const RealParentPortal: React.FC = () => {
 
       {/* Footer */}
       <footer className="p-4 sm:p-6 border-t border-slate-900 text-center text-xs text-slate-500">
-        ÉcoleConnect — Espace Parents Sécurisé
+        ÉcoleConnect — Espace Numérique Responsable Légal
       </footer>
     </div>
   );

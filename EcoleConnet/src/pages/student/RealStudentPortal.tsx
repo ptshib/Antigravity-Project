@@ -1,5 +1,5 @@
 // Fichier : src/pages/student/RealStudentPortal.tsx
-// Portail Élève Réel : Consultation officielle des notes et résultats périodiques (Phase 2F.2)
+// Portail Élève Réel : Consultation officielle des résultats et téléchargement du bulletin PDF (Phase 2F.3C)
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRealAuth } from '../../contexts/RealAuthContext';
@@ -16,17 +16,21 @@ import {
   Clock,
   LogOut,
   Eye,
-  RefreshCw
+  RefreshCw,
+  Download,
+  FileCheck,
+  ShieldCheck
 } from 'lucide-react';
+import { downloadReportCardPdfBlob, isPublishedPdfMetadataComplete } from '../../services/reportCardPdfService.ts';
+import { buildGetSchoolCalendarParams, extractAndSortCalendarPeriods } from '../../services/calendarService.ts';
 
 interface StudentRecord {
   id: string;
+  school_id: string;
   student_number: string;
   first_name: string;
   last_name: string;
   enrollment_status: string;
-  school_id: string;
-  class_id?: string;
 }
 
 interface PeriodResultSubject {
@@ -56,6 +60,18 @@ interface StudentPeriodResult {
   subjects: PeriodResultSubject[];
 }
 
+interface OfficialStudentReportCard {
+  id: string;
+  rank: number | null;
+  overall_percentage: number | null;
+  pdf_storage_path: string | null;
+  pdf_version: number | null;
+  pdf_generated_at: string | null;
+  pdf_checksum: string | null;
+  principal_remarks: string | null;
+  homeroom_teacher_remarks: string | null;
+}
+
 export const RealStudentPortal: React.FC = () => {
   const { profile, school, signOutReal } = useRealAuth();
   const { showToast } = useNotifications();
@@ -74,9 +90,11 @@ export const RealStudentPortal: React.FC = () => {
   const [calendarPeriods, setCalendarPeriods] = useState<any[]>([]);
   const [selectedPeriodId, setSelectedPeriodId] = useState<string>('');
 
-  // Results
+  // Results & Official Report Card (Phase 2F.3C)
   const [loadingResults, setLoadingResults] = useState<boolean>(false);
   const [periodResult, setPeriodResult] = useState<StudentPeriodResult | null>(null);
+  const [officialReportCard, setOfficialReportCard] = useState<OfficialStudentReportCard | null>(null);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState<boolean>(false);
 
   // Subject Detail Modal
   const [selectedSubjectDetail, setSelectedSubjectDetail] = useState<{
@@ -148,185 +166,175 @@ export const RealStudentPortal: React.FC = () => {
 
       if (enrError) {
         console.error('[RealStudentPortal] Erreur student_enrollments:', enrError, { student_id: studentData.id });
-        throw new Error("Erreur lors de la récupération de votre inscription scolaire.");
+        throw new Error("Aucune inscription active trouvée pour l'année scolaire en cours.");
       }
 
-      if (!enrollmentData) {
-        throw new Error("Aucune inscription scolaire active trouvée pour l'année en cours.");
+      if (!enrollmentData || !enrollmentData.class) {
+        throw new Error("Votre compte n’est rattaché à aucune classe active.");
       }
 
-      const schoolId = enrollmentData.school_id || studentData.school_id;
-      const academicYearId = enrollmentData.academic_year_id;
-      const cls = (enrollmentData.class as any);
-      const educationCycle = cls?.education_cycle || 'secondary';
-
+      const cl = enrollmentData.class as any;
       setClassInfo({
-        id: enrollmentData.class_id,
-        name: cls?.name || 'Classe',
-        education_cycle: educationCycle,
-        academic_year_id: academicYearId
+        id: cl.id,
+        name: cl.name,
+        education_cycle: cl.education_cycle,
+        academic_year_id: cl.academic_year_id
       });
 
-      // 1.3 Charger le calendrier scolaire officiel via RPC get_school_calendar
-      let periods: any[] = [];
+      // 1.3 Charger le calendrier scolaire officiel avec paramètres stricts et extraction robuste
+      const calParams = buildGetSchoolCalendarParams(
+        studentData.school_id,
+        enrollmentData.academic_year_id || cl.academic_year_id,
+        cl.education_cycle
+      );
 
-      const { data: rawCal, error: calError } = await supabase.rpc('get_school_calendar', {
-        p_school_id: schoolId,
-        p_academic_year_id: academicYearId,
-        p_education_cycle: educationCycle
-      });
+      if (!calParams) {
+        throw new Error("Informations d'établissement ou de cycle scolaire incomplètes.");
+      }
 
+      const { data: calendarData, error: calError } = await supabase.rpc('get_school_calendar', calParams);
       if (calError) {
         console.error('[RealStudentPortal] Erreur RPC get_school_calendar:', calError, {
-          p_school_id: schoolId,
-          p_academic_year_id: academicYearId,
-          p_education_cycle: educationCycle
+          authUid,
+          school_id: studentData.school_id,
+          params: calParams
         });
 
-        // Détection de l'inactivité du calendrier
-        const errMsg = (calError.message || '').toLowerCase();
+        const inactiveMsg = "Le calendrier scolaire de votre établissement n'est pas encore configuré ou actif.";
         if (
-          errMsg.includes('pas encore publié') ||
-          errMsg.includes('pas encore activé') ||
-          errMsg.includes('inactif') ||
-          errMsg.includes('inactive')
+          calError.message?.includes('inactif') ||
+          calError.message?.includes('suspendu') ||
+          calError.message?.includes('introuvable') ||
+          calError.message?.includes('non encore publié')
         ) {
-          const inactiveMsg = "Le calendrier scolaire de votre cycle n’est pas encore activé par l’établissement.";
           setPortalError(inactiveMsg);
           setCalendarPeriods([]);
-          setSelectedPeriodId('');
-          setPeriodResult(null);
-          notifyErrorOnce(inactiveMsg);
           return;
         }
-
-        // Fallback sécurisé en cas d'autre restriction
-        const { data: periodsFallback, error: fallbackError } = await supabase
-          .from('school_periods')
-          .select('id, name, position, starts_on, ends_on, is_active, parent_term_id, school_terms(id, name)')
-          .eq('school_id', schoolId)
-          .eq('academic_year_id', academicYearId)
-          .eq('education_cycle', educationCycle)
-          .eq('is_active', true)
-          .order('position', { ascending: true });
-
-        if (fallbackError || !periodsFallback || periodsFallback.length === 0) {
-          const inactiveMsg = "Le calendrier scolaire de votre cycle n’est pas encore activé par l’établissement.";
-          setPortalError(inactiveMsg);
-          setCalendarPeriods([]);
-          setSelectedPeriodId('');
-          setPeriodResult(null);
-          notifyErrorOnce(inactiveMsg);
-          return;
-        }
-
-        periods = (periodsFallback || []).map((p: any) => ({
-          id: p.id,
-          name: p.name,
-          position: p.position,
-          starts_on: p.starts_on,
-          ends_on: p.ends_on,
-          parent_term_id: p.parent_term_id,
-          parent_term_name: p.school_terms?.name || 'Semestre'
-        }));
-      } else {
-        const calData = Array.isArray(rawCal) ? rawCal[0] : rawCal;
-        if (calData && calData.terms) {
-          (calData.terms || []).forEach((t: any) => {
-            (t.periods || []).forEach((p: any) => {
-              periods.push({
-                ...p,
-                parent_term_id: t.id,
-                parent_term_name: t.name
-              });
-            });
-          });
-        }
+        throw new Error("Impossible de charger le calendrier scolaire. Veuillez réessayer ultérieurement.");
       }
 
-      periods.sort((a, b) => (a.position || 0) - (b.position || 0));
-      setCalendarPeriods(periods);
+      const sortedPeriods = extractAndSortCalendarPeriods(calendarData);
 
-      if (periods.length === 0) {
-        const inactiveMsg = "Le calendrier scolaire de votre cycle n’est pas encore activé par l’établissement.";
-        setPortalError(inactiveMsg);
-        setSelectedPeriodId('');
-        setPeriodResult(null);
-        notifyErrorOnce(inactiveMsg);
+      if (sortedPeriods.length === 0) {
+        setPortalError("Aucune période d'évaluation n'est actuellement configurée pour votre cycle.");
+        setCalendarPeriods([]);
         return;
       }
 
-      // 1.4 Sélection automatique : période courante par date ou première période disponible
-      const today = new Date().toISOString().split('T')[0];
-      const activeCurrentPeriod = periods.find(p => p.starts_on && p.ends_on && p.starts_on <= today && today <= p.ends_on);
-      const chosenPeriodId = activeCurrentPeriod ? activeCurrentPeriod.id : periods[0].id;
-      setSelectedPeriodId(chosenPeriodId);
+      setCalendarPeriods(sortedPeriods);
 
+      if (sortedPeriods.length > 0) {
+        setSelectedPeriodId(sortedPeriods[0].id);
+      }
     } catch (err: any) {
       console.error('[RealStudentPortal] Échec de chargement:', err);
-      const friendly = err.message || "Le calendrier scolaire de votre cycle n’est pas encore activé par l’établissement.";
+      const friendly = err.message || "Impossible de charger votre espace élève. Veuillez vérifier votre connexion.";
       setPortalError(friendly);
-      setCalendarPeriods([]);
-      setSelectedPeriodId('');
-      setPeriodResult(null);
-      notifyErrorOnce(friendly);
     } finally {
       setLoading(false);
     }
-  }, [profile?.id, notifyErrorOnce]);
+  }, [profile?.id]);
 
-  // Chargement initial stable
   useEffect(() => {
     loadPortalData();
-  }, [profile?.id, loadPortalData]);
+  }, [loadPortalData]);
 
-  // 2. Chargement des résultats de la période sélectionnée via RPC get_student_period_result
+  // 2. Chargement des résultats académiques et vérification du bulletin officiel publié (Phase 2F.3C)
   const loadResults = useCallback(async () => {
     if (!studentRecord?.id || !selectedPeriodId) {
       setPeriodResult(null);
-      setLoadingResults(false);
+      setOfficialReportCard(null);
       return;
     }
 
     setLoadingResults(true);
     try {
+      // 2.1 Charger les résultats de la période
       const { data: rawData, error } = await supabase.rpc('get_student_period_result', {
         p_student_id: studentRecord.id,
         p_period_id: selectedPeriodId
       });
 
       if (error) {
-        console.error('[RealStudentPortal] Erreur get_student_period_result:', error, {
-          p_student_id: studentRecord.id,
-          p_period_id: selectedPeriodId
-        });
-        throw error;
+        console.error('[RealStudentPortal] Erreur get_student_period_result:', error);
       }
 
       const resData = Array.isArray(rawData) ? rawData[0] : rawData;
-      if (resData) {
-        setPeriodResult(resData as StudentPeriodResult);
+      setPeriodResult(resData ? (resData as StudentPeriodResult) : null);
+
+      // 2.2 Vérifier s'il existe un bulletin officiel publié via RLS
+      const { data: rcData, error: rcErr } = await supabase
+        .from('period_report_cards')
+        .select(`
+          id, rank, overall_percentage, pdf_storage_path, pdf_version, pdf_generated_at, pdf_checksum,
+          principal_remarks, homeroom_teacher_remarks,
+          batch:report_card_batches!inner(status)
+        `)
+        .eq('student_id', studentRecord.id)
+        .eq('period_id', selectedPeriodId)
+        .eq('batch.status', 'published')
+        .maybeSingle();
+
+      if (rcErr) {
+        console.error('[RealStudentPortal] Erreur chargement bulletin officiel:', rcErr);
+        notifyErrorOnce("Erreur lors de la récupération du bulletin officiel.");
+        setOfficialReportCard(null);
+      } else if (rcData && isPublishedPdfMetadataComplete(rcData)) {
+        setOfficialReportCard({
+          id: rcData.id,
+          rank: rcData.rank,
+          overall_percentage: rcData.overall_percentage,
+          pdf_storage_path: rcData.pdf_storage_path,
+          pdf_version: rcData.pdf_version,
+          pdf_generated_at: rcData.pdf_generated_at,
+          pdf_checksum: rcData.pdf_checksum,
+          principal_remarks: rcData.principal_remarks,
+          homeroom_teacher_remarks: rcData.homeroom_teacher_remarks
+        });
       } else {
-        setPeriodResult(null);
+        setOfficialReportCard(null);
       }
     } catch (err: any) {
-      console.error('[RealStudentPortal] Erreur résultats:', err);
+      console.error('[RealStudentPortal] Erreur résultats / bulletin:', err);
       setPeriodResult(null);
+      setOfficialReportCard(null);
     } finally {
       setLoadingResults(false);
     }
   }, [studentRecord?.id, selectedPeriodId]);
 
-  // Déclenché uniquement lors d'un changement explicite de période ou de dossier élève
   useEffect(() => {
     if (studentRecord?.id && selectedPeriodId) {
       loadResults();
     } else {
       setPeriodResult(null);
+      setOfficialReportCard(null);
     }
   }, [studentRecord?.id, selectedPeriodId, loadResults]);
 
-  // 3. Consultation du détail des évaluations par matière via get_student_subject_period_result
+  // 3. Téléchargement Sécurisé du Bulletin PDF Officiel (Phase 2F.3C)
+  const handleDownloadOfficialReportCard = async () => {
+    if (!officialReportCard?.pdf_storage_path || isDownloadingPdf || !studentRecord) return;
+
+    setIsDownloadingPdf(true);
+    try {
+      const selectedPeriod = calendarPeriods.find(p => p.id === selectedPeriodId);
+      const periodLabel = selectedPeriod?.name?.replace(/[^a-zA-Z0-9_-]/g, '_') || 'Periode';
+      const cleanStudentName = `${studentRecord.first_name}_${studentRecord.last_name}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const filename = `Bulletin_${cleanStudentName}_${periodLabel}.pdf`;
+
+      await downloadReportCardPdfBlob(officialReportCard.pdf_storage_path, filename);
+      showToast('Téléchargement du bulletin officiel lancé avec succès.', 'success');
+    } catch (err: any) {
+      console.error('[RealStudentPortal] Erreur téléchargement PDF:', err);
+      showToast(err.message || 'Impossible de télécharger le bulletin PDF officiel.', 'warning');
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  };
+
+  // 4. Consultation du détail des évaluations par matière
   const handleOpenSubjectDetail = async (subject: PeriodResultSubject) => {
     if (!studentRecord?.id || !selectedPeriodId) return;
 
@@ -343,14 +351,7 @@ export const RealStudentPortal: React.FC = () => {
         p_period_id: selectedPeriodId
       });
 
-      if (error) {
-        console.error('[RealStudentPortal] Erreur get_student_subject_period_result:', error, {
-          p_student_id: studentRecord.id,
-          p_subject_id: subject.subject_id,
-          p_period_id: selectedPeriodId
-        });
-        throw error;
-      }
+      if (error) throw error;
 
       const resData = Array.isArray(rawData) ? rawData[0] : rawData;
 
@@ -445,7 +446,7 @@ export const RealStudentPortal: React.FC = () => {
             <div>
               <h2 className="text-lg font-black text-white">Résultats & Notes Scolaires</h2>
               <p className="text-xs text-slate-400">
-                Consultez vos pourcentages et les évaluations officielles publiées pour chaque période.
+                Consultez vos pourcentages et téléchargez votre bulletin scolaire officiel publié.
               </p>
             </div>
           </div>
@@ -473,6 +474,44 @@ export const RealStudentPortal: React.FC = () => {
           </div>
         </div>
 
+        {/* Official Report Card Download Banner (Phase 2F.3C) */}
+        {officialReportCard && (
+          <div className="p-6 bg-gradient-to-r from-amber-500/20 via-slate-900 to-indigo-950/40 rounded-3xl border border-amber-500/40 shadow-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
+                <FileCheck className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black text-amber-400 uppercase tracking-wider">
+                    Bulletin Officiel Certifié Disponible
+                  </span>
+                  <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full text-[10px] font-bold flex items-center gap-1">
+                    <ShieldCheck className="w-3 h-3" />
+                    Signé & Scellé
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300">
+                  {officialReportCard.rank ? (
+                    <span>Votre rang officiel : <strong className="text-white font-mono font-black">#{officialReportCard.rank}</strong> • </span>
+                  ) : null}
+                  Document conforme avec cachet de l'école et signatures de la direction.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              disabled={isDownloadingPdf}
+              onClick={handleDownloadOfficialReportCard}
+              className="w-full md:w-auto px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-amber-500/10 transition-colors disabled:opacity-50"
+            >
+              <Download className={`w-4 h-4 ${isDownloadingPdf ? 'animate-bounce' : ''}`} />
+              <span>{isDownloadingPdf ? 'Téléchargement...' : 'Télécharger le Bulletin (PDF)'}</span>
+            </button>
+          </div>
+        )}
+
         {/* Results Body */}
         {calendarPeriods.length === 0 ? (
           <div className="p-12 text-center bg-slate-900/90 rounded-3xl border border-slate-800 space-y-4 shadow-xl backdrop-blur-xl">
@@ -494,9 +533,9 @@ export const RealStudentPortal: React.FC = () => {
         ) : !periodResult ? (
           <div className="p-12 text-center bg-slate-900 rounded-3xl border border-slate-800 space-y-3">
             <Award className="w-12 h-12 text-slate-600 mx-auto" />
-            <h3 className="text-sm font-bold text-white">Aucun résultat disponible</h3>
+            <h3 className="text-sm font-bold text-white">Aucun résultat publié</h3>
             <p className="text-xs text-slate-400 max-w-sm mx-auto">
-              Vos professeurs n'ont pas encore publié d'évaluation pour cette période ou vos résultats sont en cours de traitement.
+              Les évaluations de cette période n'ont pas encore été clôturées ou publiées par l'établissement.
             </p>
           </div>
         ) : (
@@ -547,7 +586,11 @@ export const RealStudentPortal: React.FC = () => {
                 <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-amber-300 text-xs flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
                   <span>
-                    Certaines notes sont encore en attente de publication. Votre moyenne sera actualisée automatiquement.
+                    {officialReportCard ? (
+                      "Ce bulletin officiel a été publié avec des matières en attente. Toute correction ultérieure fera l’objet d’une nouvelle révision."
+                    ) : (
+                      "Certaines notes sont encore en attente de publication. Votre moyenne sera actualisée automatiquement."
+                    )}
                   </span>
                 </div>
               )}

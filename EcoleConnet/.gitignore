@@ -17,6 +17,10 @@ dist-ssr
 supabase/.temp/
 .temp/
 
+# Deno & Artifacts
+deno.lock
+*.pdf
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

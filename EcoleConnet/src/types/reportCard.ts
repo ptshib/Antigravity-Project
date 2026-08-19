@@ -78,7 +78,8 @@ export interface PeriodReportCardItem {
   principal_remarks?: string | null;
   pdf_storage_path?: string | null;
   pdf_generated_at?: string | null;
-  pdf_version?: number;
+  pdf_checksum?: string | null;
+  pdf_version?: number | null;
   identity?: ReportCardStudentIdentity;
   signatures?: ReportCardSignatures;
   subjects: ReportCardSubjectResult[];
@@ -111,6 +112,84 @@ export interface SchoolOfficialPrerequisites {
   hasHomeroomTeacher: boolean;
   hasHomeroomSignature: boolean;
   isReadyForValidation: boolean;
+}
+
+// Types enrichis pour la Phase 2F.3C (Génération, Statut PDF & Publication)
+
+export interface ReportCardPdfUnreadyCard {
+  report_card_id: string;
+  student_id: string;
+  student_name?: string | null;
+  issue:
+    | 'missing_pdf'
+    | 'pdf_generated_before_last_validation'
+    | 'invalid_checksum_or_path'
+    | 'storage_file_missing_or_invalid';
+}
+
+export interface ReportCardPdfGenerationStatus {
+  batch_id: string;
+  batch_status: ReportCardBatchStatus;
+  revision_number: number;
+  validated_at: string | null;
+  total_report_cards: number;
+  total_active_enrollments: number;
+  ready_pdfs: number;
+  missing_pdfs: number;
+  outdated_pdfs: number;
+  invalid_pdfs: number;
+  duplicate_paths_count: number;
+  unmatched_enrollments_count: number;
+  unmatched_cards_count: number;
+  structural_mismatches_count: number;
+  can_publish: boolean;
+  unready_cards: ReportCardPdfUnreadyCard[];
+}
+
+export interface SinglePdfGenerationResult {
+  report_card_id: string;
+  student_id: string;
+  student_name?: string | null;
+  status: 'generated' | 'skipped' | 'failed';
+  storage_path?: string | null;
+  checksum?: string | null;
+  version?: number | null;
+  error_code?: string | null;
+}
+
+export interface GenerateReportCardPdfsResponse {
+  success: boolean;
+  partial_success?: boolean;
+  batch_id: string;
+  revision_number: number;
+  total_report_cards: number;
+  generated_count: number;
+  skipped_count: number;
+  failed_count: number;
+  results: SinglePdfGenerationResult[];
+  errors?: Array<{
+    report_card_id: string;
+    student_id: string;
+    error_code: string;
+  }>;
+  generation_status: ReportCardPdfGenerationStatus;
+  correlation_id: string;
+}
+
+export interface PublishReportCardBatchResponse {
+  success: boolean;
+  status: 'published';
+  batch_id: string;
+  total_students_published: number;
+  superseded_previous_batch_id: string | null;
+}
+
+export interface ReportCardPdfServiceError {
+  message: string;
+  error_code: string;
+  http_status?: number;
+  correlation_id?: string;
+  details?: any;
 }
 
 export const getReportCardBatchStatusLabel = (status?: ReportCardBatchStatus | string | null): string => {

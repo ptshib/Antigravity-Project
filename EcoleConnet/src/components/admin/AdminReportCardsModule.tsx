@@ -1,4 +1,4 @@
-// Module Administrateur : Gestion & Validation des Bulletins Périodiques (Phase 2F.3)
+// Module Administrateur : Gestion, Génération PDF & Validation des Bulletins Périodiques (Phase 2F.3C)
 // Fichier : src/components/admin/AdminReportCardsModule.tsx
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
@@ -14,10 +14,26 @@ import {
   RotateCcw,
   Eye,
   FileCheck,
-  HelpCircle
+  HelpCircle,
+  FileText,
+  Download,
+  CheckCircle2,
+  RefreshCw,
+  Sparkles
 } from 'lucide-react';
-import type { ReportCardBatchManagement, PeriodReportCardItem, SchoolOfficialPrerequisites } from '../../types/reportCard';
+import type {
+  ReportCardBatchManagement,
+  PeriodReportCardItem,
+  SchoolOfficialPrerequisites,
+  ReportCardPdfGenerationStatus
+} from '../../types/reportCard';
 import { getReportCardBatchStatusLabel } from '../../types/reportCard';
+import {
+  getPdfGenerationStatus,
+  generateBatchPdfs,
+  publishBatch,
+  downloadReportCardPdfBlob
+} from '../../services/reportCardPdfService';
 
 interface AdminReportCardsModuleProps {
   classes: any[];
@@ -63,6 +79,14 @@ export const AdminReportCardsModule: React.FC<AdminReportCardsModuleProps> = ({
   const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
   const [batchDetail, setBatchDetail] = useState<ReportCardBatchManagement | null>(null);
   const [loadingDetail, setLoadingDetail] = useState<boolean>(false);
+
+  // PDF Generation & Publication States (Phase 2F.3C)
+  const [pdfGenerationStatus, setPdfGenerationStatus] = useState<ReportCardPdfGenerationStatus | null>(null);
+  const [loadingPdfStatus, setLoadingPdfStatus] = useState<boolean>(false);
+  const [generatingPdfs, setGeneratingPdfs] = useState<boolean>(false);
+  const [showPublishModal, setShowPublishModal] = useState<boolean>(false);
+  const [publishingBatch, setPublishingBatch] = useState<boolean>(false);
+  const [downloadingCardId, setDownloadingCardId] = useState<string | null>(null);
 
   // Prerequisites check state
   const [schoolOfficialData, setSchoolOfficialData] = useState<any>(null);
@@ -154,11 +178,26 @@ export const AdminReportCardsModule: React.FC<AdminReportCardsModuleProps> = ({
     loadBatchesList();
   }, [loadSchoolData, loadBatchesList]);
 
+  // Load PDF Generation Status via service
+  const loadPdfStatus = useCallback(async (batchId: string) => {
+    setLoadingPdfStatus(true);
+    try {
+      const status = await getPdfGenerationStatus(batchId);
+      setPdfGenerationStatus(status);
+    } catch (err: any) {
+      console.warn('[AdminReportCardsModule] Information statut PDF:', err.message);
+      setPdfGenerationStatus(null);
+    } finally {
+      setLoadingPdfStatus(false);
+    }
+  }, []);
+
   // Load Full Batch Details via RPC get_report_card_for_management
-  const handleOpenBatchDetail = async (batchId: string) => {
+  const handleOpenBatchDetail = useCallback(async (batchId: string) => {
     setSelectedBatchId(batchId);
     setLoadingDetail(true);
     setBatchDetail(null);
+    setPdfGenerationStatus(null);
 
     try {
       const { data, error } = await supabase.rpc('get_report_card_for_management', {
@@ -168,7 +207,12 @@ export const AdminReportCardsModule: React.FC<AdminReportCardsModuleProps> = ({
       if (error) throw error;
 
       if (data) {
-        setBatchDetail(data as ReportCardBatchManagement);
+        const batch = data as ReportCardBatchManagement;
+        setBatchDetail(batch);
+
+        if (batch.status === 'validated_by_admin' || batch.status === 'published') {
+          await loadPdfStatus(batchId);
+        }
       }
     } catch (err: any) {
       console.error('[AdminReportCardsModule] Erreur détails lot:', err);
@@ -176,7 +220,7 @@ export const AdminReportCardsModule: React.FC<AdminReportCardsModuleProps> = ({
     } finally {
       setLoadingDetail(false);
     }
-  };
+  }, [loadPdfStatus, showToast]);
 
   // Check Prerequisites for the Selected Batch
   const batchPrerequisites: SchoolOfficialPrerequisites = useMemo(() => {
@@ -310,6 +354,107 @@ export const AdminReportCardsModule: React.FC<AdminReportCardsModuleProps> = ({
     }
   };
 
+  // Trigger PDF Generation via Edge Function (Phase 2F.3C)
+  const handleGeneratePdfs = async () => {
+    if (!selectedBatchId || generatingPdfs || publishingBatch) return;
+
+    if (batchDetail?.status !== 'validated_by_admin') {
+      showToast('Seul un lot validé par la direction permet la génération des PDF.', 'warning');
+      return;
+    }
+
+    setGeneratingPdfs(true);
+    try {
+      const response = await generateBatchPdfs(selectedBatchId);
+
+      if (response.partial_success) {
+        showToast(
+          `Génération partielle : ${response.generated_count} générés, ${response.failed_count} en échec.`,
+          'warning'
+        );
+      } else {
+        showToast(
+          `Succès : ${response.generated_count} bulletins PDF générés (${response.skipped_count} conservés conformes).`,
+          'success'
+        );
+      }
+
+      await handleOpenBatchDetail(selectedBatchId);
+    } catch (err: any) {
+      console.error('[AdminReportCardsModule] Erreur génération PDF:', err);
+      showToast(err.message || 'Erreur lors de la génération des PDF du lot.', 'warning');
+      if (selectedBatchId) {
+        await loadPdfStatus(selectedBatchId);
+      }
+    } finally {
+      setGeneratingPdfs(false);
+    }
+  };
+
+  // Trigger Batch Publication via RPC (Phase 2F.3C)
+  const handlePublishBatch = async () => {
+    if (!selectedBatchId || publishingBatch || generatingPdfs) return;
+
+    if (batchDetail?.status !== 'validated_by_admin') {
+      showToast('Seul un lot validé par la direction peut être publié.', 'warning');
+      return;
+    }
+
+    if (!pdfGenerationStatus?.can_publish) {
+      showToast('Impossible de publier : la génération de tous les PDF conformes est requise.', 'warning');
+      return;
+    }
+
+    setPublishingBatch(true);
+    try {
+      // Re-vérification stricte du statut PDF juste avant l'appel RPC (Fail-closed)
+      const freshStatus = await getPdfGenerationStatus(selectedBatchId);
+      setPdfGenerationStatus(freshStatus);
+
+      if (!freshStatus.can_publish) {
+        showToast(
+          `Publication annulée : ${freshStatus.missing_pdfs + freshStatus.invalid_pdfs + freshStatus.outdated_pdfs} bulletin(s) non prêts.`,
+          'warning'
+        );
+        setShowPublishModal(false);
+        return;
+      }
+
+      await publishBatch(selectedBatchId);
+
+      showToast(
+        'Lot de bulletins publié officiellement avec succès ! Les élèves et parents ont maintenant accès à leurs bulletins signés.',
+        'success'
+      );
+      setShowPublishModal(false);
+      await loadBatchesList();
+      await handleOpenBatchDetail(selectedBatchId);
+    } catch (err: any) {
+      console.error('[AdminReportCardsModule] Erreur publication lot:', err);
+      showToast(err.message || 'Échec de la publication officielle.', 'warning');
+    } finally {
+      setPublishingBatch(false);
+    }
+  };
+
+  // Trigger Single PDF Download for Admin Inspection
+  const handleDownloadPdf = async (card: PeriodReportCardItem) => {
+    if (!card.pdf_storage_path || downloadingCardId) return;
+
+    setDownloadingCardId(card.report_card_id);
+    try {
+      const cleanStudentName = card.student_name.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const filename = `Bulletin_${cleanStudentName}_v${card.pdf_version || 1}.pdf`;
+      await downloadReportCardPdfBlob(card.pdf_storage_path, filename);
+      showToast(`Téléchargement lancé : ${filename}`, 'success');
+    } catch (err: any) {
+      console.error('[AdminReportCardsModule] Erreur téléchargement PDF:', err);
+      showToast(err.message || 'Impossible de télécharger ce bulletin PDF.', 'warning');
+    } finally {
+      setDownloadingCardId(null);
+    }
+  };
+
   // Filtered Cards inside detail view
   const filteredDetailCards = useMemo(() => {
     if (!batchDetail?.report_cards) return [];
@@ -320,183 +465,148 @@ export const AdminReportCardsModule: React.FC<AdminReportCardsModuleProps> = ({
         c.student_name.toLowerCase().includes(q) ||
         c.student_number.toLowerCase().includes(q)
     );
-  }, [batchDetail, searchQuery]);
+  }, [batchDetail?.report_cards, searchQuery]);
 
   return (
     <div className="space-y-6">
-      {/* Top Banner */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-xl backdrop-blur-xl flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div className="flex items-center gap-4">
-          <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
-            <GraduationCap className="w-7 h-7" />
-          </div>
-          <div>
-            <h2 className="text-xl font-black text-white flex items-center gap-2">
-              Supervision & Validation Administrative des Bulletins
-            </h2>
-            <p className="text-xs text-slate-400 mt-1">
-              Contrôlez les moyennes officielles, saisissez les appréciations de direction et validez les lots de bulletins pour publication.
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="px-3.5 py-1.5 bg-slate-800 text-slate-300 border border-slate-700 rounded-xl text-xs font-bold">
-            Total Lots : {batchesList.length}
-          </span>
-          <span className="px-3.5 py-1.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-bold">
-            À Valider : {batchesList.filter(b => b.status === 'submitted_by_homeroom').length}
-          </span>
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-black text-white flex items-center gap-2">
+            <GraduationCap className="w-6 h-6 text-amber-500" />
+            <span>Gestion & Validation des Bulletins Périodiques</span>
+          </h2>
+          <p className="text-xs text-slate-400 mt-1">
+            Supervision académique, génération sécurisée des PDF officiels et publication aux élèves et parents.
+          </p>
         </div>
       </div>
 
-      {/* Filter Bar */}
-      <div className="flex flex-wrap items-center gap-3 bg-slate-900/60 p-4 rounded-2xl border border-slate-800 text-xs">
-        <div className="flex items-center gap-1.5 text-slate-400 font-bold mr-2">
-          <Filter className="w-4 h-4 text-amber-400" />
-          <span>Filtres :</span>
+      {/* Filters Bar */}
+      <div className="bg-slate-900 p-4 rounded-3xl border border-slate-800 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center gap-3 flex-1">
+          <div className="flex items-center gap-2 text-slate-400 text-xs font-bold pl-1">
+            <Filter className="w-3.5 h-3.5" />
+            <span>Filtres :</span>
+          </div>
+
+          {/* Class Filter */}
+          <select
+            value={classFilter}
+            onChange={e => setClassFilter(e.target.value)}
+            className="bg-slate-950 text-white text-xs px-3 py-2 rounded-xl border border-slate-800 focus:outline-none focus:border-amber-500 font-medium"
+          >
+            <option value="all">Toutes les classes</option>
+            {classes.map(c => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+
+          {/* Period Filter */}
+          <select
+            value={periodFilter}
+            onChange={e => setPeriodFilter(e.target.value)}
+            className="bg-slate-950 text-white text-xs px-3 py-2 rounded-xl border border-slate-800 focus:outline-none focus:border-amber-500 font-medium"
+          >
+            <option value="all">Toutes les périodes</option>
+            {schoolPeriods.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+
+          {/* Status Filter */}
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+            className="bg-slate-950 text-white text-xs px-3 py-2 rounded-xl border border-slate-800 focus:outline-none focus:border-amber-500 font-medium"
+          >
+            <option value="all">Tous les statuts</option>
+            <option value="draft">Brouillon</option>
+            <option value="submitted_by_homeroom">Soumis par le titulaire</option>
+            <option value="validated_by_admin">Validé par la direction</option>
+            <option value="published">Publié</option>
+          </select>
         </div>
 
-        {/* Classe */}
-        <select
-          value={classFilter}
-          onChange={e => setClassFilter(e.target.value)}
-          className="px-3 py-2 bg-slate-800 text-white rounded-xl border border-slate-700 text-xs font-medium focus:outline-none focus:border-amber-500"
+        <button
+          type="button"
+          onClick={() => {
+            loadBatchesList();
+            if (selectedBatchId) handleOpenBatchDetail(selectedBatchId);
+          }}
+          className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
         >
-          <option value="all">Toutes les classes ({classes.length})</option>
-          {classes.map(c => (
-            <option key={c.id} value={c.id}>{c.name}</option>
-          ))}
-        </select>
-
-        {/* Période */}
-        <select
-          value={periodFilter}
-          onChange={e => setPeriodFilter(e.target.value)}
-          className="px-3 py-2 bg-slate-800 text-white rounded-xl border border-slate-700 text-xs font-medium focus:outline-none focus:border-amber-500"
-        >
-          <option value="all">Toutes les périodes ({schoolPeriods.length})</option>
-          {schoolPeriods.map(p => (
-            <option key={p.id} value={p.id}>{p.name} ({p.education_cycle})</option>
-          ))}
-        </select>
-
-        {/* Statut */}
-        <select
-          value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value)}
-          className="px-3 py-2 bg-slate-800 text-white rounded-xl border border-slate-700 text-xs font-medium focus:outline-none focus:border-amber-500"
-        >
-          <option value="all">Tous les statuts</option>
-          <option value="draft">Brouillon (draft)</option>
-          <option value="submitted_by_homeroom">Soumis par le titulaire</option>
-          <option value="validated_by_admin">Validé par la direction</option>
-          <option value="published">Publié</option>
-        </select>
+          <RefreshCw className="w-3.5 h-3.5" />
+          <span>Actualiser</span>
+        </button>
       </div>
 
-      {/* Main Layout: List & Detail Drawer */}
+      {/* Main Grid: Batches List (Left) & Batch Detail (Right) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Batches Table */}
-        <div className={selectedBatchId ? 'lg:col-span-4 space-y-4' : 'lg:col-span-12 space-y-4'}>
+        {/* Left Column: Batches List */}
+        <div className={selectedBatchId ? 'lg:col-span-4 space-y-3' : 'lg:col-span-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'}>
           {loading ? (
-            <div className="p-12 text-center bg-slate-900 rounded-3xl border border-slate-800 space-y-3">
-              <div className="w-8 h-8 border-3 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto" />
-              <p className="text-xs font-bold text-slate-400">Chargement des lots de bulletins...</p>
+            <div className="col-span-full p-8 text-center bg-slate-900 rounded-3xl border border-slate-800 text-slate-400 text-xs">
+              Chargement des lots de bulletins...
             </div>
           ) : batchesList.length === 0 ? (
-            <div className="p-12 text-center bg-slate-900 rounded-3xl border border-slate-800 space-y-3">
-              <GraduationCap className="w-12 h-12 text-slate-600 mx-auto" />
-              <p className="text-sm font-bold text-slate-300">Aucun lot de bulletins trouvé</p>
-              <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                Les professeurs titulaires génèrent les brouillons de bulletins depuis leur portail de classe.
-              </p>
+            <div className="col-span-full p-8 text-center bg-slate-900 rounded-3xl border border-slate-800 text-slate-400 text-xs">
+              Aucun lot de bulletins ne correspond aux filtres sélectionnés.
             </div>
           ) : (
-            <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden shadow-xl">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-slate-950/80 text-slate-400 border-b border-slate-800 uppercase tracking-wider font-extrabold text-[10px]">
-                      <th className="p-3">Classe & Période</th>
-                      <th className="p-3 text-center">Rév.</th>
-                      <th className="p-3 text-center">Statut</th>
-                      {!selectedBatchId && <th className="p-3 text-center">Effectif</th>}
-                      <th className="p-3 text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800 font-medium">
-                    {batchesList.map(b => {
-                      const isSelected = selectedBatchId === b.id;
-                      return (
-                        <tr
-                          key={b.id}
-                          className={`transition-colors cursor-pointer ${
-                            isSelected ? 'bg-amber-500/10 border-l-4 border-l-amber-500' : 'hover:bg-slate-800/40'
-                          }`}
-                          onClick={() => handleOpenBatchDetail(b.id)}
-                        >
-                          <td className="p-3">
-                            <span className="font-extrabold text-white block">{b.class_name}</span>
-                            <span className="text-[10px] text-amber-400 font-bold block">{b.period_name}</span>
-                          </td>
-                          <td className="p-3 text-center font-mono font-bold text-slate-300">
-                            #{b.revision_number}
-                          </td>
-                          <td className="p-3 text-center">
-                            {b.status === 'draft' && (
-                              <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 rounded-md text-[10px] font-bold inline-block">
-                                Brouillon
-                              </span>
-                            )}
-                            {b.status === 'submitted_by_homeroom' && (
-                              <span className="px-2 py-0.5 bg-indigo-500/20 text-indigo-300 rounded-md text-[10px] font-bold inline-block animate-pulse">
-                                Soumis par le titulaire
-                              </span>
-                            )}
-                            {b.status === 'validated_by_admin' && (
-                              <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 rounded-md text-[10px] font-bold inline-block">
-                                Validé par la direction
-                              </span>
-                            )}
-                            {b.status === 'published' && (
-                              <span className="px-2 py-0.5 bg-emerald-500 text-slate-950 rounded-md text-[10px] font-black inline-block">
-                                Publié
-                              </span>
-                            )}
-                            {b.status === 'superseded' && (
-                              <span className="px-2 py-0.5 bg-slate-800 text-slate-400 rounded-md text-[10px] font-bold inline-block">
-                                Remplacé par une nouvelle révision
-                              </span>
-                            )}
-                          </td>
-                          {!selectedBatchId && (
-                            <td className="p-3 text-center">
-                              <span className="font-bold text-white">{b.total_students_count}</span>
-                              <span className="text-[10px] text-slate-500 block">
-                                ({b.complete_students_count} C / {b.incomplete_students_count} I)
-                              </span>
-                            </td>
-                          )}
-                          <td className="p-3 text-right">
-                            <button
-                              type="button"
-                              onClick={e => {
-                                e.stopPropagation();
-                                handleOpenBatchDetail(b.id);
-                              }}
-                              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold"
-                            >
-                              Ouvrir
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            batchesList.map(batch => {
+              const isSelected = selectedBatchId === batch.id;
+              return (
+                <div
+                  key={batch.id}
+                  onClick={() => handleOpenBatchDetail(batch.id)}
+                  className={`p-4 rounded-2xl border transition-all cursor-pointer space-y-3 ${
+                    isSelected
+                      ? 'bg-slate-900 border-amber-500/80 shadow-lg shadow-amber-500/5 ring-1 ring-amber-500/50'
+                      : 'bg-slate-900/60 hover:bg-slate-900 border-slate-800/80 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h4 className="font-extrabold text-white text-sm">{batch.class_name}</h4>
+                      <p className="text-xs text-slate-400">{batch.period_name} • Rév. #{batch.revision_number}</p>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-black border uppercase tracking-wider ${
+                        batch.status === 'published'
+                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                          : batch.status === 'validated_by_admin'
+                          ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30'
+                          : batch.status === 'submitted_by_homeroom'
+                          ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                          : 'bg-slate-800 text-slate-400 border-slate-700'
+                      }`}
+                    >
+                      {getReportCardBatchStatusLabel(batch.status)}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 text-center text-xs py-1 bg-slate-950/60 rounded-xl border border-slate-800/50">
+                    <div>
+                      <span className="text-[10px] text-slate-500 block uppercase font-bold">Total</span>
+                      <strong className="text-white font-mono">{batch.total_students_count}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-emerald-500/80 block uppercase font-bold">Complets</span>
+                      <strong className="text-emerald-400 font-mono">{batch.complete_students_count}</strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-amber-500/80 block uppercase font-bold">Incomplets</span>
+                      <strong className="text-amber-400 font-mono">{batch.incomplete_students_count}</strong>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
           )}
         </div>
 
@@ -522,7 +632,11 @@ export const AdminReportCardsModule: React.FC<AdminReportCardsModuleProps> = ({
                         <h3 className="text-lg font-black text-white">
                           {batchDetail.class_name} — Révision #{batchDetail.revision_number}
                         </h3>
-                        <span className="px-2.5 py-0.5 bg-slate-800 text-amber-400 border border-amber-500/30 rounded-full text-xs font-bold">
+                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
+                          batchDetail.status === 'published'
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                            : 'bg-slate-800 text-amber-400 border-amber-500/30'
+                        }`}>
                           {getReportCardBatchStatusLabel(batchDetail.status)}
                         </span>
                       </div>
@@ -562,51 +676,176 @@ export const AdminReportCardsModule: React.FC<AdminReportCardsModuleProps> = ({
                         </button>
                       )}
 
-                      {/* Publish button - Disabled for Phase 2F.3A */}
+                      {/* Generate PDFs button (Phase 2F.3C) */}
                       {batchDetail.status === 'validated_by_admin' && (
                         <button
                           type="button"
-                          disabled={true}
-                          className="px-4 py-2 bg-slate-800 text-slate-500 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-not-allowed opacity-60"
-                          title="La génération sécurisée des PDF sera installée à l’étape suivante."
+                          disabled={generatingPdfs || publishingBatch}
+                          onClick={handleGeneratePdfs}
+                          className="px-4 py-2 bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-black rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-md transition-colors disabled:opacity-50"
+                        >
+                          <Sparkles className={`w-4 h-4 ${generatingPdfs ? 'animate-spin' : ''}`} />
+                          <span>{generatingPdfs ? 'Génération en cours...' : 'Générer les PDF Officiels'}</span>
+                        </button>
+                      )}
+
+                      {/* Publish button (Phase 2F.3C) */}
+                      {batchDetail.status === 'validated_by_admin' && (
+                        <button
+                          type="button"
+                          disabled={!pdfGenerationStatus?.can_publish || publishingBatch || generatingPdfs}
+                          onClick={() => setShowPublishModal(true)}
+                          className={`px-4 py-2 font-black rounded-xl text-xs flex items-center gap-1.5 shadow-md transition-colors ${
+                            pdfGenerationStatus?.can_publish
+                              ? 'bg-emerald-500 hover:bg-emerald-600 text-slate-950 cursor-pointer'
+                              : 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-60'
+                          }`}
+                          title={
+                            pdfGenerationStatus?.can_publish
+                              ? 'Publier officiellement les bulletins'
+                              : 'La génération complète des PDF est requise avant publication'
+                          }
                         >
                           <Award className="w-4 h-4" />
-                          <span>Publier (Étape PDF suivante)</span>
+                          <span>{publishingBatch ? 'Publication...' : 'Publier les Bulletins'}</span>
                         </button>
+                      )}
+
+                      {/* Published State Banner */}
+                      {batchDetail.status === 'published' && (
+                        <div className="px-3.5 py-1.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-xl text-xs font-bold flex items-center gap-1.5">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          <span>Lot Officiellement Publié</span>
+                          {batchDetail.published_at && (
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              ({new Date(batchDetail.published_at).toLocaleDateString('fr-FR')})
+                            </span>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
 
-                  {/* Prerequisites Checklist Banner */}
-                  <div className={`p-4 rounded-2xl border ${batchPrerequisites.isReadyForValidation ? 'bg-emerald-950/20 border-emerald-800/40' : 'bg-amber-950/20 border-amber-800/40'} text-xs space-y-2`}>
-                    <div className="flex items-center justify-between">
-                      <span className="font-extrabold text-slate-300 flex items-center gap-1.5">
-                        <HelpCircle className="w-4 h-4 text-amber-400" />
-                        <span>Contrôle de conformité officielle pour validation :</span>
-                      </span>
-                      <span className={`font-black text-[11px] ${batchPrerequisites.isReadyForValidation ? 'text-emerald-400' : 'text-amber-400'}`}>
-                        {batchPrerequisites.isReadyForValidation ? 'Conforme pour validation' : 'Éléments bloquants'}
-                      </span>
-                    </div>
+                  {/* Prerequisites Checklist Banner (for draft/submitted) */}
+                  {batchDetail.status !== 'published' && (
+                    <div className={`p-4 rounded-2xl border ${batchPrerequisites.isReadyForValidation ? 'bg-emerald-950/20 border-emerald-800/40' : 'bg-amber-950/20 border-amber-800/40'} text-xs space-y-2`}>
+                      <div className="flex items-center justify-between">
+                        <span className="font-extrabold text-slate-300 flex items-center gap-1.5">
+                          <HelpCircle className="w-4 h-4 text-amber-400" />
+                          <span>Contrôle de conformité officielle pour validation :</span>
+                        </span>
+                        <span className={`font-black text-[11px] ${batchPrerequisites.isReadyForValidation ? 'text-emerald-400' : 'text-amber-400'}`}>
+                          {batchPrerequisites.isReadyForValidation ? 'Conforme pour validation' : 'Éléments bloquants'}
+                        </span>
+                      </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[10px]">
-                      <span className={`px-2 py-1 rounded-lg border ${batchPrerequisites.hasPrincipalName ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-slate-900 border-slate-800 text-slate-500'}`}>
-                        {batchPrerequisites.hasPrincipalName ? '✓' : '✗'} Chef d'Établissement
-                      </span>
-                      <span className={`px-2 py-1 rounded-lg border ${batchPrerequisites.hasDirectorSignature ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-slate-900 border-slate-800 text-slate-500'}`}>
-                        {batchPrerequisites.hasDirectorSignature ? '✓' : '✗'} Signature Direction
-                      </span>
-                      <span className={`px-2 py-1 rounded-lg border ${batchPrerequisites.hasStamp ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-slate-900 border-slate-800 text-slate-500'}`}>
-                        {batchPrerequisites.hasStamp ? '✓' : '✗'} Cachet Officiel
-                      </span>
-                      <span className={`px-2 py-1 rounded-lg border ${batchPrerequisites.hasHomeroomTeacher ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-slate-900 border-slate-800 text-slate-500'}`}>
-                        {batchPrerequisites.hasHomeroomTeacher ? '✓' : '✗'} Titulaire Assigné
-                      </span>
-                      <span className={`px-2 py-1 rounded-lg border ${batchPrerequisites.hasHomeroomSignature ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-slate-900 border-slate-800 text-slate-500'}`}>
-                        {batchPrerequisites.hasHomeroomSignature ? '✓' : '✗'} Signature Titulaire
-                      </span>
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[10px]">
+                        <span className={`px-2 py-1 rounded-lg border ${batchPrerequisites.hasPrincipalName ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-slate-900 border-slate-800 text-slate-500'}`}>
+                          {batchPrerequisites.hasPrincipalName ? '✓' : '✗'} Chef d'Établissement
+                        </span>
+                        <span className={`px-2 py-1 rounded-lg border ${batchPrerequisites.hasDirectorSignature ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-slate-900 border-slate-800 text-slate-500'}`}>
+                          {batchPrerequisites.hasDirectorSignature ? '✓' : '✗'} Signature Direction
+                        </span>
+                        <span className={`px-2 py-1 rounded-lg border ${batchPrerequisites.hasStamp ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-slate-900 border-slate-800 text-slate-500'}`}>
+                          {batchPrerequisites.hasStamp ? '✓' : '✗'} Cachet Officiel
+                        </span>
+                        <span className={`px-2 py-1 rounded-lg border ${batchPrerequisites.hasHomeroomTeacher ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-slate-900 border-slate-800 text-slate-500'}`}>
+                          {batchPrerequisites.hasHomeroomTeacher ? '✓' : '✗'} Titulaire Assigné
+                        </span>
+                        <span className={`px-2 py-1 rounded-lg border ${batchPrerequisites.hasHomeroomSignature ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-slate-900 border-slate-800 text-slate-500'}`}>
+                          {batchPrerequisites.hasHomeroomSignature ? '✓' : '✗'} Signature Titulaire
+                        </span>
+                      </div>
                     </div>
-                  </div>
+                  )}
+
+                  {/* PDF Generation Status Card (Phase 2F.3C) */}
+                  {(batchDetail.status === 'validated_by_admin' || batchDetail.status === 'published') && (
+                    <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-3">
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-cyan-400" />
+                          <span className="font-bold text-white">Statut des Fichiers PDF Officiels</span>
+                        </div>
+                        {loadingPdfStatus ? (
+                          <span className="text-[10px] text-slate-400">Actualisation...</span>
+                        ) : pdfGenerationStatus ? (
+                          (() => {
+                            if (batchDetail.status === 'published') {
+                              const isFullyReady =
+                                pdfGenerationStatus.ready_pdfs === pdfGenerationStatus.total_report_cards &&
+                                pdfGenerationStatus.missing_pdfs === 0 &&
+                                pdfGenerationStatus.invalid_pdfs === 0 &&
+                                pdfGenerationStatus.outdated_pdfs === 0;
+
+                              if (isFullyReady) {
+                                return (
+                                  <span className="text-[11px] font-black px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                                    ✓ PDF officiels disponibles
+                                  </span>
+                                );
+                              } else {
+                                return (
+                                  <span className="text-[11px] font-black px-2 py-0.5 rounded-md bg-rose-500/10 text-rose-400 border border-rose-500/30">
+                                    ⚠ Anomalie documentaire
+                                  </span>
+                                );
+                              }
+                            } else {
+                              return (
+                                <span className={`text-[11px] font-black px-2 py-0.5 rounded-md ${
+                                  pdfGenerationStatus.can_publish
+                                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                                    : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                                }`}>
+                                  {pdfGenerationStatus.can_publish ? '✓ Prêt pour publication' : 'Génération requise'}
+                                </span>
+                              );
+                            }
+                          })()
+                        ) : null}
+                      </div>
+
+                      {pdfGenerationStatus && (
+                        <div className="space-y-2 text-xs">
+                          {/* Progress bar */}
+                          <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                            <div
+                              className="bg-emerald-500 h-full transition-all duration-300"
+                              style={{
+                                width: `${
+                                  pdfGenerationStatus.total_report_cards > 0
+                                    ? (pdfGenerationStatus.ready_pdfs / pdfGenerationStatus.total_report_cards) * 100
+                                    : 0
+                                }%`
+                              }}
+                            />
+                          </div>
+
+                          <div className="flex flex-wrap items-center justify-between text-[11px] gap-2 pt-1 text-slate-400">
+                            <span>
+                              Bulletins conformes : <strong className="text-emerald-400">{pdfGenerationStatus.ready_pdfs} / {pdfGenerationStatus.total_report_cards}</strong>
+                            </span>
+                            {pdfGenerationStatus.missing_pdfs > 0 && (
+                              <span className="text-amber-400 font-medium">
+                                • {pdfGenerationStatus.missing_pdfs} manquant(s)
+                              </span>
+                            )}
+                            {pdfGenerationStatus.outdated_pdfs > 0 && (
+                              <span className="text-cyan-400 font-medium">
+                                • {pdfGenerationStatus.outdated_pdfs} obsolète(s)
+                              </span>
+                            )}
+                            {pdfGenerationStatus.invalid_pdfs > 0 && (
+                              <span className="text-rose-400 font-medium">
+                                • {pdfGenerationStatus.invalid_pdfs} invalide(s)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Search & Student Cards Table */}
@@ -635,160 +874,172 @@ export const AdminReportCardsModule: React.FC<AdminReportCardsModuleProps> = ({
                           <th className="p-3 text-center w-16">Rang</th>
                           <th className="p-3 min-w-[160px]">Élève & Matricule</th>
                           <th className="p-3 text-center w-24">Moyenne</th>
-                          <th className="p-3 min-w-[180px] max-w-[280px]">Appréciation Titulaire</th>
                           <th className="p-3 min-w-[180px] max-w-[280px]">Appréciation Direction</th>
-                          <th className="p-3 text-right w-28">Actions</th>
+                          <th className="p-3 text-center w-36">Document PDF</th>
+                          <th className="p-3 text-right w-24">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800 font-medium bg-slate-950/40">
-                        {filteredDetailCards.map(card => (
-                          <tr key={card.report_card_id} className="hover:bg-slate-800/40 transition-colors">
-                            <td className="p-3 text-center">
-                              {card.rank ? (
-                                <span className="px-2 py-0.5 bg-amber-500/10 text-amber-400 font-mono font-black rounded-lg text-xs inline-block">
-                                  #{card.rank}
-                                </span>
-                              ) : (
-                                <span className="text-slate-600">—</span>
-                              )}
-                            </td>
+                        {filteredDetailCards.map(card => {
+                          const hasPdf = Boolean(card.pdf_storage_path && card.pdf_version);
+                          const isDownloading = downloadingCardId === card.report_card_id;
 
-                            <td className="p-3">
-                              <p className="font-extrabold text-white text-xs leading-snug">{card.student_name}</p>
-                              <span className="font-mono text-slate-500 text-[10px] block">{card.student_number}</span>
-                            </td>
+                          return (
+                            <tr key={card.report_card_id} className="hover:bg-slate-800/40 transition-colors">
+                              <td className="p-3 text-center">
+                                {card.rank ? (
+                                  <span className="px-2 py-0.5 bg-amber-500/10 text-amber-400 font-mono font-black rounded-lg text-xs inline-block">
+                                    #{card.rank}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-600">—</span>
+                                )}
+                              </td>
 
-                            <td className="p-3 text-center">
-                              {card.overall_percentage !== null ? (
-                                <span className={`font-black text-xs ${card.overall_percentage >= 50 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                  {Number(card.overall_percentage).toFixed(1)} %
-                                </span>
-                              ) : (
-                                <span className="text-slate-500">—</span>
-                              )}
-                            </td>
+                              <td className="p-3">
+                                <p className="font-extrabold text-white text-xs leading-snug">{card.student_name}</p>
+                                <span className="font-mono text-slate-500 text-[10px] block">{card.student_number}</span>
+                              </td>
 
-                            <td className="p-3 min-w-[180px] max-w-[280px]">
-                              {card.homeroom_teacher_remarks ? (
-                                <p className="text-slate-300 text-xs break-words whitespace-pre-wrap leading-relaxed">
-                                  {card.homeroom_teacher_remarks}
-                                </p>
-                              ) : (
-                                <span className="text-slate-600 italic text-[11px]">Non renseignée</span>
-                              )}
-                            </td>
+                              <td className="p-3 text-center">
+                                {card.overall_percentage !== null ? (
+                                  <span className={`font-black text-xs ${card.overall_percentage >= 50 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    {Number(card.overall_percentage).toFixed(1)} %
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-500">—</span>
+                                )}
+                              </td>
 
-                            <td className="p-3 min-w-[180px] max-w-[280px]">
-                              {card.principal_remarks ? (
-                                <p className="text-amber-300 text-xs break-words whitespace-pre-wrap leading-relaxed font-medium">
-                                  {card.principal_remarks}
-                                </p>
-                              ) : (
-                                <span className="text-slate-600 italic text-[11px]">En attente de direction</span>
-                              )}
-                            </td>
+                              <td className="p-3 min-w-[180px] max-w-[280px]">
+                                {card.principal_remarks ? (
+                                  <p className="text-amber-300 text-xs break-words whitespace-pre-wrap leading-relaxed font-medium">
+                                    {card.principal_remarks}
+                                  </p>
+                                ) : (
+                                  <span className="text-slate-600 italic text-[11px]">En attente de direction</span>
+                                )}
+                              </td>
 
-                            <td className="p-3 text-right">
-                              {batchDetail.status === 'submitted_by_homeroom' ? (
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenRemarkModal(card)}
-                                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 ml-auto cursor-pointer transition-colors"
-                                >
-                                  <MessageSquare className="w-3.5 h-3.5 text-amber-400" />
-                                  <span>{card.principal_remarks ? 'Modifier' : 'Apprécier'}</span>
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenRemarkModal(card)}
-                                  className="px-3 py-1.5 bg-slate-800/60 hover:bg-slate-800 text-slate-300 rounded-xl text-xs font-bold flex items-center gap-1.5 ml-auto transition-colors"
-                                >
-                                  <Eye className="w-3.5 h-3.5 text-slate-400" />
-                                  <span>Voir</span>
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
+                              <td className="p-3 text-center">
+                                {hasPdf ? (
+                                  <div className="flex flex-col items-center gap-1">
+                                    <span className="px-2 py-0.5 bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 rounded text-[10px] font-mono font-bold">
+                                      v{card.pdf_version}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      disabled={isDownloading}
+                                      onClick={() => handleDownloadPdf(card)}
+                                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors disabled:opacity-50"
+                                      title="Télécharger le document PDF officiel"
+                                    >
+                                      <Download className={`w-3 h-3 ${isDownloading ? 'animate-bounce' : ''}`} />
+                                      <span>{isDownloading ? '...' : 'PDF'}</span>
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-slate-500 italic">Non généré</span>
+                                )}
+                              </td>
+
+                              <td className="p-3 text-right">
+                                {batchDetail.status === 'submitted_by_homeroom' ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenRemarkModal(card)}
+                                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 ml-auto cursor-pointer transition-colors"
+                                  >
+                                    <MessageSquare className="w-3.5 h-3.5 text-amber-400" />
+                                    <span>{card.principal_remarks ? 'Modifier' : 'Apprécier'}</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenRemarkModal(card)}
+                                    className="px-3 py-1.5 bg-slate-800/60 hover:bg-slate-800 text-slate-300 rounded-xl text-xs font-bold flex items-center gap-1.5 ml-auto transition-colors cursor-pointer"
+                                  >
+                                    <Eye className="w-3.5 h-3.5 text-slate-400" />
+                                    <span>Voir</span>
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
 
                   {/* Mobile Cards View */}
                   <div className="md:hidden space-y-3">
-                    {filteredDetailCards.map(card => (
-                      <div key={card.report_card_id} className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-3">
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <p className="font-extrabold text-white text-sm">{card.student_name}</p>
-                            <span className="font-mono text-slate-500 text-xs">{card.student_number}</span>
-                          </div>
-                          {card.rank && (
-                            <span className="px-2 py-0.5 bg-amber-500/10 text-amber-400 font-mono font-bold rounded-lg text-xs">
-                              #{card.rank}
-                            </span>
-                          )}
-                        </div>
+                    {filteredDetailCards.map(card => {
+                      const hasPdf = Boolean(card.pdf_storage_path && card.pdf_version);
+                      const isDownloading = downloadingCardId === card.report_card_id;
 
-                        <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-900">
-                          <span className="text-slate-400 font-bold uppercase text-[10px]">Moyenne</span>
-                          {card.overall_percentage !== null ? (
-                            <span className={`font-black text-sm ${card.overall_percentage >= 50 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                              {Number(card.overall_percentage).toFixed(1)} %
-                            </span>
-                          ) : (
-                            <span className="text-slate-500">Non noté</span>
-                          )}
-                        </div>
-
-                        <div className="space-y-2 pt-1 border-t border-slate-900">
-                          <div>
-                            <span className="text-slate-400 block text-[10px] uppercase font-bold mb-0.5">Appréciation Titulaire</span>
-                            {card.homeroom_teacher_remarks ? (
-                              <p className="text-slate-300 text-xs break-words whitespace-pre-wrap leading-relaxed bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/60">
-                                {card.homeroom_teacher_remarks}
-                              </p>
-                            ) : (
-                              <span className="text-slate-600 italic text-[11px]">Non renseignée</span>
+                      return (
+                        <div key={card.report_card_id} className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <p className="font-extrabold text-white text-sm">{card.student_name}</p>
+                              <span className="font-mono text-slate-500 text-xs">{card.student_number}</span>
+                            </div>
+                            {card.rank && (
+                              <span className="px-2 py-0.5 bg-amber-500/10 text-amber-400 font-mono font-bold rounded-lg text-xs">
+                                #{card.rank}
+                              </span>
                             )}
                           </div>
 
-                          <div>
-                            <span className="text-amber-400 block text-[10px] uppercase font-bold mb-0.5">Appréciation Direction</span>
-                            {card.principal_remarks ? (
-                              <p className="text-amber-300 text-xs break-words whitespace-pre-wrap leading-relaxed font-medium bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/60">
-                                {card.principal_remarks}
-                              </p>
+                          <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-900">
+                            <span className="text-slate-400 font-bold uppercase text-[10px]">Moyenne</span>
+                            {card.overall_percentage !== null ? (
+                              <span className={`font-black text-sm ${card.overall_percentage >= 50 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                {Number(card.overall_percentage).toFixed(1)} %
+                              </span>
                             ) : (
-                              <span className="text-slate-600 italic text-[11px]">En attente de direction</span>
+                              <span className="text-slate-500">Non noté</span>
                             )}
                           </div>
-                        </div>
 
-                        <div className="pt-2 flex justify-end">
-                          {batchDetail.status === 'submitted_by_homeroom' ? (
+                          <div className="space-y-2 pt-1 border-t border-slate-900">
+                            <div>
+                              <span className="text-amber-400 block text-[10px] uppercase font-bold mb-0.5">Appréciation Direction</span>
+                              {card.principal_remarks ? (
+                                <p className="text-amber-300 text-xs break-words whitespace-pre-wrap leading-relaxed font-medium bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/60">
+                                  {card.principal_remarks}
+                                </p>
+                              ) : (
+                                <span className="text-slate-600 italic text-[11px]">En attente de direction</span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="pt-2 flex items-center justify-between gap-2 border-t border-slate-900">
+                            {hasPdf && (
+                              <button
+                                type="button"
+                                disabled={isDownloading}
+                                onClick={() => handleDownloadPdf(card)}
+                                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                                <span>PDF (v{card.pdf_version})</span>
+                              </button>
+                            )}
+
                             <button
                               type="button"
                               onClick={() => handleOpenRemarkModal(card)}
-                              className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                              className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold flex items-center gap-1.5 ml-auto"
                             >
-                              <MessageSquare className="w-3.5 h-3.5 text-amber-400" />
-                              <span>{card.principal_remarks ? 'Modifier Appréciation' : 'Apprécier le Bulletin'}</span>
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>Détails</span>
                             </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleOpenRemarkModal(card)}
-                              className="w-full py-2 bg-slate-800/60 text-slate-300 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5"
-                            >
-                              <Eye className="w-3.5 h-3.5 text-slate-400" />
-                              <span>Consulter le Bulletin</span>
-                            </button>
-                          )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -898,6 +1149,56 @@ export const AdminReportCardsModule: React.FC<AdminReportCardsModuleProps> = ({
                 className="px-5 py-2 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black rounded-xl cursor-pointer shadow-lg transition-colors disabled:opacity-50"
               >
                 {validatingBatch ? 'Validation en cours...' : 'Confirmer la Validation'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Modal: Confirmation de Publication Officielle (Phase 2F.3C) */}
+      {showPublishModal && batchDetail && (
+        <Modal
+          isOpen={showPublishModal}
+          onClose={() => !publishingBatch && setShowPublishModal(false)}
+          title="Publication Officielle des Bulletins Périodiques"
+          darkMode={true}
+        >
+          <div className="space-y-4 text-xs">
+            <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-start gap-3">
+              <Award className="w-6 h-6 text-emerald-400 shrink-0 mt-0.5" />
+              <div className="space-y-1 text-emerald-200">
+                <p className="font-black text-sm text-emerald-300">
+                  Confirmer la publication officielle pour {batchDetail.class_name} ?
+                </p>
+                <p className="text-slate-300 leading-relaxed">
+                  Cette action rendra immédiatement accessibles et téléchargeables les bulletins officiels certifiés (PDF signés) sur les portails sécurisés de tous les élèves et parents rattachés.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-1 text-slate-400">
+              <p>• Classe : <strong className="text-white">{batchDetail.class_name}</strong></p>
+              <p>• Effectif concerné : <strong className="text-white">{batchDetail.total_students_count} élèves</strong></p>
+              <p>• Documents PDF prêts : <strong className="text-emerald-400 font-mono">{pdfGenerationStatus?.ready_pdfs} / {batchDetail.total_students_count}</strong></p>
+              <p>• Intégrité des signatures : <strong className="text-emerald-400 font-bold">100% Conforme</strong></p>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                disabled={publishingBatch}
+                onClick={() => setShowPublishModal(false)}
+                className="px-4 py-2 bg-slate-800 text-slate-300 hover:text-white rounded-xl font-bold cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                disabled={publishingBatch || !pdfGenerationStatus?.can_publish}
+                onClick={handlePublishBatch}
+                className="px-5 py-2 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black rounded-xl cursor-pointer shadow-lg transition-colors disabled:opacity-50"
+              >
+                {publishingBatch ? 'Publication en cours...' : 'Confirmer la Publication'}
               </button>
             </div>
           </div>
