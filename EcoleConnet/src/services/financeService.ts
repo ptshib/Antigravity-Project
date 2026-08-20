@@ -474,3 +474,117 @@ export async function getStudentFinanceDossierAdmin(
     return { dossier: null, error: mapPostgresError(err) };
   }
 }
+
+/**
+ * 8. RPC create_school_fee_catalog_item
+ */
+export async function createSchoolFeeCatalogItem(
+  params: import('../types/finance').CreateSchoolFeeCatalogItemParams
+): Promise<{ result: { success: boolean; fee_id: string } | null; error: Error | null }> {
+  try {
+    const { data, error } = await supabase.rpc('create_school_fee_catalog_item', {
+      p_academic_year_id: params.p_academic_year_id,
+      p_fee_type: params.p_fee_type,
+      p_name: params.p_name,
+      p_amount: params.p_amount,
+      p_currency: params.p_currency,
+      p_due_date: params.p_due_date,
+      p_class_id: params.p_class_id || null,
+      p_description: params.p_description || null,
+      p_is_mandatory: params.p_is_mandatory !== false
+    });
+
+    if (error) return { result: null, error: mapPostgresError(error) };
+    return { result: data as { success: boolean; fee_id: string }, error: null };
+  } catch (err: unknown) {
+    return { result: null, error: mapPostgresError(err) };
+  }
+}
+
+/**
+ * 9. RPC update_school_fee_catalog_item
+ */
+export async function updateSchoolFeeCatalogItem(
+  params: import('../types/finance').UpdateSchoolFeeCatalogItemParams
+): Promise<{ result: { success: boolean; fee_id: string } | null; error: Error | null }> {
+  try {
+    const { data, error } = await supabase.rpc('update_school_fee_catalog_item', {
+      p_fee_id: params.p_fee_id,
+      p_name: params.p_name,
+      p_amount: params.p_amount,
+      p_due_date: params.p_due_date,
+      p_description: params.p_description || null,
+      p_is_mandatory: params.p_is_mandatory !== false
+    });
+
+    if (error) return { result: null, error: mapPostgresError(error) };
+    return { result: data as { success: boolean; fee_id: string }, error: null };
+  } catch (err: unknown) {
+    return { result: null, error: mapPostgresError(err) };
+  }
+}
+
+/**
+ * 10. RPC set_school_fee_catalog_item_status
+ */
+export async function setSchoolFeeCatalogItemStatus(
+  feeId: string,
+  isActive: boolean
+): Promise<{ result: { success: boolean; fee_id: string; is_active: boolean } | null; error: Error | null }> {
+  try {
+    const { data, error } = await supabase.rpc('set_school_fee_catalog_item_status', {
+      p_fee_id: feeId,
+      p_is_active: isActive
+    });
+
+    if (error) return { result: null, error: mapPostgresError(error) };
+    return { result: data as { success: boolean; fee_id: string; is_active: boolean }, error: null };
+  } catch (err: unknown) {
+    return { result: null, error: mapPostgresError(err) };
+  }
+}
+
+/**
+ * 11. Consultation du catalogue public.school_fees
+ */
+export async function fetchSchoolFeesCatalog(
+  schoolId: string,
+  academicYearId?: string | null
+): Promise<{ fees: import('../types/finance').SchoolFee[]; error: Error | null }> {
+  try {
+    let query = supabase
+      .from('school_fees')
+      .select('*, class:classes(id, name)')
+      .eq('school_id', schoolId)
+      .order('created_at', { ascending: false });
+
+    if (academicYearId) {
+      query = query.eq('academic_year_id', academicYearId);
+    }
+
+    const { data, error } = await query;
+    if (error) return { fees: [], error: mapPostgresError(error) };
+
+    const formatted: import('../types/finance').SchoolFee[] = (data || []).map((row: any) => ({
+      id: row.id,
+      school_id: row.school_id,
+      academic_year_id: row.academic_year_id,
+      class_id: row.class_id,
+      class_name: row.class?.name || null,
+      name: row.name,
+      description: row.description,
+      fee_type: row.fee_type,
+      amount: Number(row.amount) || 0,
+      currency: row.currency,
+      due_date: row.due_date,
+      is_mandatory: row.is_mandatory,
+      is_active: row.is_active,
+      created_at: row.created_at,
+      updated_at: row.updated_at
+    }));
+
+    return { fees: formatted, error: null };
+  } catch (err: unknown) {
+    return { fees: [], error: mapPostgresError(err) };
+  }
+}

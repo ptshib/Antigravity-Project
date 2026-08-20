@@ -24,19 +24,44 @@ export type PaymentStatus = 'completed' | 'cancelled';
 export interface SchoolFee {
   id: string;
   school_id: string;
+  academic_year_id?: string;
+  class_id?: string | null;
+  class_name?: string | null;
   name: string;
-  code: string | null;
-  description: string | null;
-  fee_type: FeeType;
-  periodicity: FeePeriodicity;
+  code?: string | null;
+  description?: string | null;
+  fee_type: FeeType | string;
+  periodicity?: FeePeriodicity;
   currency: Currency;
   amount: number;
-  education_cycle: 'primary' | 'secondary' | null;
-  level: string | null;
+  due_date?: string;
+  education_cycle?: 'primary' | 'secondary' | null;
+  level?: string | null;
   is_mandatory: boolean;
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface CreateSchoolFeeCatalogItemParams {
+  p_academic_year_id: string;
+  p_fee_type: string;
+  p_name: string;
+  p_amount: number;
+  p_currency: Currency;
+  p_due_date: string;
+  p_class_id?: string | null;
+  p_description?: string | null;
+  p_is_mandatory?: boolean;
+}
+
+export interface UpdateSchoolFeeCatalogItemParams {
+  p_fee_id: string;
+  p_name: string;
+  p_amount: number;
+  p_due_date: string;
+  p_description?: string | null;
+  p_is_mandatory?: boolean;
 }
 
 export interface StudentInvoiceItem {

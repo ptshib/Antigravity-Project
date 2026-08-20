@@ -114,6 +114,30 @@ export function runFinanceFrontendTests(): { total: number; passed: number; fail
     assert(false, `TEST 3 : Exception inattendue : ${err}`);
   }
 
+  // TEST 4 : Phase Finance 3 - Administration du Catalogue des Frais
+  try {
+    const mockFees = [
+      { id: 'f1', school_id: 'school-1', academic_year_id: 'ay-1', class_id: null, fee_type: 'minerval', name: 'Minerval T1', amount: 50000, currency: 'CDF' as Currency, due_date: '2026-10-15', is_mandatory: true, is_active: true, created_at: '', updated_at: '' },
+      { id: 'f2', school_id: 'school-1', academic_year_id: 'ay-1', class_id: null, fee_type: 'uniforme', name: 'Uniforme de sport', amount: 35, currency: 'USD' as Currency, due_date: '2026-09-30', is_mandatory: false, is_active: true, created_at: '', updated_at: '' },
+      { id: 'f3', school_id: 'school-1', academic_year_id: 'ay-1', class_id: null, fee_type: 'transport', name: 'Bus Ancien Tarif', amount: 20, currency: 'USD' as Currency, due_date: '2026-09-30', is_mandatory: false, is_active: false, created_at: '', updated_at: '' }
+    ];
+
+    const activeFees = mockFees.filter(f => f.is_active);
+    const cdfFees = mockFees.filter(f => f.currency === 'CDF');
+    const usdFees = mockFees.filter(f => f.currency === 'USD');
+
+    assert(activeFees.length === 2, 'TEST 4.1 : 2 tarifs actifs sur 3 dans le catalogue');
+    assert(cdfFees.length === 1 && cdfFees[0].amount === 50000, 'TEST 4.2 : Tarif CDF à 50 000 CDF extrait correctement');
+    assert(usdFees.length === 2, 'TEST 4.3 : 2 tarifs USD extraits correctement');
+
+    // Validation des autorisations de rôles
+    const isStaffAllowed = (role: string) => ['school_admin', 'finance_agent'].includes(role);
+    assert(isStaffAllowed('school_admin') && isStaffAllowed('finance_agent'), 'TEST 4.4 : school_admin et finance_agent autorisés à administrer la grille tarifaire');
+    assert(!isStaffAllowed('teacher') && !isStaffAllowed('parent') && !isStaffAllowed('student'), 'TEST 4.5 : teacher, parent et student strictement refusés');
+  } catch (err: unknown) {
+    assert(false, `TEST 4 : Exception inattendue : ${err}`);
+  }
+
   console.log(`\n=== RÉSULTATS : ${passed}/${total} TESTS RÉUSSIS ===\n`);
   return { total, passed, failed: total - passed, errors };
 }

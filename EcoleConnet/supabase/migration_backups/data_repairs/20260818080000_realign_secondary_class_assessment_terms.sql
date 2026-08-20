@@ -1,5 +1,7 @@
--- Migration Phase 2D.3 : Réalignement des Évaluations de la Classe 1A vers le Cycle Secondaire
--- Fichier : supabase/migrations/20260818080000_realign_secondary_class_assessment_terms.sql
+-- Script de Réparation Historique de Données (Data Repair / Production Patch)
+-- Fichier : supabase/migration_backups/data_repairs/20260818080000_realign_secondary_class_assessment_terms.sql
+-- Note d'archivage : Ce script effectue une correction ciblée de données spécifiques à l'établissement 'complexe-scolaire-les-petits-anges'.
+-- Il a été exécuté historiquement en production et ne doit pas faire partie de la chaîne de migrations DDL reproductibles sur une base vide.
 
 BEGIN;
 
@@ -142,53 +144,3 @@ BEGIN
 END $$;
 
 COMMIT;
-
---------------------------------------------------------------------------------
--- MATRICE DE TESTS DOCUMENTÉS (NON EXÉCUTÉS)
---------------------------------------------------------------------------------
-/*
-================================================================================
-TEST 1 : Deux évaluations réalignées vers le 1er Semestre
---------------------------------------------------------------------------------
--- Vérification après exécution :
--- SELECT sa.id, sa.title, sa.status, st.name, st.education_cycle, st.division_type
--- FROM public.school_assessments sa
--- JOIN public.school_terms st ON st.id = sa.term_id
--- WHERE sa.class_id = (SELECT id FROM public.classes WHERE name = '1A' AND school_id = '...')
--- Résultat attendu : 2 lignes avec st.name = '1er Semestre', st.education_cycle = 'secondary', st.division_type = 'semester'.
-
-================================================================================
-TEST 2 : Conservation stricte des IDs, Statuts et Notes
---------------------------------------------------------------------------------
--- Vérification :
--- - Les UUIDs (assessment_id) n'ont pas changé.
--- - "Interrogation de Chimie N°1" conserve status = 'cancelled'.
--- - "Interrogation d’Anglais N°1" conserve status = 'published'.
--- - Toutes les lignes de public.student_grades liées à ces évaluations sont intactes.
-
-================================================================================
-TEST 3 : Aucune altération des Devoirs ou Séances de Présence
---------------------------------------------------------------------------------
--- Vérification :
--- SELECT COUNT(*) FROM public.school_homework WHERE class_id = '...';
--- SELECT COUNT(*) FROM public.attendance_sessions WHERE class_id = '...';
--- Résultat attendu : Données et term_id strictement inchangés.
-
-================================================================================
-TEST 4 : Aucune altération d'une autre classe ou d'une autre école
---------------------------------------------------------------------------------
--- Vérification : Seules les évaluations de la classe 1A du Complexe Scolaire Les Petits Anges sont ciblées.
-
-================================================================================
-TEST 5 : Exécution ultérieure de set_class_education_cycle(1A, 'secondary')
---------------------------------------------------------------------------------
--- Scénario : L'administrateur scolaire clique sur "Définir Cycle" -> "Secondaire (2S/4P)" pour la classe 1A.
--- Résultat attendu : Succès (true). Le contrôle d'incompatibilité passe car les 2 évaluations sont désormais rattachées au 1er Semestre secondaire.
-
-================================================================================
-TEST 6 : Affectation du cycle secondaire sur 1B et 1C
---------------------------------------------------------------------------------
--- Scénario : L'administrateur configure education_cycle = 'secondary' pour 1B et 1C (qui n'ont pas d'évaluations incompatibles).
--- Résultat attendu : Succès immédiat via la RPC set_class_education_cycle().
-================================================================================
-*/
