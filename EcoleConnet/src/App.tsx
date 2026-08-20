@@ -28,6 +28,7 @@ import { SetPasswordPage } from './pages/auth/SetPasswordPage';
 import { AccountSuspendedPage } from './pages/auth/AccountSuspendedPage';
 import { ConfigRequiredPage } from './pages/auth/ConfigRequiredPage';
 import { SuperAdminDashboard } from './pages/superadmin/SuperAdminDashboard';
+import { getRoleRedirectPath, isSchoolPortalRole } from './utils/roleRouting';
 import { SchoolSupervisionPage } from './pages/superadmin/SchoolSupervisionPage';
 import { RealSchoolAdminPortal } from './pages/admin/RealSchoolAdminPortal';
 import { RealTeacherPortal } from './pages/teacher/RealTeacherPortal';
@@ -111,22 +112,20 @@ const MainLayout: React.FC = () => {
       return;
     }
 
-    // 2. If signed in, handle post-login redirects ONLY when on /connexion or /
+    // 2. If signed in, handle post-login redirects ONLY when on /connexion, /, or on non-canonical /app routes
     if (realAuth.user && realAuth.session) {
       if (realAuth.profile && (!realAuth.profile.is_active || realAuth.school?.status === 'suspended' || realAuth.school?.status === 'archived')) {
         if (pathname !== '/acces-suspendu') {
           navigate('/acces-suspendu');
         }
       } else if (realAuth.profile) {
-        const rolePathMap: Record<string, string> = {
-          super_admin: '/app/superadmin',
-          school_admin: '/app/ecole',
-          teacher: '/app/enseignant',
-          parent: '/app/parent',
-          student: '/app/eleve'
-        };
-        const targetRolePath = rolePathMap[realAuth.profile.role] || `/app/${realAuth.profile.role}`;
-        if (pathname === '/connexion' || pathname === '/') {
+        const targetRolePath = getRoleRedirectPath(realAuth.profile.role);
+        const isSuperAdminSubRoute = realAuth.profile.role === 'super_admin' && pathname.startsWith('/app/superadmin/ecoles/');
+        if (
+          pathname === '/connexion' ||
+          pathname === '/' ||
+          (pathname.startsWith('/app') && pathname !== targetRolePath && !isSuperAdminSubRoute)
+        ) {
           navigate(targetRolePath);
         }
       }
@@ -263,7 +262,7 @@ const MainLayout: React.FC = () => {
       );
     }
 
-    if (realAuth.profile?.role === 'school_admin') {
+    if (isSchoolPortalRole(realAuth.profile?.role)) {
       return <RealSchoolAdminPortal />;
     }
 

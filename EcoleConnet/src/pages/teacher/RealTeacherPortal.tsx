@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { TeacherGradesModule } from '../../components/teacher/TeacherGradesModule';
 import { TeacherOfficialSignatureCard } from '../../components/teacher/TeacherOfficialSignatureCard';
+import { TeacherClassFinanceOverview } from '../../components/teacher/TeacherClassFinanceOverview';
 
 export type TeacherTab = 
   | 'overview' 
@@ -19,6 +20,7 @@ export type TeacherTab =
   | 'schedule' 
   | 'homework' 
   | 'grades' 
+  | 'finance'
   | 'messages' 
   | 'profile';
 
@@ -78,6 +80,7 @@ export const RealTeacherPortal: React.FC = () => {
   const { showToast } = useNotifications();
 
   const [activeTab, setActiveTab] = useState<TeacherTab>('overview');
+  const [selectedFinanceClassId, setSelectedFinanceClassId] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [accessError, setAccessError] = useState<string | null>(null);
 
@@ -794,6 +797,19 @@ export const RealTeacherPortal: React.FC = () => {
             Notes {gradesCount > 0 ? `(${gradesCount})` : ''}
           </button>
           <button
+            onClick={() => {
+              setActiveTab('finance');
+              if (!selectedFinanceClassId && groupedAssignments.length > 0) {
+                setSelectedFinanceClassId(groupedAssignments[0].class_id);
+              }
+            }}
+            className={`px-3.5 py-1.5 rounded-xl cursor-pointer transition-colors whitespace-nowrap ${
+              activeTab === 'finance' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Statut Financier Classe
+          </button>
+          <button
             onClick={() => setActiveTab('messages')}
             className={`px-3.5 py-1.5 rounded-xl cursor-pointer transition-colors whitespace-nowrap ${
               activeTab === 'messages' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'
@@ -845,6 +861,41 @@ export const RealTeacherPortal: React.FC = () => {
             <span>Faire l'Appel de Présence</span>
           </button>
         </div>
+
+        {/* TAB FINANCE */}
+        {activeTab === 'finance' && (
+          <div className="space-y-6">
+            <div className="p-4 bg-slate-900 border border-slate-800 rounded-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <span className="text-[10px] font-extrabold text-amber-400 uppercase tracking-wider block">
+                  Sélection de la classe
+                </span>
+                <h3 className="text-sm font-bold text-white">Consulter le statut d'une classe attribuée</h3>
+              </div>
+
+              <select
+                value={selectedFinanceClassId}
+                onChange={(e) => setSelectedFinanceClassId(e.target.value)}
+                className="w-full sm:w-64 bg-slate-950 border border-slate-700 text-white text-xs font-bold px-3 py-2 rounded-xl"
+              >
+                <option value="">-- Choisir une classe --</option>
+                {groupedAssignments.map((g) => (
+                  <option key={g.class_id} value={g.class_id}>
+                    {g.class_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selectedFinanceClassId ? (
+              <TeacherClassFinanceOverview classId={selectedFinanceClassId} />
+            ) : (
+              <div className="p-8 bg-slate-900 border border-slate-800 rounded-3xl text-center text-xs text-slate-400">
+                Veuillez sélectionner une classe ci-dessus pour afficher la synthèse de régularité.
+              </div>
+            )}
+          </div>
+        )}
 
         {/* TAB 1: OVERVIEW */}
         {activeTab === 'overview' && (

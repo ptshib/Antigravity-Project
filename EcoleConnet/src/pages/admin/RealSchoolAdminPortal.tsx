@@ -36,11 +36,13 @@ import {
   Lock,
   Unlock,
   CalendarDays,
-  Sliders
+  Sliders,
+  DollarSign
 } from 'lucide-react';
 import { AdminGradesModule } from '../../components/admin/AdminGradesModule';
 import { ClassSubjectCoefficientsModule } from '../../components/admin/ClassSubjectCoefficientsModule';
 import { SchoolOfficialIdentityModule } from '../../components/admin/SchoolOfficialIdentityModule';
+import { FinanceDashboardModule } from '../../components/admin/finance/FinanceDashboardModule';
 
 interface SubjectRow {
   id: string;
@@ -266,6 +268,7 @@ interface HomeworkAdminRow {
 
 type SchoolAdminTab =
   | 'vue_densemble'
+  | 'finance'
   | 'annees_scolaires'
   | 'trimestres'
   | 'matieres'
@@ -285,8 +288,19 @@ export const RealSchoolAdminPortal: React.FC = () => {
   const { profile, school, signOutReal } = useRealAuth();
   const { showToast } = useNotifications();
 
-  // Active Tab State
-  const [activeTab, setActiveTab] = useState<SchoolAdminTab>('vue_densemble');
+  const isFinanceAgent = profile?.role === 'finance_agent';
+
+  // Active Tab State (finance_agent defaults and is locked to 'finance')
+  const [activeTab, setActiveTab] = useState<SchoolAdminTab>(() =>
+    profile?.role === 'finance_agent' ? 'finance' : 'vue_densemble'
+  );
+
+  useEffect(() => {
+    if (isFinanceAgent && activeTab !== 'finance') {
+      setActiveTab('finance');
+    }
+  }, [isFinanceAgent, activeTab]);
+
   const [loading, setLoading] = useState<boolean>(true);
   const [adminAssessmentsCount, setAdminAssessmentsCount] = useState<number>(0);
 
@@ -509,6 +523,10 @@ export const RealSchoolAdminPortal: React.FC = () => {
   // Fetch All School Data (Locked strictly to current school_id)
   const loadSchoolPortalData = useCallback(async () => {
     if (!school?.id) return;
+    if (profile?.role === 'finance_agent') {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
 
     try {
@@ -643,7 +661,7 @@ export const RealSchoolAdminPortal: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [school?.id]);
+  }, [school?.id, profile?.role]);
 
   // Handler - Annulation administrative de devoir avec motif
   const handleAdminCancelHomework = async (e: React.FormEvent) => {
@@ -676,8 +694,12 @@ export const RealSchoolAdminPortal: React.FC = () => {
   };
 
   useEffect(() => {
-    loadSchoolPortalData();
-  }, [loadSchoolPortalData]);
+    if (profile?.role !== 'finance_agent') {
+      loadSchoolPortalData();
+    } else {
+      setLoading(false);
+    }
+  }, [loadSchoolPortalData, profile?.role]);
 
   // Handlers - Academic Year
   const handleCreateYear = async (e: React.FormEvent) => {
@@ -2070,7 +2092,9 @@ export const RealSchoolAdminPortal: React.FC = () => {
         <div className="flex items-center gap-3">
           <div className="text-right hidden sm:block">
             <p className="text-xs font-bold text-white">{profile?.first_name} {profile?.last_name}</p>
-            <p className="text-[10px] text-slate-400">Administrateur d'Établissement</p>
+            <p className="text-[10px] text-slate-400">
+              {profile?.role === 'finance_agent' ? 'Agent financier' : 'Administrateur d\'Établissement'}
+            </p>
           </div>
           <button
             onClick={signOutReal}
@@ -2086,6 +2110,7 @@ export const RealSchoolAdminPortal: React.FC = () => {
       <nav className="bg-slate-900/80 border-b border-slate-800 px-4 sm:px-6 py-2 overflow-x-auto scrollbar-none flex items-center gap-1 text-xs">
         {[
           { id: 'vue_densemble', label: 'Vue d’ensemble', icon: Activity },
+          { id: 'finance', label: 'Finance & Frais', icon: DollarSign },
           { id: 'annees_scolaires', label: `Années (${academicYears.length})`, icon: Calendar },
           { id: 'trimestres', label: `Calendrier Scolaire (${schoolTerms.length})`, icon: Clock },
           { id: 'matieres', label: `Matières (${subjects.length})`, icon: BookMarked },
@@ -2100,30 +2125,40 @@ export const RealSchoolAdminPortal: React.FC = () => {
           { id: 'affectations', label: `Affectations (${assignments.length})`, icon: Layers },
           { id: 'importations', label: `Importations (${importJobs.length})`, icon: Upload },
           { id: 'parametres', label: 'Paramètres', icon: Settings }
-        ].map(tab => {
-          const IconComp = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as SchoolAdminTab)}
-              className={`px-3.5 py-2 rounded-xl font-bold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
-                isActive
-                  ? 'bg-amber-500 text-slate-950 font-black shadow-md'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <IconComp className="w-3.5 h-3.5" />
-              <span>{tab.label}</span>
-            </button>
-          );
-        })}
+        ]
+          .filter(tab => !isFinanceAgent || tab.id === 'finance')
+          .map(tab => {
+            const IconComp = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as SchoolAdminTab)}
+                className={`px-3.5 py-2 rounded-xl font-bold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                  isActive
+                    ? 'bg-amber-500 text-slate-950 font-black shadow-md'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                }`}
+              >
+                <IconComp className="w-3.5 h-3.5" />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
       </nav>
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-8">
-        {/* TAB 1: VUE D'ENSEMBLE */}
-        {activeTab === 'vue_densemble' && (
+        {/* TAB FINANCE (Exclusif finance_agent ou onglet actif) */}
+        {(isFinanceAgent || activeTab === 'finance') && school?.id && (
+          <FinanceDashboardModule schoolId={school.id} />
+        )}
+
+        {/* ONGLETS ADMINISTRATIFS (Masqués pour finance_agent) */}
+        {!isFinanceAgent && (
+          <>
+            {/* TAB 1: VUE D'ENSEMBLE */}
+            {activeTab === 'vue_densemble' && (
           <div className="space-y-6">
             {/* Onboarding Wizard Card */}
             <div className="p-6 bg-gradient-to-r from-slate-900 via-slate-900 to-amber-950/40 rounded-3xl border border-amber-500/30 space-y-4 shadow-xl">
@@ -4148,6 +4183,8 @@ export const RealSchoolAdminPortal: React.FC = () => {
             schoolPeriods={schoolPeriods}
             onStatsChange={count => setAdminAssessmentsCount(count)}
           />
+        )}
+          </>
         )}
       </main>
 

@@ -57,6 +57,7 @@ export const Modal: React.FC<ModalProps> = ({
             {title}
           </h3>
           <button
+            type="button"
             onClick={onClose}
             className={`p-1.5 rounded-xl transition-colors cursor-pointer ${
               darkMode

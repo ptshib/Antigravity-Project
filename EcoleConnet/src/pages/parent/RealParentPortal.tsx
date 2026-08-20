@@ -19,10 +19,12 @@ import {
   User,
   Download,
   FileCheck,
-  ShieldCheck
+  ShieldCheck,
+  DollarSign
 } from 'lucide-react';
 import { downloadReportCardPdfBlob, isPublishedPdfMetadataComplete } from '../../services/reportCardPdfService.ts';
 import { buildGetSchoolCalendarParams, extractAndSortCalendarPeriods } from '../../services/calendarService.ts';
+import { ParentFinanceModule } from '../../components/parent/ParentFinanceModule';
 
 interface LinkedChild {
   link_id: string;
@@ -87,6 +89,9 @@ export const RealParentPortal: React.FC = () => {
   // Calendar
   const [calendarPeriods, setCalendarPeriods] = useState<any[]>([]);
   const [selectedPeriodId, setSelectedPeriodId] = useState<string>('');
+
+  // Navigation Tabs (Academic vs Finance)
+  const [parentViewTab, setParentViewTab] = useState<'academic' | 'finance'>('academic');
 
   // Academic Results & Official Report Card (Phase 2F.3C)
   const [loadingResults, setLoadingResults] = useState<boolean>(false);
@@ -481,7 +486,36 @@ export const RealParentPortal: React.FC = () => {
               </div>
             </div>
 
-            {/* Official Report Card Download Banner (Phase 2F.3C) */}
+            {/* Navigation Sub-Tabs (Academic vs Finance) */}
+            <div className="flex border-b border-slate-800 pb-1 gap-4 text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => setParentViewTab('academic')}
+                className={`pb-2.5 transition border-b-2 flex items-center gap-2 cursor-pointer ${parentViewTab === 'academic' ? 'border-indigo-500 text-indigo-400 font-extrabold' : 'border-transparent text-slate-400 hover:text-white'}`}
+              >
+                <Award className="w-4 h-4" />
+                <span>Résultats Scolaires & Bulletins</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setParentViewTab('finance')}
+                className={`pb-2.5 transition border-b-2 flex items-center gap-2 cursor-pointer ${parentViewTab === 'finance' ? 'border-amber-500 text-amber-400 font-extrabold' : 'border-transparent text-slate-400 hover:text-white'}`}
+              >
+                <DollarSign className="w-4 h-4" />
+                <span>Scolarité & Situation Financière</span>
+              </button>
+            </div>
+
+            {/* FINANCE VIEW */}
+            {parentViewTab === 'finance' && selectedChildId && (
+              <ParentFinanceModule studentId={selectedChildId} />
+            )}
+
+            {/* ACADEMIC VIEW */}
+            {parentViewTab === 'academic' && (
+              <>
+                {/* Official Report Card Download Banner (Phase 2F.3C) */}
             {officialReportCard && activeChild && (
               <div className="p-6 bg-gradient-to-r from-amber-500/20 via-slate-900 to-indigo-950/40 rounded-3xl border border-amber-500/40 shadow-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
@@ -669,9 +703,11 @@ export const RealParentPortal: React.FC = () => {
                 </div>
               </div>
             )}
-          </div>
+          </>
         )}
-      </main>
+      </div>
+    )}
+  </main>
 
       {/* Subject Assessments Detail Modal */}
       {selectedSubjectDetail && (

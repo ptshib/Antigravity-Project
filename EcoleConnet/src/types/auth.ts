@@ -1,4 +1,4 @@
-export type RealRole = 'super_admin' | 'school_admin' | 'teacher' | 'parent' | 'student';
+export type RealRole = 'super_admin' | 'school_admin' | 'finance_agent' | 'teacher' | 'parent' | 'student';
 
 export interface RealProfile {
   id: string;
