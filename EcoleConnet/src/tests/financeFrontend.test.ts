@@ -1,13 +1,13 @@
 // Fichier : src/tests/financeFrontend.test.ts
 // Tests unitaires frontend automatisés pour la Phase Finance 2 ÉcoleConnect
 
-import { validateRecordPaymentResult } from '../services/financeService';
+import { validateRecordPaymentResult, validateCreateDraftInvoiceResult } from '../services/financeService';
 import type { Currency } from '../types/finance';
 
 /**
  * Suite de tests automatisés frontend (Sans mutation Supabase)
  */
-export function runFinanceFrontendTests(): { total: number; passed: number; failed: number; errors: string[] } {
+export async function runFinanceFrontendTests(): Promise<{ total: number; passed: number; failed: number; errors: string[] }> {
   const errors: string[] = [];
   let passed = 0;
   let total = 0;
@@ -136,6 +136,98 @@ export function runFinanceFrontendTests(): { total: number; passed: number; fail
     assert(!isStaffAllowed('teacher') && !isStaffAllowed('parent') && !isStaffAllowed('student'), 'TEST 4.5 : teacher, parent et student strictement refusés');
   } catch (err: unknown) {
     assert(false, `TEST 4 : Exception inattendue : ${err}`);
+  }
+
+  // TEST 5 : Hotfix Brouillon - Parsing de validateCreateDraftInvoiceResult et Clé d'Idempotence
+  try {
+    const draftPayload = {
+      success: true,
+      is_idempotent_replay: false,
+      invoice_id: 'a1000000-0000-4000-a000-000000000001',
+      invoice_number: 'INV-2026-000001',
+      sequence_number: 1,
+      status: 'draft',
+      currency: 'USD',
+      total_amount: 10.00,
+      due_date: '2026-09-15',
+      created_at: '2026-08-20T20:00:00Z'
+    };
+
+    const validated = validateCreateDraftInvoiceResult(draftPayload);
+    assert(validated.invoice_id === 'a1000000-0000-4000-a000-000000000001', 'TEST 5.1 : invoice_id extrait correctement');
+    assert(validated.invoice_number === 'INV-2026-000001', 'TEST 5.2 : invoice_number extrait correctement');
+    assert(validated.sequence_number === 1, 'TEST 5.3 : sequence_number extrait correctement');
+    assert(validated.is_idempotent_replay === false, 'TEST 5.4 : is_idempotent_replay initial = false');
+
+    const replayPayload = {
+      ...draftPayload,
+      is_idempotent_replay: true
+    };
+    const validatedReplay = validateCreateDraftInvoiceResult(replayPayload);
+    assert(validatedReplay.is_idempotent_replay === true, 'TEST 5.5 : Rejeu d’idempotence reconnu avec is_idempotent_replay = true');
+  } catch (err: unknown) {
+    assert(false, `TEST 5 : Exception inattendue : ${err}`);
+  }
+
+  // TEST 6 : Rejet des réponses incomplètes / Absence de Fallbacks
+  try {
+    let errorCaught = false;
+
+    // Test 6.1: Absence de sequence_number
+    try {
+      validateCreateDraftInvoiceResult({
+        success: true,
+        invoice_id: 'a1000000-0000-4000-a000-000000000001',
+        invoice_number: 'INV-1',
+        status: 'draft',
+        currency: 'USD',
+        total_amount: 10,
+        created_at: '2026-08-20T20:00:00Z',
+        is_idempotent_replay: false
+      });
+    } catch {
+      errorCaught = true;
+    }
+    assert(errorCaught, 'TEST 6.1 : Rejet d’un retour sans sequence_number (zéro fallback)');
+
+    // Test 6.2: Format UUID invalide pour invoice_id
+    errorCaught = false;
+    try {
+      validateCreateDraftInvoiceResult({
+        success: true,
+        invoice_id: 'invalid-id',
+        invoice_number: 'INV-1',
+        sequence_number: 1,
+        status: 'draft',
+        currency: 'USD',
+        total_amount: 10,
+        created_at: '2026-08-20T20:00:00Z',
+        is_idempotent_replay: false
+      });
+    } catch {
+      errorCaught = true;
+    }
+    assert(errorCaught, 'TEST 6.2 : Rejet d’un UUID de facture invalide');
+
+    // Test 6.3: Simulation de verrou anti-double-clic avec compteur d'appels
+    let callCount = 0;
+    const isSubmittingRef = { current: false };
+    const hasCompletedRef = { current: false };
+
+    const simulateSubmit = async () => {
+      if (isSubmittingRef.current || hasCompletedRef.current) return;
+      isSubmittingRef.current = true;
+      callCount++;
+      await new Promise(r => setTimeout(r, 10));
+      hasCompletedRef.current = true;
+      isSubmittingRef.current = false;
+    };
+
+    // Lancement simultané de 3 clics/Enter rapides
+    await Promise.all([simulateSubmit(), simulateSubmit(), simulateSubmit()]);
+    assert(callCount === 1, 'TEST 6.3 : Verrou synchrone useRef garantit exactement 1 appel sous clics simultanés');
+  } catch (err: unknown) {
+    assert(false, `TEST 6 : Exception inattendue : ${err}`);
   }
 
   console.log(`\n=== RÉSULTATS : ${passed}/${total} TESTS RÉUSSIS ===\n`);

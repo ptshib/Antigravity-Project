@@ -4,6 +4,8 @@
 import { supabase } from '../lib/supabase';
 import type {
   CreateDraftInvoiceParams,
+  CreateDraftInvoiceResult,
+  VoidDraftInvoiceParams,
   RecordPaymentParams,
   RecordPaymentResult,
   ParentStudentFinancesResult,
@@ -92,11 +94,71 @@ function mapPostgresError(error: unknown): Error {
 // VALIDATEURS ET TYPE GUARDS EXPLICITES POUR LES 7 RPCs (VALIDE CHAQUE RÉPONSE)
 // ---------------------------------------------------------------------------
 
-function validateInvoiceId(data: unknown): string {
-  if (typeof data === 'string' && data.length > 0) {
-    return data;
+export function validateCreateDraftInvoiceResult(data: unknown): CreateDraftInvoiceResult {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Format de réponse invalide pour create_draft_student_invoice (non-objet).');
   }
-  throw new FinanceServiceError('La RPC create_draft_student_invoice a renvoyé une réponse invalide.');
+
+  if (data['success'] !== true) {
+    const errorMsg = typeof data['error'] === 'string' ? data['error'] : 'La création de la facture a échoué côté serveur.';
+    throw new FinanceServiceError(errorMsg);
+  }
+
+  const invoice_id = getStringProperty(data, 'invoice_id');
+  if (!invoice_id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invoice_id)) {
+    throw new FinanceServiceError('Propriété obligatoire "invoice_id" manquante ou format UUID invalide.');
+  }
+
+  const invoice_number = getStringProperty(data, 'invoice_number');
+  if (!invoice_number || invoice_number.trim() === '') {
+    throw new FinanceServiceError('Propriété obligatoire "invoice_number" manquante ou vide.');
+  }
+
+  const sequence_number = getNumberProperty(data, 'sequence_number');
+  if (sequence_number === null || sequence_number <= 0) {
+    throw new FinanceServiceError('Propriété obligatoire "sequence_number" manquante ou non strictement positive.');
+  }
+
+  const status = getStringProperty(data, 'status');
+  if (status !== 'draft') {
+    throw new FinanceServiceError(`Statut invalide pour un brouillon créé : attendu "draft", reçu "${status}".`);
+  }
+
+  const currency = getStringProperty(data, 'currency');
+  if (currency !== 'USD' && currency !== 'CDF') {
+    throw new FinanceServiceError(`Devise invalide dans le retour RPC : attendu "USD" ou "CDF", reçu "${currency}".`);
+  }
+
+  const total_amount = getNumberProperty(data, 'total_amount');
+  if (total_amount === null || total_amount <= 0) {
+    throw new FinanceServiceError('Propriété obligatoire "total_amount" manquante ou non strictement positive.');
+  }
+
+  const created_at = getStringProperty(data, 'created_at');
+  if (!created_at || isNaN(Date.parse(created_at))) {
+    throw new FinanceServiceError('Propriété obligatoire "created_at" manquante ou horodatage ISO invalide.');
+  }
+
+  if (typeof data['is_idempotent_replay'] !== 'boolean') {
+    throw new FinanceServiceError('Propriété obligatoire "is_idempotent_replay" manquante ou non booléenne.');
+  }
+
+  const due_date = data['due_date'] !== null && data['due_date'] !== undefined
+    ? String(data['due_date'])
+    : null;
+
+  return {
+    success: true,
+    is_idempotent_replay: Boolean(data['is_idempotent_replay']),
+    invoice_id,
+    invoice_number,
+    sequence_number,
+    status: 'draft',
+    currency: currency as Currency,
+    total_amount,
+    due_date,
+    created_at
+  };
 }
 
 function validateIssueInvoiceResponse(data: unknown): unknown {
@@ -340,21 +402,45 @@ function validateStudentFinanceDossierAdmin(data: unknown): StudentFinanceDossie
 /**
  * 1. RPC create_draft_student_invoice
  */
-export async function createDraftStudentInvoice(params: CreateDraftInvoiceParams): Promise<{ invoiceId: string | null; error: Error | null }> {
+export async function createDraftStudentInvoice(params: CreateDraftInvoiceParams): Promise<{ result: CreateDraftInvoiceResult | null; invoiceId: string | null; error: Error | null }> {
   try {
     const { data, error } = await supabase.rpc('create_draft_student_invoice', {
       p_student_id: params.p_student_id,
       p_academic_year_id: params.p_academic_year_id,
       p_due_date: params.p_due_date || null,
-      p_currency: params.p_currency || 'USD',
-      p_items: params.p_items
+      p_currency: params.p_currency,
+      p_items: params.p_items,
+      p_idempotency_key: params.p_idempotency_key,
+      p_issue_date: params.p_issue_date || new Date().toISOString().split('T')[0],
+      p_notes: params.p_notes || null
     });
 
-    if (error) return { invoiceId: null, error: mapPostgresError(error) };
-    const invoiceId = validateInvoiceId(data);
-    return { invoiceId, error: null };
+    if (error) return { result: null, invoiceId: null, error: mapPostgresError(error) };
+    const result = validateCreateDraftInvoiceResult(data);
+    return { result, invoiceId: result.invoice_id, error: null };
   } catch (err: unknown) {
-    return { invoiceId: null, error: mapPostgresError(err) };
+    return { result: null, invoiceId: null, error: mapPostgresError(err) };
+  }
+}
+
+/**
+ * RPC void_draft_student_invoice (Annulation auditable d'un brouillon)
+ */
+export async function voidDraftStudentInvoice(params: VoidDraftInvoiceParams): Promise<{ success: boolean; error: Error | null }> {
+  try {
+    const { data, error } = await supabase.rpc('void_draft_student_invoice', {
+      p_invoice_id: params.p_invoice_id,
+      p_cancel_reason: params.p_cancel_reason
+    });
+
+    if (error) return { success: false, error: mapPostgresError(error) };
+    const isSuccess = isObject(data) && data['success'] === true;
+    if (!isSuccess) {
+      return { success: false, error: new FinanceServiceError('La RPC void_draft_student_invoice n’a pas confirmé l’annulation.') };
+    }
+    return { success: true, error: null };
+  } catch (err: unknown) {
+    return { success: false, error: mapPostgresError(err) };
   }
 }
 

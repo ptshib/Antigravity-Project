@@ -145,7 +145,20 @@ export interface PaymentReceipt {
   created_at: string;
 }
 
-// Paramètres de création de facture brouillon
+// Résultat et paramètres de création de facture brouillon
+export interface CreateDraftInvoiceResult {
+  success: boolean;
+  is_idempotent_replay?: boolean;
+  invoice_id: string;
+  invoice_number: string;
+  sequence_number?: number;
+  status: string;
+  currency: Currency;
+  total_amount: number;
+  due_date?: string | null;
+  created_at: string;
+}
+
 export interface CreateDraftInvoiceItemInput {
   fee_name: string;
   fee_type?: FeeType;
@@ -158,9 +171,16 @@ export interface CreateDraftInvoiceParams {
   p_student_id: string;
   p_academic_year_id: string;
   p_due_date?: string | null;
-  p_currency?: Currency;
+  p_currency: Currency;
   p_items: CreateDraftInvoiceItemInput[];
+  p_idempotency_key: string;
+  p_issue_date?: string | null;
   p_notes?: string | null;
+}
+
+export interface VoidDraftInvoiceParams {
+  p_invoice_id: string;
+  p_cancel_reason: string;
 }
 
 // Paramètres d'encaissement de paiement

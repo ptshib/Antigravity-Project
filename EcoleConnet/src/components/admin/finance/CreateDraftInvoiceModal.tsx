@@ -61,8 +61,25 @@ export const CreateDraftInvoiceModal: React.FC<CreateDraftInvoiceModalProps> = (
   const [notes, setNotes] = useState<string>('');
   const [items, setItems] = useState<CreateDraftInvoiceItemInput[]>([]);
 
-  // Submitting State
+  // Submitting & Double-Click Lock States
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const isSubmittingRef = React.useRef<boolean>(false);
+  const hasCompletedRef = React.useRef<boolean>(false);
+  const idempotencyKeyRef = React.useRef<string | null>(null);
+
+  // Generate an idempotency key once per modal open intention
+  useEffect(() => {
+    if (isOpen && !idempotencyKeyRef.current) {
+      idempotencyKeyRef.current = typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `IDEMP-INV-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    }
+    if (!isOpen) {
+      isSubmittingRef.current = false;
+      hasCompletedRef.current = false;
+      idempotencyKeyRef.current = null;
+    }
+  }, [isOpen]);
 
   // Fetch student and catalog options on modal open
   useEffect(() => {
@@ -165,9 +182,13 @@ export const CreateDraftInvoiceModal: React.FC<CreateDraftInvoiceModalProps> = (
   // Calculate Total
   const calculatedTotal = items.reduce((sum, item) => sum + (Number(item.unit_price) || 0) * (Number(item.quantity) || 1), 0);
 
-  // Submit Handler
+  // Submit Handler with anti-double submission lock & stable idempotency key
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (isSubmittingRef.current || hasCompletedRef.current) {
+      return;
+    }
 
     if (!selectedStudentId) {
       showToast('Veuillez sélectionner un élève.', 'urgent');
@@ -193,31 +214,56 @@ export const CreateDraftInvoiceModal: React.FC<CreateDraftInvoiceModalProps> = (
       }
     }
 
+    if (!idempotencyKeyRef.current) {
+      idempotencyKeyRef.current = typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `IDEMP-INV-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    }
+
+    isSubmittingRef.current = true;
     setIsSubmitting(true);
+
     try {
-      const { invoiceId, error } = await createDraftStudentInvoice({
+      const { result, error } = await createDraftStudentInvoice({
         p_student_id: selectedStudentId,
         p_academic_year_id: selectedAcademicYearId,
         p_due_date: dueDate || null,
         p_currency: currency,
         p_items: items,
-        p_notes: notes || null
+        p_notes: notes || null,
+        p_idempotency_key: idempotencyKeyRef.current
       });
 
       if (error) {
         showToast(`Erreur création facture : ${error.message}`, 'urgent');
-      } else if (invoiceId) {
-        showToast('Facture brouillon créée avec succès !', 'success');
-        onSuccess(invoiceId);
-        onClose();
-        // Reset form
+        isSubmittingRef.current = false;
+        setIsSubmitting(false);
+      } else if (result && result.invoice_id) {
+        hasCompletedRef.current = true;
+        const msg = result.is_idempotent_replay
+          ? `Facture brouillon ${result.invoice_number} déjà existante (rejeu d’idempotence).`
+          : `Facture brouillon ${result.invoice_number} créée avec succès !`;
+        showToast(msg, 'success');
+
+        // Refresh parent, safely catching any secondary refetch error
+        try {
+          onSuccess(result.invoice_id);
+        } catch (refetchErr) {
+          console.error('[CreateDraftInvoiceModal] Erreur rafraîchissement secondaire (non bloquante):', refetchErr);
+        }
+
+        // Reset & Close
         setSelectedStudentId('');
         setItems([]);
         setNotes('');
+        idempotencyKeyRef.current = null;
+        onClose();
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Erreur inattendue';
       showToast(`Erreur inattendue : ${msg}`, 'urgent');
+      isSubmittingRef.current = false;
+      setIsSubmitting(false);
     } finally {
       setIsSubmitting(false);
     }

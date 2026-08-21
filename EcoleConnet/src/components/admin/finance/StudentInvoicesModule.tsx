@@ -9,10 +9,12 @@ import type { StudentInvoice, RecordPaymentResult } from '../../../types/finance
 import { FormattedAmount, InvoiceStatusBadge } from '../../common/CurrencyBadge';
 import { Search, Plus, Send, CreditCard, FolderOpen } from 'lucide-react';
 import { CreateDraftInvoiceModal } from './CreateDraftInvoiceModal';
+import { CancelDraftInvoiceModal } from './CancelDraftInvoiceModal';
 import { PaymentEntryModal } from './PaymentEntryModal';
 import { PaymentReceiptModal } from './PaymentReceiptModal';
 import type { PaymentReceiptData } from './PaymentReceiptModal';
 import { StudentFinanceDossierModal } from './StudentFinanceDossierModal';
+import { Ban } from 'lucide-react';
 
 interface StudentInvoicesModuleProps {
   schoolId: string;
@@ -30,6 +32,7 @@ export const StudentInvoicesModule: React.FC<StudentInvoicesModuleProps> = ({ sc
 
   // Modals
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
+  const [cancelDraftInvoice, setCancelDraftInvoice] = useState<StudentInvoice | null>(null);
   const [paymentInvoice, setPaymentInvoice] = useState<StudentInvoice | null>(null);
   const [activeReceipt, setActiveReceipt] = useState<PaymentReceiptData | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState<boolean>(false);
@@ -269,17 +272,27 @@ export const StudentInvoicesModule: React.FC<StudentInvoicesModuleProps> = ({ sc
 
                     <td className="px-4 py-3 text-center">
                       <div className="flex items-center justify-center gap-1.5">
-                        {/* Draft -> Issue Button */}
+                        {/* Draft -> Issue & Cancel Buttons */}
                         {inv.status === 'draft' && (
-                          <button
-                            onClick={() => handleIssueInvoice(inv.id)}
-                            disabled={issuingInvoiceId === inv.id}
-                            className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[11px] font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                            title="Émettre officiellement cette facture"
-                          >
-                            <Send className="w-3 h-3" />
-                            <span>Émettre</span>
-                          </button>
+                          <>
+                            <button
+                              onClick={() => handleIssueInvoice(inv.id)}
+                              disabled={issuingInvoiceId === inv.id}
+                              className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[11px] font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                              title="Émettre officiellement cette facture"
+                            >
+                              <Send className="w-3 h-3" />
+                              <span>Émettre</span>
+                            </button>
+
+                            <button
+                              onClick={() => setCancelDraftInvoice(inv)}
+                              className="p-1 text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                              title="Annuler ce brouillon de facture"
+                            >
+                              <Ban className="w-3.5 h-3.5" />
+                            </button>
+                          </>
                         )}
 
                         {/* Issued / Partially Paid -> Pay Button */}
@@ -323,6 +336,13 @@ export const StudentInvoicesModule: React.FC<StudentInvoicesModuleProps> = ({ sc
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
         schoolId={schoolId}
+        onSuccess={() => fetchInvoices()}
+      />
+
+      <CancelDraftInvoiceModal
+        isOpen={!!cancelDraftInvoice}
+        onClose={() => setCancelDraftInvoice(null)}
+        invoice={cancelDraftInvoice}
         onSuccess={() => fetchInvoices()}
       />
 
