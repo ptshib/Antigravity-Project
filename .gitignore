@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/Us-and-God/
+/Us-and-God-ParentBackup/
