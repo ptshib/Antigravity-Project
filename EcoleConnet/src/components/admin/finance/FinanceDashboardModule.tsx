@@ -1,7 +1,7 @@
 // Fichier : src/components/admin/finance/FinanceDashboardModule.tsx
 // Tableau de bord financier principal pour le Portail Administrateur & Agent Financier
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { computeFinanceDashboardKPIs, fetchAllSchoolInvoices, getSchoolAgingSummary } from '../../../services/financeService';
 import type { AgingSummaryResponse } from '../../../types/finance';
 import { FormattedAmount } from '../../common/CurrencyBadge';
@@ -56,25 +56,53 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
   const [agingLoading, setAgingLoading] = useState<boolean>(false);
   const [agingError, setAgingError] = useState<string | null>(null);
 
+  const agingFetchLockRef = useRef(false);
+  const isMountedRef = useRef(true);
+  const hasLoadedAgingRef = useRef(false);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const fetchAgingData = useCallback(async () => {
-    setAgingLoading(true);
-    setAgingError(null);
+    // Verrou synchrone synchrone avant le premier await
+    if (agingFetchLockRef.current) return;
+    agingFetchLockRef.current = true;
+
+    if (isMountedRef.current) {
+      setAgingLoading(true);
+      setAgingError(null);
+    }
+
     try {
       const summaryRes = await getSchoolAgingSummary();
+      if (!isMountedRef.current) return;
       setAgingSummary(summaryRes);
+      setAgingError(null);
     } catch (err: unknown) {
+      if (!isMountedRef.current) return;
       const msg = err instanceof Error ? err.message : 'Erreur lors du chargement de la balance âgée.';
       setAgingError(msg);
     } finally {
-      setAgingLoading(false);
+      agingFetchLockRef.current = false;
+      if (isMountedRef.current) {
+        setAgingLoading(false);
+      }
     }
   }, []);
 
+  // Chargement initial unique à l'ouverture de l'onglet créances (sécurisé contre la boucle d'erreur & StrictMode)
   useEffect(() => {
-    if (activeSubTab === 'creances' && !agingSummary && !agingLoading) {
+    if (activeSubTab === 'creances' && !hasLoadedAgingRef.current) {
+      hasLoadedAgingRef.current = true;
       fetchAgingData();
     }
-  }, [activeSubTab, agingSummary, agingLoading, fetchAgingData]);
+  }, [activeSubTab, fetchAgingData]);
+
+
 
   const fetchKpis = useCallback(async () => {
     try {

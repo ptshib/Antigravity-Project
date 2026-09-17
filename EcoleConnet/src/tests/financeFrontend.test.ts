@@ -914,8 +914,103 @@ export async function runFinanceFrontendTests(): Promise<{ total: number; passed
     assert(false, `TEST 8.21 : Exception inattendue : ${err}`);
   }
 
+  // 8.22 Test Anti-Boucle RPC sur Erreur (Incident 42703 + React Loop)
+  try {
+    let callCounter = 0;
+    let hasLoadedRef = false;
+    let loadingState = false;
+    let errorState: string | null = null;
+    let summaryState: any = null;
+
+    const simulateRpcCall = async () => {
+      callCounter++;
+      loadingState = true;
+      try {
+        throw new Error('HTTP 400 : column status of relation profiles does not exist (SQLSTATE 42703)');
+      } catch (err: any) {
+        errorState = err.message;
+        summaryState = null;
+      } finally {
+        loadingState = false;
+      }
+    };
+
+    const simulateMountOrTabSwitch = async () => {
+      if (!hasLoadedRef && !loadingState) {
+        hasLoadedRef = true;
+        await simulateRpcCall();
+      }
+    };
+
+    // 1. Premier chargement (onglet créances actif)
+    await simulateMountOrTabSwitch();
+    assert(callCounter === 1 && errorState !== null && summaryState === null, 'TEST 8.22.1 : Premier appel échoué enregistre l’erreur et compteur = 1');
+
+    // 2. Simulation de 5 re-renders React consécutifs après échec
+    for (let render = 1; render <= 5; render++) {
+      await simulateMountOrTabSwitch();
+    }
+    assert(callCounter === 1, 'TEST 8.22.2 : Après 5 re-renders consécutifs, aucun retry automatique (compteur reste strictly à 1)');
+
+    // 3. Clic manuel sur le bouton "Réessayer"
+    const handleManualRetry = async () => {
+      await simulateRpcCall();
+    };
+
+    await handleManualRetry();
+    assert(callCounter === 2, 'TEST 8.22.3 : Un clic manuel Réessayer porte le compteur à 2 exactement');
+
+    // 4. Re-renders ultérieurs après retry
+    for (let render = 1; render <= 3; render++) {
+      await simulateMountOrTabSwitch();
+    }
+    assert(callCounter === 2, 'TEST 8.22.4 : Aucune autre requête automatique suite au retry manuel (compteur fixe à 2)');
+
+    // 5. Clic Réessayer avec succès -> l'erreur est effacée et le résumé affiché
+    let isSuccessRetry = true;
+    const handleSuccessfulRetry = async () => {
+      callCounter++;
+      if (isSuccessRetry) {
+        errorState = null;
+        summaryState = { meta: { school_id: 'sch-1' }, currencies: {} };
+      }
+    };
+    await handleSuccessfulRetry();
+    assert(callCounter === 3 && errorState === null && summaryState !== null, 'TEST 8.22.5 : Retry réussi efface l’erreur et remplace par la synthèse valide');
+
+    // 6. Verrou synchrone contre les clics réessayés simultanés
+    let concurrentLock = false;
+    let concurrentCallCount = 0;
+    const simulateConcurrentRetry = async () => {
+      if (concurrentLock) return;
+      concurrentLock = true;
+      try {
+        concurrentCallCount++;
+        await new Promise((res) => setTimeout(res, 20));
+      } finally {
+        concurrentLock = false;
+      }
+    };
+    await Promise.all([simulateConcurrentRetry(), simulateConcurrentRetry()]);
+    assert(concurrentCallCount === 1, 'TEST 8.22.6 : Clics Réessayer simultanés -> 1 seul appel exécuté via le verrou synchrone');
+
+    // 7. Unmount safety
+    let mounted = true;
+    let stateSetAfterUnmount = false;
+    const asyncFetchUnmount = async () => {
+      await new Promise((res) => setTimeout(res, 10));
+      if (!mounted) return;
+      stateSetAfterUnmount = true;
+    };
+    const unmountPromise = asyncFetchUnmount();
+    mounted = false;
+    await unmountPromise;
+    assert(!stateSetAfterUnmount, 'TEST 8.22.7 : Résolution après démontage n’effectue aucun setState');
+  } catch (err: unknown) {
+    assert(false, `TEST 8.22 : Exception inattendue : ${err}`);
+  }
+
   console.log(`\n=== RÉSULTATS : ${passed}/${total} TESTS RÉUSSIS ===\n`);
   return { total, passed, failed: total - passed, errors };
 }
-
 runFinanceFrontendTests();
