@@ -2,11 +2,14 @@
 // Tableau de bord financier principal pour le Portail Administrateur & Agent Financier
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { computeFinanceDashboardKPIs, fetchAllSchoolInvoices } from '../../../services/financeService';
+import { computeFinanceDashboardKPIs, fetchAllSchoolInvoices, getSchoolAgingSummary } from '../../../services/financeService';
+import type { AgingSummaryResponse } from '../../../types/finance';
 import { FormattedAmount } from '../../common/CurrencyBadge';
 import { SchoolFeesCatalogModule } from './SchoolFeesCatalogModule';
 import { StudentInvoicesModule } from './StudentInvoicesModule';
 import { StudentFinanceDossierModal } from './StudentFinanceDossierModal';
+import { AgingSummaryCard } from './AgingSummaryCard';
+import { OverdueInvoicesTable } from './OverdueInvoicesTable';
 import {
   DollarSign,
   TrendingUp,
@@ -14,14 +17,15 @@ import {
   CheckCircle2,
   FileText,
   Layers,
-  BarChart3
+  BarChart3,
+  Clock
 } from 'lucide-react';
 
 interface FinanceDashboardModuleProps {
   schoolId: string;
 }
 
-type FinanceSubTab = 'vue_densemble' | 'factures' | 'catalogue';
+type FinanceSubTab = 'vue_densemble' | 'creances' | 'factures' | 'catalogue';
 
 export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ schoolId }) => {
   const [activeSubTab, setActiveSubTab] = useState<FinanceSubTab>('vue_densemble');
@@ -46,6 +50,31 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
 
   // Dossier Modal State
   const [selectedDossierStudentId, setSelectedDossierStudentId] = useState<string | null>(null);
+
+  // Finance 4A State (Aging Summary)
+  const [agingSummary, setAgingSummary] = useState<AgingSummaryResponse | null>(null);
+  const [agingLoading, setAgingLoading] = useState<boolean>(false);
+  const [agingError, setAgingError] = useState<string | null>(null);
+
+  const fetchAgingData = useCallback(async () => {
+    setAgingLoading(true);
+    setAgingError(null);
+    try {
+      const summaryRes = await getSchoolAgingSummary();
+      setAgingSummary(summaryRes);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erreur lors du chargement de la balance âgée.';
+      setAgingError(msg);
+    } finally {
+      setAgingLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeSubTab === 'creances' && !agingSummary && !agingLoading) {
+      fetchAgingData();
+    }
+  }, [activeSubTab, agingSummary, agingLoading, fetchAgingData]);
 
   const fetchKpis = useCallback(async () => {
     try {
@@ -113,6 +142,13 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
           >
             <BarChart3 className="w-3.5 h-3.5" />
             Vue d'ensemble
+          </button>
+          <button
+            onClick={() => setActiveSubTab('creances')}
+            className={`flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${activeSubTab === 'creances' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            Balance Âgée & Créances
           </button>
           <button
             onClick={() => setActiveSubTab('factures')}
@@ -269,6 +305,18 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
               Ouvrir le Module de Facturation
             </button>
           </div>
+        </div>
+      )}
+
+      {activeSubTab === 'creances' && (
+        <div className="space-y-6">
+          <AgingSummaryCard
+            summary={agingSummary}
+            loading={agingLoading}
+            error={agingError}
+            onRetry={fetchAgingData}
+          />
+          <OverdueInvoicesTable />
         </div>
       )}
 

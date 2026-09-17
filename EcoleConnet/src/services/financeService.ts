@@ -14,7 +14,14 @@ import type {
   InvoiceStatus,
   Currency,
   PaymentMethod,
-  PaymentStatus
+  PaymentStatus,
+  AgingSummaryResponse,
+  OverdueInvoicesResponse,
+  OverdueInvoicesFilters,
+  OverdueInvoicesCursor,
+  AgingBucketKey,
+  CurrencyAgingSummary,
+  AgingBucketSummary
 } from '../types/finance';
 
 /**
@@ -849,4 +856,321 @@ export function computeFinanceDashboardKPIs(invoices: DashboardInvoiceRecord[]):
   });
 
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// VALIDATEURS RUNTIME DE SÉCURITÉ POUR FINANCE 4A (BALANCE ÂGÉE & CRÉANCES)
+// ---------------------------------------------------------------------------
+
+function validateAgingBucketSummary(bucketData: unknown, bucketName: string): AgingBucketSummary {
+  if (!isObject(bucketData)) {
+    throw new FinanceServiceError(`Structure invalide pour la tranche de retard '${bucketName}' (non-objet).`);
+  }
+  const amount = getNumberProperty(bucketData, 'amount');
+  if (amount === null || !isFinite(amount) || amount < 0) {
+    throw new FinanceServiceError(`Montant invalide ou négatif pour la tranche de retard '${bucketName}'.`);
+  }
+  const count = getNumberProperty(bucketData, 'count');
+  if (count === null || !isFinite(count) || count < 0 || !Number.isInteger(count)) {
+    throw new FinanceServiceError(`Nombre de factures invalide pour la tranche de retard '${bucketName}'.`);
+  }
+  return { amount, count };
+}
+
+function validateCurrencyAgingSummary(currData: unknown, expectedCurrency: 'USD' | 'CDF'): CurrencyAgingSummary {
+  if (!isObject(currData)) {
+    throw new FinanceServiceError(`Structure de synthèse manquante ou invalide pour la devise ${expectedCurrency}.`);
+  }
+  const currency = getStringProperty(currData, 'currency');
+  if (currency !== expectedCurrency) {
+    throw new FinanceServiceError(`Devise incohérente dans la synthèse : attendu '${expectedCurrency}', reçu '${currency}'.`);
+  }
+
+  const total_overdue_amount = getNumberProperty(currData, 'total_overdue_amount');
+  if (total_overdue_amount === null || !isFinite(total_overdue_amount) || total_overdue_amount < 0) {
+    throw new FinanceServiceError(`total_overdue_amount invalide pour ${expectedCurrency}.`);
+  }
+  const total_overdue_count = getNumberProperty(currData, 'total_overdue_count');
+  if (total_overdue_count === null || !isFinite(total_overdue_count) || total_overdue_count < 0 || !Number.isInteger(total_overdue_count)) {
+    throw new FinanceServiceError(`total_overdue_count invalide pour ${expectedCurrency}.`);
+  }
+
+  const due_today_amount = getNumberProperty(currData, 'due_today_amount');
+  if (due_today_amount === null || !isFinite(due_today_amount) || due_today_amount < 0) {
+    throw new FinanceServiceError(`due_today_amount invalide pour ${expectedCurrency}.`);
+  }
+  const due_today_count = getNumberProperty(currData, 'due_today_count');
+  if (due_today_count === null || !isFinite(due_today_count) || due_today_count < 0 || !Number.isInteger(due_today_count)) {
+    throw new FinanceServiceError(`due_today_count invalide pour ${expectedCurrency}.`);
+  }
+
+  const upcoming_amount = getNumberProperty(currData, 'upcoming_amount');
+  if (upcoming_amount === null || !isFinite(upcoming_amount) || upcoming_amount < 0) {
+    throw new FinanceServiceError(`upcoming_amount invalide pour ${expectedCurrency}.`);
+  }
+  const upcoming_count = getNumberProperty(currData, 'upcoming_count');
+  if (upcoming_count === null || !isFinite(upcoming_count) || upcoming_count < 0 || !Number.isInteger(upcoming_count)) {
+    throw new FinanceServiceError(`upcoming_count invalide pour ${expectedCurrency}.`);
+  }
+
+  const bucketsRaw = currData['aging_buckets'];
+  if (!isObject(bucketsRaw)) {
+    throw new FinanceServiceError(`Propriété 'aging_buckets' manquante ou invalide pour ${expectedCurrency}.`);
+  }
+
+  const buckets: Record<AgingBucketKey, AgingBucketSummary> = {
+    '1_30_days': validateAgingBucketSummary(bucketsRaw['1_30_days'], '1_30_days'),
+    '31_60_days': validateAgingBucketSummary(bucketsRaw['31_60_days'], '31_60_days'),
+    '61_90_days': validateAgingBucketSummary(bucketsRaw['61_90_days'], '61_90_days'),
+    'over_90_days': validateAgingBucketSummary(bucketsRaw['over_90_days'], 'over_90_days')
+  };
+
+  return {
+    currency: expectedCurrency,
+    total_overdue_amount,
+    total_overdue_count,
+    due_today_amount,
+    due_today_count,
+    upcoming_amount,
+    upcoming_count,
+    aging_buckets: buckets
+  };
+}
+
+export function validateAgingSummaryResponse(data: unknown): AgingSummaryResponse {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Format de réponse invalide pour get_school_aging_summary (non-objet).');
+  }
+
+  const metaRaw = data['meta'];
+  if (!isObject(metaRaw)) {
+    throw new FinanceServiceError("Propriété 'meta' manquante ou invalide dans la synthèse de balance âgée.");
+  }
+
+  const school_id = getStringProperty(metaRaw, 'school_id');
+  if (!school_id) {
+    throw new FinanceServiceError("Propriété 'school_id' manquante dans meta.");
+  }
+
+  const school_timezone = getStringProperty(metaRaw, 'school_timezone');
+  if (!school_timezone) {
+    throw new FinanceServiceError("Propriété 'school_timezone' manquante dans meta.");
+  }
+
+  if (typeof metaRaw['timezone_fallback_applied'] !== 'boolean') {
+    throw new FinanceServiceError("Propriété 'timezone_fallback_applied' manquante ou non booléenne dans meta.");
+  }
+
+  const evaluated_at_utc = getStringProperty(metaRaw, 'evaluated_at_utc');
+  if (!evaluated_at_utc || isNaN(Date.parse(evaluated_at_utc))) {
+    throw new FinanceServiceError("Propriété 'evaluated_at_utc' invalide ou non parseable.");
+  }
+
+  const business_date = getStringProperty(metaRaw, 'business_date');
+  if (!business_date || !/^\d{4}-\d{2}-\d{2}$/.test(business_date) || isNaN(Date.parse(business_date))) {
+    throw new FinanceServiceError("Propriété 'business_date' invalide ou format YYYY-MM-DD non respecté.");
+  }
+
+  const currenciesRaw = data['currencies'];
+  if (!isObject(currenciesRaw)) {
+    throw new FinanceServiceError("Propriété 'currencies' manquante ou invalide dans la synthèse.");
+  }
+
+  const usd = validateCurrencyAgingSummary(currenciesRaw['USD'], 'USD');
+  const cdf = validateCurrencyAgingSummary(currenciesRaw['CDF'], 'CDF');
+
+  return {
+    meta: {
+      school_id,
+      school_timezone,
+      timezone_fallback_applied: Boolean(metaRaw['timezone_fallback_applied']),
+      evaluated_at_utc,
+      business_date
+    },
+    currencies: {
+      USD: usd,
+      CDF: cdf
+    }
+  };
+}
+
+export function validateOverdueInvoicesResponse(data: unknown): OverdueInvoicesResponse {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Format de réponse invalide pour get_school_overdue_invoices_admin (non-objet).');
+  }
+
+  const business_date = getStringProperty(data, 'business_date');
+  if (!business_date || !/^\d{4}-\d{2}-\d{2}$/.test(business_date) || isNaN(Date.parse(business_date))) {
+    throw new FinanceServiceError("Propriété 'business_date' invalide ou format YYYY-MM-DD non respecté dans la liste des créances.");
+  }
+
+  if (typeof data['has_more'] !== 'boolean') {
+    throw new FinanceServiceError("Propriété 'has_more' manquante ou non booléenne.");
+  }
+
+  const itemsRaw = data['items'];
+  if (!Array.isArray(itemsRaw)) {
+    throw new FinanceServiceError("Propriété 'items' manquante ou non tableau.");
+  }
+
+  const validBuckets: AgingBucketKey[] = ['1_30_days', '31_60_days', '61_90_days', 'over_90_days'];
+
+  const items = itemsRaw.map((item, index) => {
+    if (!isObject(item)) {
+      throw new FinanceServiceError(`Élément #${index} invalide dans la liste des créances (non-objet).`);
+    }
+
+    const invoice_id = getStringProperty(item, 'invoice_id');
+    if (!invoice_id) throw new FinanceServiceError(`Élément #${index} : 'invoice_id' manquant.`);
+
+    const invoice_number = getStringProperty(item, 'invoice_number');
+    if (!invoice_number) throw new FinanceServiceError(`Élément #${index} : 'invoice_number' manquant.`);
+
+    const student_id = getStringProperty(item, 'student_id');
+    if (!student_id) throw new FinanceServiceError(`Élément #${index} : 'student_id' manquant.`);
+
+    const student_name = getStringProperty(item, 'student_name') ?? '';
+    const class_name = getStringProperty(item, 'class_name') ?? '';
+
+    const due_date = getStringProperty(item, 'due_date');
+    if (!due_date || !/^\d{4}-\d{2}-\d{2}$/.test(due_date) || isNaN(Date.parse(due_date)) || new Date(due_date).toISOString().substring(0, 10) !== due_date) {
+      throw new FinanceServiceError(`Élément #${index} : 'due_date' invalide ou date calendrier impossible ('${due_date}').`);
+    }
+
+    const days_overdue = getNumberProperty(item, 'days_overdue');
+    if (days_overdue === null || !isFinite(days_overdue) || days_overdue < 1 || !Number.isInteger(days_overdue)) {
+      throw new FinanceServiceError(`Élément #${index} : 'days_overdue' invalide (doit être un entier >= 1).`);
+    }
+
+    const aging_bucket = getStringProperty(item, 'aging_bucket') as AgingBucketKey;
+    if (!validBuckets.includes(aging_bucket)) {
+      throw new FinanceServiceError(`Élément #${index} : 'aging_bucket' invalide ('${aging_bucket}').`);
+    }
+
+    const currency = getStringProperty(item, 'currency') as Currency;
+    if (currency !== 'USD' && currency !== 'CDF') {
+      throw new FinanceServiceError(`Élément #${index} : 'currency' invalide ('${currency}').`);
+    }
+
+    const total_amount = getNumberProperty(item, 'total_amount');
+    if (total_amount === null || !isFinite(total_amount) || total_amount <= 0) {
+      throw new FinanceServiceError(`Élément #${index} : 'total_amount' invalide ou non strictement positif.`);
+    }
+
+    const paid_amount = getNumberProperty(item, 'paid_amount');
+    if (paid_amount === null || !isFinite(paid_amount) || paid_amount < 0 || paid_amount > total_amount) {
+      throw new FinanceServiceError(`Élément #${index} : 'paid_amount' incohérent ou supérieur au total.`);
+    }
+
+    const remaining_balance = getNumberProperty(item, 'remaining_balance');
+    if (remaining_balance === null || !isFinite(remaining_balance) || remaining_balance <= 0 || remaining_balance > total_amount) {
+      throw new FinanceServiceError(`Élément #${index} : 'remaining_balance' incohérent ou supérieur au total.`);
+    }
+
+    const status = getStringProperty(item, 'status') as 'issued' | 'partially_paid';
+    if (status !== 'issued' && status !== 'partially_paid') {
+      throw new FinanceServiceError(`Élément #${index} : 'status' invalide pour une créance ('${status}').`);
+    }
+
+    return {
+      invoice_id,
+      invoice_number,
+      student_id,
+      student_name,
+      class_name,
+      due_date,
+      days_overdue,
+      aging_bucket,
+      currency,
+      total_amount,
+      paid_amount,
+      remaining_balance,
+      status
+    };
+  });
+
+  // Validation du curseur
+  const nextCursorRaw = data['next_cursor'];
+  let next_cursor: OverdueInvoicesCursor | null = null;
+
+  if (nextCursorRaw !== null && nextCursorRaw !== undefined) {
+    if (!isObject(nextCursorRaw)) {
+      throw new FinanceServiceError("Propriété 'next_cursor' invalide (ni null ni objet).");
+    }
+    const cursorDueDate = getStringProperty(nextCursorRaw, 'due_date');
+    const cursorId = getStringProperty(nextCursorRaw, 'id');
+
+    if (!cursorDueDate || !cursorId) {
+      throw new FinanceServiceError("Curseur partiel non autorisé : 'due_date' et 'id' doivent être tous les deux présents dans next_cursor.");
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(cursorDueDate) || isNaN(Date.parse(cursorDueDate))) {
+      throw new FinanceServiceError("Format YYYY-MM-DD invalide pour 'due_date' dans next_cursor.");
+    }
+    next_cursor = {
+      due_date: cursorDueDate,
+      id: cursorId
+    };
+  }
+
+  if (data['has_more'] === true && !next_cursor) {
+    throw new FinanceServiceError("Propriété next_cursor obligatoire lorsque has_more est vrai.");
+  }
+
+  if (data['has_more'] === false && next_cursor !== null) {
+    throw new FinanceServiceError("next_cursor doit être null lorsque has_more est faux.");
+  }
+
+  return {
+    business_date,
+    items,
+    has_more: Boolean(data['has_more']),
+    next_cursor
+  };
+}
+
+// ---------------------------------------------------------------------------
+// METHODES APIS SUPABASE RPC POUR FINANCE 4A
+// ---------------------------------------------------------------------------
+
+export async function getSchoolAgingSummary(): Promise<AgingSummaryResponse> {
+  try {
+    const { data, error } = await supabase.rpc('get_school_aging_summary');
+    if (error) {
+      throw mapPostgresError(error);
+    }
+    return validateAgingSummaryResponse(data);
+  } catch (err: unknown) {
+    if (err instanceof FinanceServiceError) throw err;
+    throw mapPostgresError(err);
+  }
+}
+
+export async function getSchoolOverdueInvoicesAdmin(
+  filters?: OverdueInvoicesFilters,
+  cursor?: OverdueInvoicesCursor | null
+): Promise<OverdueInvoicesResponse> {
+  const searchTrimmed = filters?.p_search ? filters.p_search.trim() : null;
+  if (searchTrimmed && searchTrimmed.length > 100) {
+    throw new FinanceServiceError('Le terme de recherche ne peut pas dépasser 100 caractères.', '22023');
+  }
+
+  const rpcParams = {
+    p_currency: filters?.p_currency || null,
+    p_aging_bucket: filters?.p_aging_bucket || null,
+    p_search: searchTrimmed || null,
+    p_limit: filters?.p_limit ?? 20,
+    p_cursor_due_date: cursor?.due_date || null,
+    p_cursor_id: cursor?.id || null
+  };
+
+  try {
+    const { data, error } = await supabase.rpc('get_school_overdue_invoices_admin', rpcParams);
+    if (error) {
+      throw mapPostgresError(error);
+    }
+    return validateOverdueInvoicesResponse(data);
+  } catch (err: unknown) {
+    if (err instanceof FinanceServiceError) throw err;
+    throw mapPostgresError(err);
+  }
 }

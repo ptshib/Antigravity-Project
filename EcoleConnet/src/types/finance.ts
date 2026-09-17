@@ -300,3 +300,76 @@ export interface StudentFinanceDossierAdminResult {
     created_at: string;
   }>;
 }
+
+// ---------------------------------------------------------------------------
+// CONTRATS TYPE SCRIPT STRICTS POUR FINANCE 4A (BALANCE ÂGÉE & CRÉANCES)
+// ---------------------------------------------------------------------------
+
+export type AgingBucketKey = '1_30_days' | '31_60_days' | '61_90_days' | 'over_90_days';
+
+export interface AgingBucketSummary {
+  amount: number;
+  count: number;
+}
+
+export interface CurrencyAgingSummary {
+  currency: Currency;
+  total_overdue_amount: number;
+  total_overdue_count: number;
+  due_today_amount: number;
+  due_today_count: number;
+  upcoming_amount: number;
+  upcoming_count: number;
+  aging_buckets: Record<AgingBucketKey, AgingBucketSummary>;
+}
+
+export interface AgingSummaryMeta {
+  school_id: string;
+  school_timezone: string;
+  timezone_fallback_applied: boolean;
+  evaluated_at_utc: string;
+  business_date: string;
+}
+
+export interface AgingSummaryResponse {
+  meta: AgingSummaryMeta;
+  currencies: {
+    USD: CurrencyAgingSummary;
+    CDF: CurrencyAgingSummary;
+  };
+}
+
+export interface OverdueInvoiceItem {
+  invoice_id: string;
+  invoice_number: string;
+  student_id: string;
+  student_name: string;
+  class_name: string;
+  due_date: string;
+  days_overdue: number;
+  aging_bucket: AgingBucketKey;
+  currency: Currency;
+  total_amount: number;
+  paid_amount: number;
+  remaining_balance: number;
+  status: 'issued' | 'partially_paid';
+}
+
+export interface OverdueInvoicesCursor {
+  due_date: string;
+  id: string;
+}
+
+export interface OverdueInvoicesResponse {
+  business_date: string;
+  items: OverdueInvoiceItem[];
+  has_more: boolean;
+  next_cursor: OverdueInvoicesCursor | null;
+}
+
+export interface OverdueInvoicesFilters {
+  p_currency?: Currency | null;
+  p_aging_bucket?: AgingBucketKey | null;
+  p_search?: string | null;
+  p_limit?: number;
+}
