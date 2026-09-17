@@ -2,7 +2,7 @@
 // Tableau de bord financier principal pour le Portail Administrateur & Agent Financier
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../../../lib/supabase';
+import { computeFinanceDashboardKPIs, fetchAllSchoolInvoices } from '../../../services/financeService';
 import { FormattedAmount } from '../../common/CurrencyBadge';
 import { SchoolFeesCatalogModule } from './SchoolFeesCatalogModule';
 import { StudentInvoicesModule } from './StudentInvoicesModule';
@@ -49,75 +49,31 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
 
   const fetchKpis = useCallback(async () => {
     try {
-      const { data: invData, error: invErr } = await supabase
-        .from('student_invoices')
-        .select('total_amount, paid_amount, remaining_balance, currency, status')
-        .eq('school_id', schoolId);
+      const { data: invData, error: invErr } = await fetchAllSchoolInvoices(schoolId);
 
-      if (!invErr && invData) {
-        let issUSD = 0, pdUSD = 0, remUSD = 0;
-        let cntIssUSD = 0, cntPdUSD = 0, cntPartUSD = 0, cntDrfUSD = 0;
+      if (invErr) {
+        console.error('Erreur chargement factures paginées:', invErr);
+        return;
+      }
 
-        let issCDF = 0, pdCDF = 0, remCDF = 0;
-        let cntIssCDF = 0, cntPdCDF = 0, cntPartCDF = 0, cntDrfCDF = 0;
+      if (invData) {
+        const kpis = computeFinanceDashboardKPIs(invData);
 
-        invData.forEach((inv) => {
-          const status = inv.status;
-          const currency = inv.currency === 'CDF' ? 'CDF' : 'USD';
-          const totalAmt = Number(inv.total_amount) || 0;
-          const paidAmt = Number(inv.paid_amount) || 0;
-          const remAmt = Number(inv.remaining_balance) || 0;
+        setTotalIssuedUSD(kpis.USD.totalIssued);
+        setTotalPaidUSD(kpis.USD.totalPaid);
+        setTotalRemainingUSD(kpis.USD.totalRemaining);
+        setIssuedCountUSD(kpis.USD.issuedCount);
+        setPaidCountUSD(kpis.USD.paidCount);
+        setPartialCountUSD(kpis.USD.partialCount);
+        setDraftCountUSD(kpis.USD.draftCount);
 
-          if (currency === 'USD') {
-            if (status === 'draft') {
-              cntDrfUSD += 1;
-            } else if (status !== 'cancelled') {
-              // Total émis : exclure draft et cancelled
-              issUSD += totalAmt;
-              pdUSD += paidAmt;
-              cntIssUSD += 1;
-
-              if (status === 'issued' || status === 'partially_paid') {
-                remUSD += remAmt;
-              }
-
-              if (status === 'paid') cntPdUSD += 1;
-              if (status === 'partially_paid') cntPartUSD += 1;
-            }
-          } else {
-            // CDF
-            if (status === 'draft') {
-              cntDrfCDF += 1;
-            } else if (status !== 'cancelled') {
-              issCDF += totalAmt;
-              pdCDF += paidAmt;
-              cntIssCDF += 1;
-
-              if (status === 'issued' || status === 'partially_paid') {
-                remCDF += remAmt;
-              }
-
-              if (status === 'paid') cntPdCDF += 1;
-              if (status === 'partially_paid') cntPartCDF += 1;
-            }
-          }
-        });
-
-        setTotalIssuedUSD(issUSD);
-        setTotalPaidUSD(pdUSD);
-        setTotalRemainingUSD(remUSD);
-        setIssuedCountUSD(cntIssUSD);
-        setPaidCountUSD(cntPdUSD);
-        setPartialCountUSD(cntPartUSD);
-        setDraftCountUSD(cntDrfUSD);
-
-        setTotalIssuedCDF(issCDF);
-        setTotalPaidCDF(pdCDF);
-        setTotalRemainingCDF(remCDF);
-        setIssuedCountCDF(cntIssCDF);
-        setPaidCountCDF(cntPdCDF);
-        setPartialCountCDF(cntPartCDF);
-        setDraftCountCDF(cntDrfCDF);
+        setTotalIssuedCDF(kpis.CDF.totalIssued);
+        setTotalPaidCDF(kpis.CDF.totalPaid);
+        setTotalRemainingCDF(kpis.CDF.totalRemaining);
+        setIssuedCountCDF(kpis.CDF.issuedCount);
+        setPaidCountCDF(kpis.CDF.paidCount);
+        setPartialCountCDF(kpis.CDF.partialCount);
+        setDraftCountCDF(kpis.CDF.draftCount);
       }
     } catch (err: unknown) {
       console.error('Erreur KPIs finance:', err);

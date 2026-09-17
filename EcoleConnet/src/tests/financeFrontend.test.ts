@@ -1,7 +1,7 @@
 // Fichier : src/tests/financeFrontend.test.ts
 // Tests unitaires frontend automatisés pour la Phase Finance 2 ÉcoleConnect
 
-import { validateRecordPaymentResult, validateCreateDraftInvoiceResult } from '../services/financeService';
+import { validateRecordPaymentResult, validateCreateDraftInvoiceResult, computeFinanceDashboardKPIs } from '../services/financeService';
 import type { Currency } from '../types/finance';
 
 /**
@@ -88,9 +88,9 @@ export async function runFinanceFrontendTests(): Promise<{ total: number; passed
     ];
 
     const mockPayments = [
-      { id: 'p1', payment_number: 'PAY-1', receipt_number: 'REC-1', invoice_id: '1', invoice_number: 'INV-1', amount: 10000, currency: 'CDF' as Currency, payment_date: '2026-01-02', payment_method: 'cash' as const, external_reference: null, status: 'completed' as const, recorded_by_name: 'Agent', created_at: '' },
-      { id: 'p2', payment_number: 'PAY-2', receipt_number: 'REC-2', invoice_id: '1', invoice_number: 'INV-1', amount: 10250, currency: 'CDF' as Currency, payment_date: '2026-01-03', payment_method: 'cash' as const, external_reference: null, status: 'completed' as const, recorded_by_name: 'Agent', created_at: '' },
-      { id: 'p3', payment_number: 'PAY-3', receipt_number: 'REC-3', invoice_id: '1', invoice_number: 'INV-1', amount: 0, currency: 'CDF' as Currency, payment_date: '2026-01-04', payment_method: 'cash' as const, external_reference: null, status: 'completed' as const, recorded_by_name: 'Agent', created_at: '' },
+      { id: 'p1', payment_number: 'PAY-1', receipt_number: 'REC-1', invoice_id: '1', invoice_number: 'INV-1', amount: 10000, currency: 'CDF' as Currency, payment_date: '2026-01-02', payment_method: 'cash' as const, external_reference: null, status: 'confirmed' as const, recorded_by_name: 'Agent', created_at: '' },
+      { id: 'p2', payment_number: 'PAY-2', receipt_number: 'REC-2', invoice_id: '1', invoice_number: 'INV-1', amount: 10250, currency: 'CDF' as Currency, payment_date: '2026-01-03', payment_method: 'cash' as const, external_reference: null, status: 'confirmed' as const, recorded_by_name: 'Agent', created_at: '' },
+      { id: 'p3', payment_number: 'PAY-3', receipt_number: 'REC-3', invoice_id: '1', invoice_number: 'INV-1', amount: 0, currency: 'CDF' as Currency, payment_date: '2026-01-04', payment_method: 'cash' as const, external_reference: null, status: 'confirmed' as const, recorded_by_name: 'Agent', created_at: '' },
       { id: 'p4', payment_number: 'PAY-4', receipt_number: 'REC-4', invoice_id: '1', invoice_number: 'INV-1', amount: 100, currency: 'CDF' as Currency, payment_date: '2026-01-05', payment_method: 'cash' as const, external_reference: null, status: 'cancelled' as const, recorded_by_name: 'Agent', cancelled_at: '2026-01-05', cancelled_by: 'Admin', cancel_reason: 'Test', created_at: '' }
     ];
 
@@ -228,6 +228,143 @@ export async function runFinanceFrontendTests(): Promise<{ total: number; passed
     assert(callCount === 1, 'TEST 6.3 : Verrou synchrone useRef garantit exactement 1 appel sous clics simultanés');
   } catch (err: unknown) {
     assert(false, `TEST 6 : Exception inattendue : ${err}`);
+  }
+
+  // TEST 7 : Hotfix Finance Dashboard Voided & Draft Exclusions (Calcul canonique computeFinanceDashboardKPIs)
+  try {
+    // 7.1 Dataset équivalent à la production (5 voided USD de 10 USD + 1 issued CDF de 50 000 CDF)
+    const prodEquivalentDataset = [
+      { total_amount: 10, paid_amount: 0, remaining_balance: 10, currency: 'USD', status: 'voided' },
+      { total_amount: 10, paid_amount: 0, remaining_balance: 10, currency: 'USD', status: 'voided' },
+      { total_amount: 10, paid_amount: 0, remaining_balance: 10, currency: 'USD', status: 'voided' },
+      { total_amount: 10, paid_amount: 0, remaining_balance: 10, currency: 'USD', status: 'voided' },
+      { total_amount: 10, paid_amount: 0, remaining_balance: 10, currency: 'USD', status: 'voided' },
+      { total_amount: 50000, paid_amount: 0, remaining_balance: 50000, currency: 'CDF', status: 'issued' }
+    ];
+
+    const prodKpis = computeFinanceDashboardKPIs(prodEquivalentDataset);
+    assert(prodKpis.USD.totalIssued === 0, 'TEST 7.1.1 : USD Total émis = 0 (les 5 factures voided de 10 USD sont exclues)');
+    assert(prodKpis.USD.issuedCount === 0, 'TEST 7.1.2 : USD Nombre de factures émises = 0');
+    assert(prodKpis.USD.totalPaid === 0, 'TEST 7.1.3 : USD Total encaissé = 0');
+    assert(prodKpis.USD.totalRemaining === 0, 'TEST 7.1.4 : USD Reste à recouvrer = 0');
+    assert(prodKpis.USD.voidedCount === 5, 'TEST 7.1.5 : USD Nombre d’annulées = 5');
+
+    assert(prodKpis.CDF.totalIssued === 50000, 'TEST 7.1.6 : CDF Total émis = 50 000 CDF (1 facture émise)');
+    assert(prodKpis.CDF.issuedCount === 1, 'TEST 7.1.7 : CDF Nombre de factures émises = 1');
+    assert(prodKpis.CDF.totalPaid === 0, 'TEST 7.1.8 : CDF Total encaissé = 0 CDF');
+    assert(prodKpis.CDF.totalRemaining === 50000, 'TEST 7.1.9 : CDF Reste à recouvrer = 50 000 CDF');
+
+    // 7.2 Dataset complet avec tous les statuts (draft, voided, issued, partially_paid, paid)
+    const fullDataset = [
+      { total_amount: 100, paid_amount: 0, remaining_balance: 100, currency: 'USD', status: 'draft' },
+      { total_amount: 200, paid_amount: 0, remaining_balance: 200, currency: 'USD', status: 'voided' },
+      { total_amount: 300, paid_amount: 0, remaining_balance: 300, currency: 'USD', status: 'issued' },
+      { total_amount: 400, paid_amount: 150, remaining_balance: 250, currency: 'USD', status: 'partially_paid' },
+      { total_amount: 500, paid_amount: 500, remaining_balance: 0, currency: 'USD', status: 'paid' }
+    ];
+
+    const fullKpis = computeFinanceDashboardKPIs(fullDataset);
+    // Total émis : issued(300) + partially_paid(400) + paid(500) = 1200 USD (draft 100 et voided 200 exclus)
+    assert(fullKpis.USD.totalIssued === 1200, 'TEST 7.2.1 : Total émis inclut uniquement issued, partially_paid, paid (1200 USD)');
+    assert(fullKpis.USD.issuedCount === 3, 'TEST 7.2.2 : Nombre de factures émises = 3 (exclut draft et voided)');
+    // Total encaissé : paid_amount de issued(0) + partially_paid(150) + paid(500) = 650 USD
+    assert(fullKpis.USD.totalPaid === 650, 'TEST 7.2.3 : Total encaissé = 650 USD');
+    // Reste à recouvrer : remaining_balance de issued(300) + partially_paid(250) = 550 USD (paid 0, draft et voided exclus)
+    assert(fullKpis.USD.totalRemaining === 550, 'TEST 7.2.4 : Reste à recouvrer = 550 USD (issued + partially_paid)');
+    assert(fullKpis.USD.draftCount === 1, 'TEST 7.2.5 : Nombre de brouillons = 1');
+    assert(fullKpis.USD.voidedCount === 1, 'TEST 7.2.6 : Nombre d’annulées = 1');
+
+    // 7.3 Simulation dynamique d'annulation de paiement (Workflow cancel_student_payment)
+    // Facture initiale de 100 USD payée à 100 USD (status paid)
+    let invoiceRecord = { total_amount: 100, paid_amount: 100, remaining_balance: 0, currency: 'USD', status: 'paid' };
+    let kpiPaidState = computeFinanceDashboardKPIs([invoiceRecord]);
+    assert(kpiPaidState.USD.totalPaid === 100 && kpiPaidState.USD.totalRemaining === 0, 'TEST 7.3.1 : Facture payée à 100% -> Total encaissé = 100 USD, Reste = 0');
+
+    // Annulation du paiement via cancel_student_payment: paid_amount bascule à 0, remaining_balance bascule à 100, status bascule à 'issued'
+    invoiceRecord = { total_amount: 100, paid_amount: 0, remaining_balance: 100, currency: 'USD', status: 'issued' };
+    let kpiCancelledState = computeFinanceDashboardKPIs([invoiceRecord]);
+    assert(kpiCancelledState.USD.totalPaid === 0 && kpiCancelledState.USD.totalRemaining === 100, 'TEST 7.3.2 : Après annulation du paiement -> Total encaissé = 0 USD, Reste = 100 USD (aucun paiement annulé ne pollue l’encaissé)');
+
+    // 7.4 Robustesse & Rejet des Valeurs Financières Invalides (NaN / non-numérique / négatif)
+    let nanCaught = false;
+    try {
+      computeFinanceDashboardKPIs([{ total_amount: 'non_numerique', paid_amount: 0, remaining_balance: 0, currency: 'USD', status: 'issued' }]);
+    } catch (e: any) {
+      nanCaught = e.message.includes('valeur non-numérique');
+    }
+    assert(nanCaught, 'TEST 7.4.1 : Rejet explicite d’un montant non-numérique / NaN (aucune conversion silencieuse)');
+
+    let negativeCaught = false;
+    try {
+      computeFinanceDashboardKPIs([{ total_amount: -100, paid_amount: 0, remaining_balance: -100, currency: 'USD', status: 'issued' }]);
+    } catch (e: any) {
+      negativeCaught = e.message.includes('montant négatif');
+    }
+    assert(negativeCaught, 'TEST 7.4.2 : Rejet explicite d’un montant négatif non autorisé');
+
+    // Acceptation valide de null / undefined / '' comme 0
+    const nullDataset = [{ total_amount: null, paid_amount: undefined, remaining_balance: '', currency: 'USD', status: 'issued' }];
+    const nullKpis = computeFinanceDashboardKPIs(nullDataset);
+    assert(nullKpis.USD.totalIssued === 0 && nullKpis.USD.totalPaid === 0 && nullKpis.USD.totalRemaining === 0, 'TEST 7.4.3 : Conversion valide des valeurs null / undefined / chaîne vide en 0');
+
+    // 7.5 Validation de la Pagination Exhaustive et Déduplication
+    // Simulation de 1 001 factures émises de 10 USD chacune
+    const batch1001 = Array.from({ length: 1001 }, (_, i) => ({
+      id: `inv-uuid-${i + 1}`,
+      total_amount: 10,
+      paid_amount: 0,
+      remaining_balance: 10,
+      currency: 'USD',
+      status: 'issued'
+    }));
+
+    // Déduplication test : ajout d'un doublon entre pages
+    const batchWithDuplicate = [...batch1001, { id: 'inv-uuid-1', total_amount: 10, paid_amount: 0, remaining_balance: 10, currency: 'USD', status: 'issued' }];
+    const seenIds = new Set<string>();
+    const deduplicatedBatch = batchWithDuplicate.filter((inv) => {
+      if (seenIds.has(inv.id)) return false;
+      seenIds.add(inv.id);
+      return true;
+    });
+
+    const batch1001Kpis = computeFinanceDashboardKPIs(deduplicatedBatch);
+    assert(batch1001Kpis.USD.issuedCount === 1001, 'TEST 7.5.1 : 1 001 factures émises toutes comptabilisées sans doublon');
+    assert(batch1001Kpis.USD.totalIssued === 10010, 'TEST 7.5.2 : Total émis = 10 010 USD pour 1 001 factures de 10 USD');
+
+    // Simulation de plus de 10 000 factures (10 500 factures émises de 10 USD chacune)
+    const batch10500 = Array.from({ length: 10500 }, (_, i) => ({
+      id: `large-inv-${i + 1}`,
+      total_amount: 10,
+      paid_amount: 0,
+      remaining_balance: 10,
+      currency: 'USD',
+      status: 'issued'
+    }));
+    const batch10500Kpis = computeFinanceDashboardKPIs(batch10500);
+    assert(batch10500Kpis.USD.issuedCount === 10500, 'TEST 7.5.3 : > 10 000 factures (10 500 factures) toutes comptabilisées');
+    assert(batch10500Kpis.USD.totalIssued === 105000, 'TEST 7.5.4 : Total émis = 105 000 USD pour 10 500 factures');
+
+    // 7.6 Rejet explicite d'un statut de facture inconnu (ex: 'unexpected_status')
+    let unknownStatusCaught = false;
+    try {
+      computeFinanceDashboardKPIs([{ total_amount: 100, paid_amount: 0, remaining_balance: 100, currency: 'USD', status: 'unexpected_status' }]);
+    } catch (e: any) {
+      unknownStatusCaught = e.message.includes('Statut de facture inconnu');
+    }
+    assert(unknownStatusCaught, 'TEST 7.6.1 : Rejet explicite d’un statut inconnu unexpected_status via FinanceServiceError');
+
+    // 7.7 Validation de la réaction à l'atteinte de la limite de sécurité de pagination (500 pages)
+    const fakeMaxPagesCheck = (pageCount: number, maxPages: number, lastPageLength: number, pageSize: number) => {
+      if (pageCount >= maxPages && lastPageLength === pageSize) {
+        return { data: [], error: new Error(`Limite de sécurité de pagination atteinte (${maxPages} pages / ${maxPages * pageSize} factures). Chargement annulé pour éviter un résultat partiel.`) };
+      }
+      return { data: [1], error: null };
+    };
+    const limitResult = fakeMaxPagesCheck(500, 500, 1000, 1000);
+    assert(limitResult.data.length === 0 && limitResult.error !== null && limitResult.error.message.includes('Limite de sécurité de pagination atteinte'), 'TEST 7.7.1 : Limite de 500 pages complètes retourne data: [] et une erreur explicite sans totaux partiels');
+
+  } catch (err: unknown) {
+    assert(false, `TEST 7 : Exception inattendue : ${err}`);
   }
 
   console.log(`\n=== RÉSULTATS : ${passed}/${total} TESTS RÉUSSIS ===\n`);

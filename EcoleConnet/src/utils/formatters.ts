@@ -57,7 +57,7 @@ export function getInvoiceStatusConfig(status: InvoiceStatus): {
         badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
         dotClass: 'bg-emerald-500'
       };
-    case 'cancelled':
+    case 'voided':
       return {
         label: 'Annulée',
         badgeClass: 'bg-rose-50 text-rose-700 border-rose-200',

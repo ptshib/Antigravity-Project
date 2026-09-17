@@ -384,7 +384,7 @@ function validateStudentFinanceDossierAdmin(data: unknown): StudentFinanceDossie
         payment_date: getStringProperty(payObj, 'payment_date') || '',
         payment_method: (getStringProperty(payObj, 'payment_method') as PaymentMethod) || 'cash',
         external_reference: getStringProperty(payObj, 'external_reference'),
-        status: (getStringProperty(payObj, 'status') as PaymentStatus) || 'completed',
+        status: (getStringProperty(payObj, 'status') as PaymentStatus) || 'confirmed',
         recorded_by_name: getStringProperty(payObj, 'recorded_by_name'),
         cancelled_at: getStringProperty(payObj, 'cancelled_at'),
         cancelled_by: getStringProperty(payObj, 'cancelled_by'),
@@ -673,4 +673,180 @@ export async function fetchSchoolFeesCatalog(
   } catch (err: unknown) {
     return { fees: [], error: mapPostgresError(err) };
   }
+}
+
+// ---------------------------------------------------------------------------
+// CALCUL CANONIQUE DES KPIS DU TABLEAU DE BORD FINANCIER
+// ---------------------------------------------------------------------------
+
+export interface DashboardInvoiceRecord {
+  id?: string;
+  total_amount?: number | string | null;
+  paid_amount?: number | string | null;
+  remaining_balance?: number | string | null;
+  currency?: string;
+  status?: string;
+}
+
+export interface CurrencyKpiSummary {
+  totalIssued: number;
+  totalPaid: number;
+  totalRemaining: number;
+  issuedCount: number;
+  paidCount: number;
+  partialCount: number;
+  draftCount: number;
+  voidedCount: number;
+}
+
+export interface FinanceDashboardKpisResult {
+  USD: CurrencyKpiSummary;
+  CDF: CurrencyKpiSummary;
+}
+
+/**
+ * Récupération exhaustive et paginée de toutes les factures d'un établissement.
+ * - Pagination déterministe par paquets de 1 000 lignes
+ * - Tri stable par id (`.order('id', { ascending: true })`)
+ * - Arrêt automatique sur la dernière page (< 1000 lignes)
+ * - Déduplication par ID pour éviter tout doublon
+ * - Erreur explicite sur page intermédiaire sans retourner de totaux partiels trompeurs
+ */
+export async function fetchAllSchoolInvoices(
+  schoolId: string,
+  customPageSize: number = 1000,
+  customMaxPages: number = 500
+): Promise<{ data: DashboardInvoiceRecord[]; error: Error | null }> {
+  const allInvoices: DashboardInvoiceRecord[] = [];
+  const seenIds = new Set<string>();
+  const pageSize = customPageSize;
+  let pageIndex = 0;
+  const maxPages = customMaxPages;
+  let lastPageLength = 0;
+
+  try {
+    while (pageIndex < maxPages) {
+      const from = pageIndex * pageSize;
+      const to = from + pageSize - 1;
+
+      const { data, error } = await supabase
+        .from('student_invoices')
+        .select('id, total_amount, paid_amount, remaining_balance, currency, status')
+        .eq('school_id', schoolId)
+        .order('id', { ascending: true })
+        .range(from, to);
+
+      if (error) {
+        return { data: [], error: mapPostgresError(error) };
+      }
+
+      if (!data || data.length === 0) {
+        lastPageLength = 0;
+        break;
+      }
+
+      lastPageLength = data.length;
+
+      for (const inv of data) {
+        const invId = inv.id ? String(inv.id) : null;
+        if (invId) {
+          if (seenIds.has(invId)) {
+            continue;
+          }
+          seenIds.add(invId);
+        }
+        allInvoices.push(inv);
+      }
+
+      if (data.length < pageSize) {
+        break;
+      }
+
+      pageIndex++;
+    }
+
+    if (pageIndex >= maxPages && lastPageLength === pageSize) {
+      return {
+        data: [],
+        error: new FinanceServiceError(
+          `Limite de sécurité de pagination atteinte (${maxPages} pages / ${maxPages * pageSize} factures). Chargement annulé pour éviter un résultat partiel.`
+        )
+      };
+    }
+
+    return { data: allInvoices, error: null };
+  } catch (err: unknown) {
+    return { data: [], error: mapPostgresError(err) };
+  }
+}
+
+/**
+ * Valide et convertit un montant financier de manière stricte.
+ * - null / undefined / chaîne vide -> 0 (conforme au schéma SQL)
+ * - NaN / non-numérique -> Levée d'erreur explicite
+ * - Montant négatif -> Levée d'erreur explicite
+ */
+function parseAndValidateAmount(val: unknown, fieldName: string): number {
+  if (val === null || val === undefined || val === '') return 0;
+  const num = Number(val);
+  if (isNaN(num)) {
+    throw new FinanceServiceError(`Champ financier invalide (${fieldName}) : valeur non-numérique '${val}'.`);
+  }
+  if (num < 0) {
+    throw new FinanceServiceError(`Champ financier invalide (${fieldName}) : montant négatif '${val}' non autorisé.`);
+  }
+  return num;
+}
+
+/**
+ * Calcul canonique des KPIs du tableau de bord financier.
+ * RÈGLES STRICTES :
+ * - Total émis & Nombre de factures émises : incluent UNIQUEMENT 'issued', 'partially_paid', et 'paid'.
+ * - Brouillons ('draft') et Annulées ('voided') : STRICTEMENT EXCLUS du total émis et du nombre d'émises.
+ * - Reste à recouvrer : solde restant dû ('remaining_balance') des factures 'issued' et 'partially_paid'.
+ * - Total encaissé : total réglé ('paid_amount') des factures 'issued', 'partially_paid', et 'paid'.
+ * - Statut inconnu ou non-autorisé : Levée immédiate d'une exception FinanceServiceError.
+ * - Validation stricte des montants (rejet immédiat des NaN et montants négatifs).
+ * - Isolation stricte des devises USD et CDF.
+ */
+export function computeFinanceDashboardKPIs(invoices: DashboardInvoiceRecord[]): FinanceDashboardKpisResult {
+  const result: FinanceDashboardKpisResult = {
+    USD: { totalIssued: 0, totalPaid: 0, totalRemaining: 0, issuedCount: 0, paidCount: 0, partialCount: 0, draftCount: 0, voidedCount: 0 },
+    CDF: { totalIssued: 0, totalPaid: 0, totalRemaining: 0, issuedCount: 0, paidCount: 0, partialCount: 0, draftCount: 0, voidedCount: 0 }
+  };
+
+  if (!Array.isArray(invoices)) return result;
+
+  invoices.forEach((inv) => {
+    if (!inv) return;
+    const status = String(inv.status || '').toLowerCase().trim();
+    const currency = (inv.currency === 'CDF' ? 'CDF' : 'USD') as 'USD' | 'CDF';
+
+    const totalAmt = parseAndValidateAmount(inv.total_amount, 'total_amount');
+    const paidAmt = parseAndValidateAmount(inv.paid_amount, 'paid_amount');
+    const remAmt = parseAndValidateAmount(inv.remaining_balance, 'remaining_balance');
+
+    const target = result[currency];
+
+    if (status === 'draft') {
+      target.draftCount += 1;
+    } else if (status === 'voided') {
+      target.voidedCount += 1;
+    } else if (status === 'issued' || status === 'partially_paid' || status === 'paid') {
+      target.totalIssued += totalAmt;
+      target.totalPaid += paidAmt;
+      target.issuedCount += 1;
+
+      if (status === 'issued' || status === 'partially_paid') {
+        target.totalRemaining += remAmt;
+      }
+
+      if (status === 'paid') target.paidCount += 1;
+      if (status === 'partially_paid') target.partialCount += 1;
+    } else {
+      throw new FinanceServiceError(`Statut de facture inconnu ou non autorisé dans les KPIs : '${status}'.`);
+    }
+  });
+
+  return result;
 }

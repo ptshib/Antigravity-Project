@@ -15,11 +15,11 @@ export type FeeType =
 
 export type FeePeriodicity = 'unique' | 'mensuel' | 'trimestriel' | 'annuel';
 
-export type InvoiceStatus = 'draft' | 'issued' | 'partially_paid' | 'paid' | 'cancelled';
+export type InvoiceStatus = 'draft' | 'issued' | 'partially_paid' | 'paid' | 'voided';
 
 export type PaymentMethod = 'cash' | 'bank_transfer' | 'mobile_money' | 'card' | 'check' | 'other';
 
-export type PaymentStatus = 'completed' | 'cancelled';
+export type PaymentStatus = 'confirmed' | 'cancelled';
 
 export interface SchoolFee {
   id: string;
