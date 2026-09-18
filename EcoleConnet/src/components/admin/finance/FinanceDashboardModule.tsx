@@ -2,8 +2,8 @@
 // Tableau de bord financier principal pour le Portail Administrateur & Agent Financier
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { computeFinanceDashboardKPIs, fetchAllSchoolInvoices, getSchoolAgingSummary } from '../../../services/financeService';
-import type { AgingSummaryResponse } from '../../../types/finance';
+import { computeFinanceDashboardKPIs, fetchAllSchoolInvoices, getSchoolAgingSummary, getSchoolCollectionDashboard } from '../../../services/financeService';
+import type { AgingSummaryResponse, CollectionDashboardResponse } from '../../../types/finance';
 import { FormattedAmount } from '../../common/CurrencyBadge';
 import { SchoolFeesCatalogModule } from './SchoolFeesCatalogModule';
 import { StudentInvoicesModule } from './StudentInvoicesModule';
@@ -13,6 +13,8 @@ import { OverdueInvoicesTable } from './OverdueInvoicesTable';
 import { CollectionFollowupsTable } from './CollectionFollowupsTable';
 import { RecordCollectionActionModal } from './RecordCollectionActionModal';
 import { CollectionHistoryTimeline } from './CollectionHistoryTimeline';
+import { CollectionDashboardCards } from './CollectionDashboardCards';
+import { CollectionPrioritiesTable } from './CollectionPrioritiesTable';
 import {
   DollarSign,
   TrendingUp,
@@ -71,6 +73,7 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
   } | null>(null);
 
   const [refreshFollowupsTrigger, setRefreshFollowupsTrigger] = useState<number>(0);
+  const [refreshPrioritiesTrigger, setRefreshPrioritiesTrigger] = useState<number>(0);
 
   // Finance 4A State (Aging Summary)
   const [agingSummary, setAgingSummary] = useState<AgingSummaryResponse | null>(null);
@@ -81,6 +84,14 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
   const isMountedRef = useRef(true);
   const hasLoadedAgingRef = useRef(false);
 
+  // Finance 4C State (Collection Dashboard)
+  const [collectionDashboard, setCollectionDashboard] = useState<CollectionDashboardResponse | null>(null);
+  const [collectionDashboardLoading, setCollectionDashboardLoading] = useState<boolean>(false);
+  const [collectionDashboardError, setCollectionDashboardError] = useState<string | null>(null);
+
+  const collectionDashboardFetchLockRef = useRef(false);
+  const hasLoadedCollectionDashboardRef = useRef(false);
+
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
@@ -89,7 +100,6 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
   }, []);
 
   const fetchAgingData = useCallback(async () => {
-    // Verrou synchrone synchrone avant le premier await
     if (agingFetchLockRef.current) return;
     agingFetchLockRef.current = true;
 
@@ -115,13 +125,52 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
     }
   }, []);
 
-  // Chargement initial unique à l'ouverture de l'onglet créances (sécurisé contre la boucle d'erreur & StrictMode)
-  useEffect(() => {
-    if (activeSubTab === 'creances' && !hasLoadedAgingRef.current) {
-      hasLoadedAgingRef.current = true;
-      fetchAgingData();
+  const fetchCollectionDashboardData = useCallback(async () => {
+    if (collectionDashboardFetchLockRef.current) return;
+    collectionDashboardFetchLockRef.current = true;
+
+    if (isMountedRef.current) {
+      setCollectionDashboardLoading(true);
+      setCollectionDashboardError(null);
     }
-  }, [activeSubTab, fetchAgingData]);
+
+    try {
+      const dashRes = await getSchoolCollectionDashboard();
+      if (!isMountedRef.current) return;
+      setCollectionDashboard(dashRes);
+      setCollectionDashboardError(null);
+    } catch (err: unknown) {
+      if (!isMountedRef.current) return;
+      const msg = err instanceof Error ? err.message : 'Erreur lors du chargement du tableau de bord de recouvrement.';
+      setCollectionDashboardError(msg);
+    } finally {
+      collectionDashboardFetchLockRef.current = false;
+      if (isMountedRef.current) {
+        setCollectionDashboardLoading(false);
+      }
+    }
+  }, []);
+
+  // Chargement initial à l'ouverture de l'onglet créances
+  useEffect(() => {
+    if (activeSubTab === 'creances') {
+      if (!hasLoadedAgingRef.current) {
+        hasLoadedAgingRef.current = true;
+        fetchAgingData();
+      }
+      if (!hasLoadedCollectionDashboardRef.current) {
+        hasLoadedCollectionDashboardRef.current = true;
+        fetchCollectionDashboardData();
+      }
+    }
+  }, [activeSubTab, fetchAgingData, fetchCollectionDashboardData]);
+
+  const handleActionModalSuccess = () => {
+    fetchCollectionDashboardData();
+    setRefreshPrioritiesTrigger((prev) => prev + 1);
+    setRefreshFollowupsTrigger((prev) => prev + 1);
+  };
+
 
 
 
@@ -365,9 +414,23 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
             error={agingError}
             onRetry={fetchAgingData}
           />
+          <CollectionDashboardCards
+            data={collectionDashboard}
+            loading={collectionDashboardLoading}
+            error={collectionDashboardError}
+            onRetry={fetchCollectionDashboardData}
+          />
           <OverdueInvoicesTable
             onRecordAction={(inv) => setActionModalInvoice(inv)}
             onViewHistory={(inv) => setHistoryModalInvoice({ invoiceId: inv.invoice_id, invoiceNumber: inv.invoice_number, studentName: inv.student_name })}
+          />
+          <CollectionPrioritiesTable
+            refreshTrigger={refreshPrioritiesTrigger}
+            onActionSuccess={() => {
+              fetchCollectionDashboardData();
+              setRefreshPrioritiesTrigger((prev) => prev + 1);
+              setRefreshFollowupsTrigger((prev) => prev + 1);
+            }}
           />
           <CollectionFollowupsTable
             onRecordAction={(item) => setActionModalInvoice({
@@ -412,9 +475,7 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
         onClose={() => setActionModalInvoice(null)}
         invoice={actionModalInvoice}
         businessDate={agingSummary?.meta.business_date}
-        onSuccess={() => {
-          setRefreshFollowupsTrigger((prev) => prev + 1);
-        }}
+        onSuccess={handleActionModalSuccess}
       />
 
       <CollectionHistoryTimeline

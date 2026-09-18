@@ -13,7 +13,11 @@ import {
   validateCollectionFollowupsResponse,
   createInvoiceCollectionAction,
   getInvoiceCollectionHistory,
-  getSchoolCollectionFollowups
+  getSchoolCollectionFollowups,
+  validateCollectionDashboardResponse,
+  validateCollectionPrioritiesResponse,
+  getSchoolCollectionDashboard,
+  getSchoolCollectionPriorities
 } from '../services/financeService';
 import type { Currency } from '../types/finance';
 
@@ -2238,6 +2242,673 @@ export async function runFinanceFrontendTests(): Promise<{ total: number; passed
     assert(pulseOccurrences === 0, 'TEST 9.7.17 : Vérification source : aucune occurrence animate-pulse dans les trois nouveaux composants');
   } catch (err: unknown) {
     assert(false, `TEST 9.7.17 : Exception inattendue : ${err}`);
+  }
+
+  // --- TEST 10 : FINANCE 4C (PILOTAGE DU RECOUVREMENT & PRIORITÉS) ---
+  console.log('\n--- TEST 10 : FINANCE 4C (PILOTAGE DU RECOUVREMENT & PRIORITÉS) ---');
+
+  const validDashboardFixture = {
+    meta: {
+      school_id: '11111111-1111-1111-1111-111111111111',
+      school_timezone: 'Africa/Kinshasa',
+      timezone_fallback_applied: false,
+      evaluated_at_utc: '2026-09-18T18:39:58.267Z',
+      business_date: '2026-09-18'
+    },
+    currencies: {
+      USD: {
+        currency: 'USD',
+        total_overdue_amount: 1400.00,
+        total_overdue_count: 6,
+        never_contacted_amount: 100.00,
+        never_contacted_count: 1,
+        followup_due_count: 1,
+        promise_pending_amount: 300.00,
+        promise_pending_count: 1,
+        promise_overdue_amount: 600.00,
+        promise_overdue_count: 2,
+        actions_last_7_days_count: 5,
+        actions_last_30_days_count: 5,
+        collection_coverage_rate: 83.33,
+        average_overdue_days: 33,
+        critical_priority_count: 2,
+        high_priority_count: 1
+      },
+      CDF: {
+        currency: 'CDF',
+        total_overdue_amount: 1000000.00,
+        total_overdue_count: 1,
+        never_contacted_amount: 1000000.00,
+        never_contacted_count: 1,
+        followup_due_count: 0,
+        promise_pending_amount: 0.00,
+        promise_pending_count: 0,
+        promise_overdue_amount: 0.00,
+        promise_overdue_count: 0,
+        actions_last_7_days_count: 0,
+        actions_last_30_days_count: 0,
+        collection_coverage_rate: 0.00,
+        average_overdue_days: 30,
+        critical_priority_count: 0,
+        high_priority_count: 0
+      }
+    }
+  };
+
+  const validPriorityItemFixture = {
+    invoice_id: 'f0000000-0000-0000-0000-000000000006',
+    invoice_number: 'FAC-D06',
+    student_id: 'd1111111-1111-1111-1111-111111111111',
+    student_name: 'Marc Kabongo',
+    student_number: 'MAT-A1',
+    class_name: '6ème A',
+    invoice_due_date: '2026-06-10',
+    days_overdue: 100,
+    currency: 'USD',
+    total_amount: 1000.00,
+    paid_amount: 600.00,
+    remaining_balance: 400.00,
+    invoice_status: 'partially_paid',
+    collection_status: 'promise_overdue',
+    priority_level: 'critical',
+    priority_score: 130,
+    priority_reasons: [
+      'Promesse de paiement dépassée depuis le 2026-09-16',
+      'Relance à effectuer (dû le 2026-09-16)'
+    ],
+    effective_follow_up_date: '2026-09-16',
+    latest_action_id: 'ac000000-0000-0000-0000-000000000006',
+    latest_action_type: 'phone',
+    latest_contacted_at: '2026-09-13T18:39:58.267Z',
+    latest_promise_to_pay_date: '2026-09-16',
+    latest_next_follow_up_date: '2026-09-16',
+    last_contacted_by_name: 'Admin École A'
+  };
+
+  const validPrioritiesFixture = {
+    business_date: '2026-09-18',
+    items: [validPriorityItemFixture],
+    has_more: false,
+    next_cursor: null
+  };
+
+  // 10.1. Dashboard : Fixture SQL 15 KPIs USD & CDF acceptée
+  try {
+    const res = validateCollectionDashboardResponse(validDashboardFixture);
+    assert(
+      res.currencies.USD.total_overdue_count === 6 &&
+      res.currencies.CDF.total_overdue_amount === 1000000.00 &&
+      res.meta.business_date === '2026-09-18',
+      'TEST 10.1.1 : Fixture Dashboard SQL 15 KPIs acceptée'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 10.1.1 : Exception inattendue : ${err}`);
+  }
+
+  // 10.2. Dashboard : Zero-filled accepté
+  try {
+    const zeroDashboard = JSON.parse(JSON.stringify(validDashboardFixture));
+    zeroDashboard.currencies.USD.total_overdue_amount = 0;
+    zeroDashboard.currencies.USD.total_overdue_count = 0;
+    zeroDashboard.currencies.USD.never_contacted_amount = 0;
+    zeroDashboard.currencies.USD.never_contacted_count = 0;
+    zeroDashboard.currencies.USD.followup_due_count = 0;
+    zeroDashboard.currencies.USD.promise_pending_amount = 0;
+    zeroDashboard.currencies.USD.promise_pending_count = 0;
+    zeroDashboard.currencies.USD.promise_overdue_amount = 0;
+    zeroDashboard.currencies.USD.promise_overdue_count = 0;
+    zeroDashboard.currencies.USD.actions_last_7_days_count = 0;
+    zeroDashboard.currencies.USD.actions_last_30_days_count = 0;
+    zeroDashboard.currencies.USD.collection_coverage_rate = 0;
+    zeroDashboard.currencies.USD.average_overdue_days = 0;
+    zeroDashboard.currencies.USD.critical_priority_count = 0;
+    zeroDashboard.currencies.USD.high_priority_count = 0;
+
+    const res = validateCollectionDashboardResponse(zeroDashboard);
+    assert(res.currencies.USD.collection_coverage_rate === 0, 'TEST 10.1.2 : Dashboard zero-filled accepté');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.1.2 : Exception inattendue : ${err}`);
+  }
+
+  // 10.3. Dashboard : Rejet USD ou CDF manquant
+  try {
+    const invalidDash = JSON.parse(JSON.stringify(validDashboardFixture));
+    delete invalidDash.currencies.CDF;
+    let caught = false;
+    try {
+      validateCollectionDashboardResponse(invalidDash);
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 10.1.3 : Rejet si la synthèse CDF est manquante');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.1.3 : Exception inattendue : ${err}`);
+  }
+
+  // 10.4. Dashboard : Rejet montant négatif ou NaN
+  try {
+    const invalidDash = JSON.parse(JSON.stringify(validDashboardFixture));
+    invalidDash.currencies.USD.total_overdue_amount = -50;
+    let caught = false;
+    try {
+      validateCollectionDashboardResponse(invalidDash);
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 10.1.4 : Rejet d’un montant négatif dans le dashboard');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.1.4 : Exception inattendue : ${err}`);
+  }
+
+  // 10.5. Dashboard : Rejet compteur décimal ou négatif
+  try {
+    const invalidDash = JSON.parse(JSON.stringify(validDashboardFixture));
+    invalidDash.currencies.USD.total_overdue_count = 3.5;
+    let caught = false;
+    try {
+      validateCollectionDashboardResponse(invalidDash);
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 10.1.5 : Rejet d’un compteur décimal dans le dashboard');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.1.5 : Exception inattendue : ${err}`);
+  }
+
+  // 10.6. Dashboard : Rejet taux de couverture > 100
+  try {
+    const invalidDash = JSON.parse(JSON.stringify(validDashboardFixture));
+    invalidDash.currencies.USD.collection_coverage_rate = 105.00;
+    let caught = false;
+    try {
+      validateCollectionDashboardResponse(invalidDash);
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 10.1.6 : Rejet d’un taux de couverture > 100');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.1.6 : Exception inattendue : ${err}`);
+  }
+
+  // 10.7. Priorities : Fixture SQL 24 clés acceptée
+  try {
+    const res = validateCollectionPrioritiesResponse(validPrioritiesFixture);
+    assert(
+      res.items.length === 1 &&
+      res.items[0].invoice_id === 'f0000000-0000-0000-0000-000000000006' &&
+      res.items[0].priority_score === 130,
+      'TEST 10.2.1 : Fixture SQL 24 clés acceptée'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 10.2.1 : Exception inattendue : ${err}`);
+  }
+
+  // 10.8. Priorities : Rejet si une des 24 clés est manquante
+  try {
+    const invalidPrioItem = JSON.parse(JSON.stringify(validPriorityItemFixture));
+    delete invalidPrioItem.invoice_due_date;
+    let caught = false;
+    try {
+      validateCollectionPrioritiesResponse({
+        business_date: '2026-09-18',
+        items: [invalidPrioItem],
+        has_more: false,
+        next_cursor: null
+      });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 10.2.2 : Rejet si une des 24 clés SQL est manquante');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.2.2 : Exception inattendue : ${err}`);
+  }
+
+  // 10.9. Priorities : Rejet ancien alias seul (ex: due_date sans invoice_due_date)
+  try {
+    const aliasItem = JSON.parse(JSON.stringify(validPriorityItemFixture));
+    delete aliasItem.invoice_due_date;
+    aliasItem.due_date = '2026-06-10';
+    let caught = false;
+    try {
+      validateCollectionPrioritiesResponse({
+        business_date: '2026-09-18',
+        items: [aliasItem],
+        has_more: false,
+        next_cursor: null
+      });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 10.2.3 : Rejet d’un ancien alias seul (due_date)');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.2.3 : Exception inattendue : ${err}`);
+  }
+
+  // 10.10. Priorities : Rejet UUID invalide
+  try {
+    const invalidUuidItem = JSON.parse(JSON.stringify(validPriorityItemFixture));
+    invalidUuidItem.invoice_id = 'invalid-uuid-string';
+    let caught = false;
+    try {
+      validateCollectionPrioritiesResponse({
+        business_date: '2026-09-18',
+        items: [invalidUuidItem],
+        has_more: false,
+        next_cursor: null
+      });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 10.2.4 : Rejet d’un UUID invalide');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.2.4 : Exception inattendue : ${err}`);
+  }
+
+  // 10.11. Priorities : Rejet date impossible (2026-02-31)
+  try {
+    const badDateItem = JSON.parse(JSON.stringify(validPriorityItemFixture));
+    badDateItem.invoice_due_date = '2026-02-31';
+    let caught = false;
+    try {
+      validateCollectionPrioritiesResponse({
+        business_date: '2026-09-18',
+        items: [badDateItem],
+        has_more: false,
+        next_cursor: null
+      });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 10.2.5 : Rejet d’une date calendrier impossible (2026-02-31)');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.2.5 : Exception inattendue : ${err}`);
+  }
+
+  // 10.12. Priorities : Rejet statut facture non-échu (draft)
+  try {
+    const badStatusItem = JSON.parse(JSON.stringify(validPriorityItemFixture));
+    badStatusItem.invoice_status = 'draft';
+    let caught = false;
+    try {
+      validateCollectionPrioritiesResponse({
+        business_date: '2026-09-18',
+        items: [badStatusItem],
+        has_more: false,
+        next_cursor: null
+      });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 10.2.6 : Rejet d’un statut de facture non-autorisé (draft)');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.2.6 : Exception inattendue : ${err}`);
+  }
+
+  // 10.13. Priorities : Rejet paid_amount > total_amount
+  try {
+    const overpaidItem = JSON.parse(JSON.stringify(validPriorityItemFixture));
+    overpaidItem.paid_amount = 1200.00;
+    let caught = false;
+    try {
+      validateCollectionPrioritiesResponse({
+        business_date: '2026-09-18',
+        items: [overpaidItem],
+        has_more: false,
+        next_cursor: null
+      });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 10.2.7 : Rejet d’un paid_amount > total_amount');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.2.7 : Exception inattendue : ${err}`);
+  }
+
+  // 10.14. Priorities : Rejet has_more=true avec next_cursor null
+  try {
+    let caught = false;
+    try {
+      validateCollectionPrioritiesResponse({
+        business_date: '2026-09-18',
+        items: [validPriorityItemFixture],
+        has_more: true,
+        next_cursor: null
+      });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 10.2.8 : Rejet de has_more = true avec next_cursor null');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.2.8 : Exception inattendue : ${err}`);
+  }
+
+  // 10.15. RPC : getSchoolCollectionDashboard zéro argument
+  try {
+    let rpcCalled = false;
+    let rpcArgsLength = -1;
+    const { supabase } = await import('../lib/supabase');
+    const originalRpc = supabase.rpc;
+
+    (supabase as any).rpc = async (fnName: string, ...args: any[]) => {
+      rpcCalled = true;
+      rpcArgsLength = args.length;
+      assert(fnName === 'get_school_collection_dashboard', 'TEST 10.3.1 : Nom exact de la RPC dashboard');
+      return { data: validDashboardFixture, error: null };
+    };
+
+    try {
+      await getSchoolCollectionDashboard();
+      assert(rpcCalled && rpcArgsLength === 0, 'TEST 10.3.2 : Dashboard RPC exécuté avec zéro argument');
+    } finally {
+      (supabase as any).rpc = originalRpc;
+    }
+  } catch (err: unknown) {
+    assert(false, `TEST 10.3.2 : Exception inattendue : ${err}`);
+  }
+
+  // 10.16. RPC : getSchoolCollectionPriorities exact 6 paramètres sans p_school_id ni undefined
+  try {
+    let capturedParams: any = null;
+    const { supabase } = await import('../lib/supabase');
+    const originalRpc = supabase.rpc;
+
+    (supabase as any).rpc = async (fnName: string, params: any) => {
+      capturedParams = params;
+      assert(fnName === 'get_school_collection_priorities', 'TEST 10.3.3 : Nom exact de la RPC priorités');
+      return { data: validPrioritiesFixture, error: null };
+    };
+
+    try {
+      await getSchoolCollectionPriorities({ p_currency: 'USD', p_priority_filter: 'critical', p_limit: 15 });
+      const paramKeys = Object.keys(capturedParams);
+      assert(paramKeys.length === 6, 'TEST 10.3.4 : Priorities RPC exécutée avec exactement 6 paramètres');
+      assert(!('p_school_id' in capturedParams), 'TEST 10.3.5 : Absence totale de p_school_id dans les paramètres');
+      assert(
+        capturedParams.p_currency === 'USD' &&
+        capturedParams.p_priority_filter === 'critical' &&
+        capturedParams.p_limit === 15 &&
+        capturedParams.p_cursor_priority_score === null &&
+        capturedParams.p_cursor_effective_date === null &&
+        capturedParams.p_cursor_invoice_id === null,
+        'TEST 10.3.6 : Normalisation et transmission des paramètres 4C conformes sans undefined'
+      );
+    } finally {
+      (supabase as any).rpc = originalRpc;
+    }
+  } catch (err: unknown) {
+    assert(false, `TEST 10.3.6 : Exception inattendue : ${err}`);
+  }
+
+  // 10.17. Pagination Keyset : 3 pages / 7 items avec N+1 et 0 doublon
+  try {
+    const item1 = JSON.parse(JSON.stringify(validPriorityItemFixture));
+    item1.invoice_id = 'f0000000-0000-0000-0000-000000000001';
+    item1.priority_score = 100;
+
+    const item2 = JSON.parse(JSON.stringify(validPriorityItemFixture));
+    item2.invoice_id = 'f0000000-0000-0000-0000-000000000002';
+    item2.priority_score = 90;
+
+    const item3 = JSON.parse(JSON.stringify(validPriorityItemFixture));
+    item3.invoice_id = 'f0000000-0000-0000-0000-000000000003';
+    item3.priority_score = 80;
+
+    const item4 = JSON.parse(JSON.stringify(validPriorityItemFixture));
+    item4.invoice_id = 'f0000000-0000-0000-0000-000000000004';
+    item4.priority_score = 70;
+
+    const item5 = JSON.parse(JSON.stringify(validPriorityItemFixture));
+    item5.invoice_id = 'f0000000-0000-0000-0000-000000000005';
+    item5.priority_score = 60;
+
+    const item6 = JSON.parse(JSON.stringify(validPriorityItemFixture));
+    item6.invoice_id = 'f0000000-0000-0000-0000-000000000006';
+    item6.priority_score = 50;
+
+    const item7 = JSON.parse(JSON.stringify(validPriorityItemFixture));
+    item7.invoice_id = 'f0000000-0000-0000-0000-000000000007';
+    item7.priority_score = 40;
+
+    const { supabase } = await import('../lib/supabase');
+    const originalRpc = supabase.rpc;
+
+    (supabase as any).rpc = async (_fnName: string, params: any) => {
+      if (params.p_cursor_invoice_id === null) {
+        return {
+          data: {
+            business_date: '2026-09-18',
+            items: [item1, item2, item3],
+            has_more: true,
+            next_cursor: { priority_score: 80, effective_date: '2026-09-16', invoice_id: item3.invoice_id }
+          },
+          error: null
+        };
+      } else if (params.p_cursor_invoice_id === item3.invoice_id) {
+        return {
+          data: {
+            business_date: '2026-09-18',
+            items: [item4, item5, item6],
+            has_more: true,
+            next_cursor: { priority_score: 50, effective_date: '2026-09-16', invoice_id: item6.invoice_id }
+          },
+          error: null
+        };
+      } else {
+        return {
+          data: {
+            business_date: '2026-09-18',
+            items: [item7],
+            has_more: false,
+            next_cursor: null
+          },
+          error: null
+        };
+      }
+    };
+
+    try {
+      const page1 = await getSchoolCollectionPriorities({}, null);
+      assert(page1.items.length === 3 && page1.has_more, 'TEST 10.4.1 : Page 1 keyset retourne 3 items et has_more = true');
+
+      const page2 = await getSchoolCollectionPriorities({}, page1.next_cursor);
+      assert(page2.items.length === 3 && page2.items[0].invoice_id === item4.invoice_id, 'TEST 10.4.2 : Page 2 keyset avec N+1 au début');
+
+      const page3 = await getSchoolCollectionPriorities({}, page2.next_cursor);
+      assert(page3.items.length === 1 && !page3.has_more && page3.next_cursor === null, 'TEST 10.4.3 : Page 3 keyset avec has_more = false et next_cursor null');
+    } finally {
+      (supabase as any).rpc = originalRpc;
+    }
+  } catch (err: unknown) {
+    assert(false, `TEST 10.4.3 : Exception inattendue : ${err}`);
+  }
+
+  // 10.18. Priorities : class_name string normale acceptée
+  try {
+    const res = validateCollectionPrioritiesResponse(validPrioritiesFixture);
+    assert(res.items[0].class_name === '6ème A', 'TEST 10.2.9 : class_name string normale acceptée');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.2.9 : Exception inattendue : ${err}`);
+  }
+
+  // 10.19. Priorities : class_name null acceptée
+  try {
+    const nullClassFixture = JSON.parse(JSON.stringify(validPrioritiesFixture));
+    nullClassFixture.items[0].class_name = null;
+    const res = validateCollectionPrioritiesResponse(nullClassFixture);
+    assert(res.items[0].class_name === null, 'TEST 10.2.10 : class_name null acceptée et retournée comme null');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.2.10 : Exception inattendue : ${err}`);
+  }
+
+  // 10.20. Priorities : class_name absente (undefined) ou de mauvais type / chaîne vide rejetée
+  try {
+    const invalidClassFixture = JSON.parse(JSON.stringify(validPrioritiesFixture));
+    delete invalidClassFixture.items[0].class_name;
+    let caught = false;
+    try {
+      validateCollectionPrioritiesResponse(invalidClassFixture);
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 10.2.11 : Rejet si class_name est manquant (undefined)');
+
+    const emptyClassFixture = JSON.parse(JSON.stringify(validPrioritiesFixture));
+    emptyClassFixture.items[0].class_name = '   ';
+    let caughtEmpty = false;
+    try {
+      validateCollectionPrioritiesResponse(emptyClassFixture);
+    } catch {
+      caughtEmpty = true;
+    }
+    assert(caughtEmpty, 'TEST 10.2.12 : Rejet si class_name est une chaîne vide');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.2.12 : Exception inattendue : ${err}`);
+  }
+
+  // 10.21. Priorities : Tous les 7 champs nullable acceptés simultanément à null
+  try {
+    const nullFieldsFixture = JSON.parse(JSON.stringify(validPrioritiesFixture));
+    nullFieldsFixture.items[0].class_name = null;
+    nullFieldsFixture.items[0].latest_action_id = null;
+    nullFieldsFixture.items[0].latest_action_type = null;
+    nullFieldsFixture.items[0].latest_contacted_at = null;
+    nullFieldsFixture.items[0].latest_promise_to_pay_date = null;
+    nullFieldsFixture.items[0].latest_next_follow_up_date = null;
+    nullFieldsFixture.items[0].last_contacted_by_name = null;
+    const res = validateCollectionPrioritiesResponse(nullFieldsFixture);
+    assert(
+      res.items[0].class_name === null &&
+      res.items[0].latest_action_id === null &&
+      res.items[0].latest_action_type === null &&
+      res.items[0].latest_contacted_at === null &&
+      res.items[0].latest_promise_to_pay_date === null &&
+      res.items[0].latest_next_follow_up_date === null &&
+      res.items[0].last_contacted_by_name === null,
+      'TEST 10.2.13 : Tous les 7 champs nullable acceptés à null simultanément'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 10.2.13 : Exception inattendue : ${err}`);
+  }
+
+  // 10.21.1. Priorities : student_number valide accepté
+  try {
+    const validStudentNumFixture = JSON.parse(JSON.stringify(validPrioritiesFixture));
+    validStudentNumFixture.items[0].student_number = 'MAT-2026-99';
+    const res = validateCollectionPrioritiesResponse(validStudentNumFixture);
+    assert(res.items[0].student_number === 'MAT-2026-99', 'TEST 10.2.14 : student_number valide accepté');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.2.14 : Exception inattendue : ${err}`);
+  }
+
+  // 10.21.2. Priorities : student_number absent/vide rejeté
+  try {
+    const missingNumFixture = JSON.parse(JSON.stringify(validPrioritiesFixture));
+    delete missingNumFixture.items[0].student_number;
+    let caughtMissing = false;
+    try {
+      validateCollectionPrioritiesResponse(missingNumFixture);
+    } catch {
+      caughtMissing = true;
+    }
+    assert(caughtMissing, 'TEST 10.2.15 : student_number absent (undefined) rejeté');
+
+    const emptyNumFixture = JSON.parse(JSON.stringify(validPrioritiesFixture));
+    emptyNumFixture.items[0].student_number = '   ';
+    let caughtEmptyNum = false;
+    try {
+      validateCollectionPrioritiesResponse(emptyNumFixture);
+    } catch {
+      caughtEmptyNum = true;
+    }
+    assert(caughtEmptyNum, 'TEST 10.2.15.2 : student_number vide rejeté');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.2.15 : Exception inattendue : ${err}`);
+  }
+
+  // 10.21.3. Priorities : created_at absent accepté
+  try {
+    const noCreatedAtFixture = JSON.parse(JSON.stringify(validPrioritiesFixture));
+    assert(!('created_at' in noCreatedAtFixture.items[0]), 'TEST 10.2.16 : created_at est absent de la fixture 24 clés SQL');
+    const resNoCreatedAt = validateCollectionPrioritiesResponse(noCreatedAtFixture);
+    assert(resNoCreatedAt.items.length === 1, 'TEST 10.2.16.2 : created_at absent de la fixture est accepté avec succès');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.2.16 : Exception inattendue : ${err}`);
+  }
+
+  // 10.21.4. Priorities : présence de created_at ne compense jamais l'absence de student_number
+  try {
+    const fakeCreatedAtFixture = JSON.parse(JSON.stringify(validPrioritiesFixture));
+    delete fakeCreatedAtFixture.items[0].student_number;
+    fakeCreatedAtFixture.items[0].created_at = '2026-09-18T12:00:00Z';
+    let caughtCompensate = false;
+    try {
+      validateCollectionPrioritiesResponse(fakeCreatedAtFixture);
+    } catch {
+      caughtCompensate = true;
+    }
+    assert(caughtCompensate, 'TEST 10.2.17 : La présence de created_at ne compense jamais l’absence de student_number');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.2.17 : Exception inattendue : ${err}`);
+  }
+
+  // 10.21.5. Priorities : les 24 clés SQL canoniques sont couvertes avec student_number et sans created_at
+  try {
+    const res24Keys = validateCollectionPrioritiesResponse(validPrioritiesFixture);
+    const itemKeys = Object.keys(validPrioritiesFixture.items[0]);
+    assert(res24Keys.items.length === 1 && itemKeys.length === 24 && !itemKeys.includes('created_at') && itemKeys.includes('student_number'), 'TEST 10.2.18 : Les 24 clés SQL canoniques sont couvertes avec student_number et sans created_at');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.2.18 : Exception inattendue : ${err}`);
+  }
+
+
+  // 10.22. RPC Pre-flight : Limite 0 et 101 rejetée côté client avant RPC
+  try {
+    let caught0 = false;
+    try {
+      await getSchoolCollectionPriorities({ p_limit: 0 });
+    } catch (e: any) {
+      if (e.code === '22023') caught0 = true;
+    }
+    assert(caught0, 'TEST 10.3.7 : Limite p_limit = 0 rejetée côté client avec code 22023');
+
+    let caught101 = false;
+    try {
+      await getSchoolCollectionPriorities({ p_limit: 101 });
+    } catch (e: any) {
+      if (e.code === '22023') caught101 = true;
+    }
+    assert(caught101, 'TEST 10.3.8 : Limite p_limit = 101 rejetée côté client avec code 22023');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.3.8 : Exception inattendue : ${err}`);
+  }
+
+  // 10.23. RPC Pre-flight : Curseur partiel rejeté côté client avant RPC
+  try {
+    let caughtPartial = false;
+    try {
+      await getSchoolCollectionPriorities({}, { priority_score: 100 } as any);
+    } catch (e: any) {
+      if (e.code === '22023') caughtPartial = true;
+    }
+    assert(caughtPartial, 'TEST 10.3.9 : Curseur partiel rejeté côté client avec code 22023');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.3.9 : Exception inattendue : ${err}`);
+  }
+
+  // 10.24. Source code check : Aucune occurrence animate-pulse dans les 2 nouveaux composants 4C
+  try {
+    const { CollectionDashboardCards } = await import('../components/admin/finance/CollectionDashboardCards');
+    const { CollectionPrioritiesTable } = await import('../components/admin/finance/CollectionPrioritiesTable');
+
+    const dashSrc = CollectionDashboardCards.toString();
+    const prioSrc = CollectionPrioritiesTable.toString();
+
+    const pulseOccurrences = (dashSrc.match(/animate-pulse/g) || []).length +
+      (prioSrc.match(/animate-pulse/g) || []).length;
+
+    assert(pulseOccurrences === 0, 'TEST 10.5.1 : Source check : aucune occurrence animate-pulse dans les 2 nouveaux composants 4C');
+  } catch (err: unknown) {
+    assert(false, `TEST 10.5.1 : Exception inattendue : ${err}`);
   }
 
   console.log(`\n=== RÉSULTATS : ${passed}/${total} TESTS RÉUSSIS ===\n`);

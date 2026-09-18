@@ -464,3 +464,90 @@ export interface CreateCollectionActionInput {
   promise_to_pay_date?: string | null;
   next_follow_up_date?: string | null;
 }
+
+// ---------------------------------------------------------------------------
+// CONTRATS TYPESCRIPT STRICTS POUR FINANCE 4C (PILOTAGE DU RECOUVREMENT)
+// ---------------------------------------------------------------------------
+
+export type CollectionPriorityLevel = 'critical' | 'high' | 'normal';
+
+export interface CollectionDashboardMeta {
+  school_id: string;
+  school_timezone: string;
+  timezone_fallback_applied: boolean;
+  evaluated_at_utc: string;
+  business_date: string;
+}
+
+export interface CollectionDashboardCurrency {
+  currency: Currency;
+  total_overdue_amount: number;
+  total_overdue_count: number;
+  never_contacted_amount: number;
+  never_contacted_count: number;
+  followup_due_count: number;
+  promise_pending_amount: number;
+  promise_pending_count: number;
+  promise_overdue_amount: number;
+  promise_overdue_count: number;
+  actions_last_7_days_count: number;
+  actions_last_30_days_count: number;
+  collection_coverage_rate: number;
+  average_overdue_days: number;
+  critical_priority_count: number;
+  high_priority_count: number;
+}
+
+export interface CollectionDashboardResponse {
+  meta: CollectionDashboardMeta;
+  currencies: {
+    USD: CollectionDashboardCurrency;
+    CDF: CollectionDashboardCurrency;
+  };
+}
+
+export interface CollectionPriorityItem {
+  invoice_id: string;
+  invoice_number: string;
+  student_id: string;
+  student_name: string;
+  student_number: string;
+  class_name: string | null;
+  invoice_due_date: string;
+  days_overdue: number;
+  currency: Currency;
+  total_amount: number;
+  paid_amount: number;
+  remaining_balance: number;
+  invoice_status: 'issued' | 'partially_paid';
+  collection_status: CollectionStatus;
+  priority_level: CollectionPriorityLevel;
+  priority_score: number;
+  priority_reasons: string[];
+  effective_follow_up_date: string;
+  latest_action_id: string | null;
+  latest_action_type: CollectionActionType | null;
+  latest_contacted_at: string | null;
+  latest_promise_to_pay_date: string | null;
+  latest_next_follow_up_date: string | null;
+  last_contacted_by_name: string | null;
+}
+
+export interface CollectionPrioritiesCursor {
+  priority_score: number;
+  effective_date: string;
+  invoice_id: string;
+}
+
+export interface CollectionPrioritiesResponse {
+  business_date: string;
+  items: CollectionPriorityItem[];
+  has_more: boolean;
+  next_cursor: CollectionPrioritiesCursor | null;
+}
+
+export interface CollectionPrioritiesFilters {
+  p_currency?: Currency | null;
+  p_priority_filter?: CollectionPriorityLevel | 'all' | null;
+  p_limit?: number;
+}

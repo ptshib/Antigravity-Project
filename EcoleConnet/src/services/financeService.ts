@@ -30,7 +30,14 @@ import type {
   CollectionFollowupsCursor,
   CollectionFollowupsResponse,
   CollectionFollowupsFilters,
-  CreateCollectionActionInput
+  CreateCollectionActionInput,
+  CollectionPriorityLevel,
+  CollectionDashboardCurrency,
+  CollectionDashboardResponse,
+  CollectionPriorityItem,
+  CollectionPrioritiesCursor,
+  CollectionPrioritiesResponse,
+  CollectionPrioritiesFilters
 } from '../types/finance';
 
 /**
@@ -65,6 +72,12 @@ function getNumberProperty(obj: Record<string, unknown>, key: string): number | 
     if (typeof val === 'number') return val;
   }
   return null;
+}
+
+function isValidCalendarDate(dateStr: string): boolean {
+  if (typeof dateStr !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
+  if (isNaN(Date.parse(dateStr))) return false;
+  return new Date(dateStr).toISOString().substring(0, 10) === dateStr;
 }
 
 /**
@@ -1613,6 +1626,403 @@ export async function getSchoolCollectionFollowups(
       throw mapPostgresError(error);
     }
     return validateCollectionFollowupsResponse(data);
+  } catch (err: unknown) {
+    if (err instanceof FinanceServiceError) throw err;
+    throw mapPostgresError(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// VALIDATEURS ET MÉTHODES RPC POUR FINANCE 4C (PILOTAGE DU RECOUVREMENT)
+// ---------------------------------------------------------------------------
+
+const VALID_COLLECTION_PRIORITY_LEVELS: CollectionPriorityLevel[] = ['critical', 'high', 'normal'];
+
+export function validateCollectionDashboardResponse(data: unknown): CollectionDashboardResponse {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Réponse du tableau de bord de recouvrement invalide (non-objet).', '22023');
+  }
+
+  const metaObj = data.meta;
+  if (!isObject(metaObj)) {
+    throw new FinanceServiceError("Propriété 'meta' invalide ou manquante dans le tableau de bord.", '22023');
+  }
+
+  const school_id = metaObj.school_id;
+  if (typeof school_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(school_id)) {
+    throw new FinanceServiceError("Propriété 'meta.school_id' invalide (doit être un UUID valide).", '22023');
+  }
+
+  const school_timezone = metaObj.school_timezone;
+  if (typeof school_timezone !== 'string' || !school_timezone.trim()) {
+    throw new FinanceServiceError("Propriété 'meta.school_timezone' invalide (chaîne non vide requise).", '22023');
+  }
+
+  const timezone_fallback_applied = metaObj.timezone_fallback_applied;
+  if (typeof timezone_fallback_applied !== 'boolean') {
+    throw new FinanceServiceError("Propriété 'meta.timezone_fallback_applied' invalide (booléen requis).", '22023');
+  }
+
+  const evaluated_at_utc = metaObj.evaluated_at_utc;
+  if (typeof evaluated_at_utc !== 'string' || isNaN(Date.parse(evaluated_at_utc))) {
+    throw new FinanceServiceError("Propriété 'meta.evaluated_at_utc' invalide (horodatage UTC ISO valide requis).", '22023');
+  }
+
+  const business_date = metaObj.business_date;
+  if (typeof business_date !== 'string' || !isValidCalendarDate(business_date)) {
+    throw new FinanceServiceError("Propriété 'meta.business_date' invalide (date calendrier 'YYYY-MM-DD' requise).", '22023');
+  }
+
+  const currenciesObj = data.currencies;
+  if (!isObject(currenciesObj)) {
+    throw new FinanceServiceError("Propriété 'currencies' invalide ou manquante dans le tableau de bord.", '22023');
+  }
+
+  const validateCurrencyObj = (cObj: unknown, currName: 'USD' | 'CDF'): CollectionDashboardCurrency => {
+    if (!isObject(cObj)) {
+      throw new FinanceServiceError(`Données de synthèse ${currName} manquantes ou invalides.`, '22023');
+    }
+
+    if (cObj.currency !== currName) {
+      throw new FinanceServiceError(`Propriété 'currency' incohérente pour ${currName} (reçu: '${cObj.currency}').`, '22023');
+    }
+
+    const validateNumber = (key: string, min = 0, integerOnly = false): number => {
+      const val = cObj[key];
+      if (typeof val !== 'number' || !Number.isFinite(val) || val < min || (integerOnly && !Number.isInteger(val))) {
+        throw new FinanceServiceError(`Propriété '${key}' invalide pour la devise ${currName}.`, '22023');
+      }
+      return val;
+    };
+
+    const total_overdue_amount = validateNumber('total_overdue_amount', 0);
+    const total_overdue_count = validateNumber('total_overdue_count', 0, true);
+    const never_contacted_amount = validateNumber('never_contacted_amount', 0);
+    const never_contacted_count = validateNumber('never_contacted_count', 0, true);
+    const followup_due_count = validateNumber('followup_due_count', 0, true);
+    const promise_pending_amount = validateNumber('promise_pending_amount', 0);
+    const promise_pending_count = validateNumber('promise_pending_count', 0, true);
+    const promise_overdue_amount = validateNumber('promise_overdue_amount', 0);
+    const promise_overdue_count = validateNumber('promise_overdue_count', 0, true);
+    const actions_last_7_days_count = validateNumber('actions_last_7_days_count', 0, true);
+    const actions_last_30_days_count = validateNumber('actions_last_30_days_count', 0, true);
+    const collection_coverage_rate = validateNumber('collection_coverage_rate', 0);
+    if (collection_coverage_rate > 100) {
+      throw new FinanceServiceError(`Propriété 'collection_coverage_rate' invalide pour ${currName} (doit être <= 100).`, '22023');
+    }
+    const average_overdue_days = validateNumber('average_overdue_days', 0, true);
+    const critical_priority_count = validateNumber('critical_priority_count', 0, true);
+    const high_priority_count = validateNumber('high_priority_count', 0, true);
+
+    return {
+      currency: currName,
+      total_overdue_amount,
+      total_overdue_count,
+      never_contacted_amount,
+      never_contacted_count,
+      followup_due_count,
+      promise_pending_amount,
+      promise_pending_count,
+      promise_overdue_amount,
+      promise_overdue_count,
+      actions_last_7_days_count,
+      actions_last_30_days_count,
+      collection_coverage_rate,
+      average_overdue_days,
+      critical_priority_count,
+      high_priority_count
+    };
+  };
+
+  const usdCurrency = validateCurrencyObj(currenciesObj.USD, 'USD');
+  const cdfCurrency = validateCurrencyObj(currenciesObj.CDF, 'CDF');
+
+  return {
+    meta: {
+      school_id,
+      school_timezone,
+      timezone_fallback_applied,
+      evaluated_at_utc,
+      business_date
+    },
+    currencies: {
+      USD: usdCurrency,
+      CDF: cdfCurrency
+    }
+  };
+}
+
+export function validateCollectionPrioritiesResponse(data: unknown): CollectionPrioritiesResponse {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Réponse des priorités de recouvrement invalide (non-objet).', '22023');
+  }
+
+  const business_date = data.business_date;
+  if (typeof business_date !== 'string' || !isValidCalendarDate(business_date)) {
+    throw new FinanceServiceError("Propriété 'business_date' invalide ou manquante dans la liste des priorités.", '22023');
+  }
+
+  if (!Array.isArray(data.items)) {
+    throw new FinanceServiceError("Propriété 'items' invalide dans la liste des priorités (tableau requis).", '22023');
+  }
+
+  const items: CollectionPriorityItem[] = data.items.map((item, idx) => {
+    if (!isObject(item)) {
+      throw new FinanceServiceError(`Élément #${idx} de la liste des priorités non-objet.`, '22023');
+    }
+
+    const keys = Object.keys(item);
+    if (keys.length !== 24) {
+      throw new FinanceServiceError(`Élément #${idx} de la liste des priorités contient ${keys.length} clés au lieu des 24 clés SQL exactes.`, '22023');
+    }
+
+    const invoice_id = item.invoice_id;
+    if (typeof invoice_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invoice_id)) {
+      throw new FinanceServiceError(`Élément #${idx} : invoice_id invalide ou manquant.`, '22023');
+    }
+
+    const invoice_number = item.invoice_number;
+    if (typeof invoice_number !== 'string' || !invoice_number.trim()) {
+      throw new FinanceServiceError(`Élément #${idx} : invoice_number invalide.`, '22023');
+    }
+
+    const student_id = item.student_id;
+    if (typeof student_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(student_id)) {
+      throw new FinanceServiceError(`Élément #${idx} : student_id invalide.`, '22023');
+    }
+
+    const student_name = item.student_name;
+    if (typeof student_name !== 'string' || !student_name.trim()) {
+      throw new FinanceServiceError(`Élément #${idx} : student_name invalide.`, '22023');
+    }
+
+    const student_number = item.student_number;
+    if (typeof student_number !== 'string' || !student_number.trim()) {
+      throw new FinanceServiceError(`Élément #${idx} : student_number invalide.`, '22023');
+    }
+
+    const class_name = item.class_name;
+    if (class_name !== null && (typeof class_name !== 'string' || !class_name.trim())) {
+      throw new FinanceServiceError(`Élément #${idx} : class_name invalide.`, '22023');
+    }
+
+    const invoice_due_date = item.invoice_due_date;
+    if (typeof invoice_due_date !== 'string' || !isValidCalendarDate(invoice_due_date)) {
+      throw new FinanceServiceError(`Élément #${idx} : invoice_due_date invalide ou date calendrier impossible.`, '22023');
+    }
+
+    const days_overdue = item.days_overdue;
+    if (typeof days_overdue !== 'number' || !Number.isInteger(days_overdue) || days_overdue < 1) {
+      throw new FinanceServiceError(`Élément #${idx} : days_overdue invalide (doit être un entier >= 1).`, '22023');
+    }
+
+    const currency = item.currency;
+    if (currency !== 'USD' && currency !== 'CDF') {
+      throw new FinanceServiceError(`Élément #${idx} : currency invalide (reçu: ${currency}).`, '22023');
+    }
+
+    const total_amount = item.total_amount;
+    if (typeof total_amount !== 'number' || !Number.isFinite(total_amount) || total_amount <= 0) {
+      throw new FinanceServiceError(`Élément #${idx} : total_amount invalide (doit être > 0).`, '22023');
+    }
+
+    const paid_amount = item.paid_amount;
+    if (typeof paid_amount !== 'number' || !Number.isFinite(paid_amount) || paid_amount < 0 || paid_amount > total_amount) {
+      throw new FinanceServiceError(`Élément #${idx} : paid_amount invalide (doit être >= 0 et <= total_amount).`, '22023');
+    }
+
+    const remaining_balance = item.remaining_balance;
+    if (typeof remaining_balance !== 'number' || !Number.isFinite(remaining_balance) || remaining_balance <= 0) {
+      throw new FinanceServiceError(`Élément #${idx} : remaining_balance invalide (doit être > 0).`, '22023');
+    }
+
+    const invoice_status = item.invoice_status;
+    if (invoice_status !== 'issued' && invoice_status !== 'partially_paid') {
+      throw new FinanceServiceError(`Élément #${idx} : invoice_status invalide (doit être 'issued' ou 'partially_paid').`, '22023');
+    }
+
+    const collection_status = item.collection_status;
+    if (typeof collection_status !== 'string' || !VALID_COLLECTION_STATUSES.includes(collection_status as CollectionStatus)) {
+      throw new FinanceServiceError(`Élément #${idx} : collection_status invalide (reçu: ${collection_status}).`, '22023');
+    }
+
+    const priority_level = item.priority_level;
+    if (typeof priority_level !== 'string' || !VALID_COLLECTION_PRIORITY_LEVELS.includes(priority_level as CollectionPriorityLevel)) {
+      throw new FinanceServiceError(`Élément #${idx} : priority_level invalide (reçu: ${priority_level}).`, '22023');
+    }
+
+    const priority_score = item.priority_score;
+    if (typeof priority_score !== 'number' || !Number.isInteger(priority_score) || priority_score < 0) {
+      throw new FinanceServiceError(`Élément #${idx} : priority_score invalide (doit être un entier >= 0).`, '22023');
+    }
+
+    const priority_reasons = item.priority_reasons;
+    if (!Array.isArray(priority_reasons) || !priority_reasons.every(r => typeof r === 'string' && r.length > 0)) {
+      throw new FinanceServiceError(`Élément #${idx} : priority_reasons invalide (tableau de chaînes non vides requis).`, '22023');
+    }
+
+    const effective_follow_up_date = item.effective_follow_up_date;
+    if (typeof effective_follow_up_date !== 'string' || !isValidCalendarDate(effective_follow_up_date)) {
+      throw new FinanceServiceError(`Élément #${idx} : effective_follow_up_date invalide.`, '22023');
+    }
+
+    const latest_action_id = item.latest_action_id;
+    if (latest_action_id !== null && (typeof latest_action_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(latest_action_id))) {
+      throw new FinanceServiceError(`Élément #${idx} : latest_action_id invalide.`, '22023');
+    }
+
+    const latest_action_type = item.latest_action_type;
+    if (latest_action_type !== null && (typeof latest_action_type !== 'string' || !VALID_ACTION_TYPES.includes(latest_action_type as CollectionActionType))) {
+      throw new FinanceServiceError(`Élément #${idx} : latest_action_type invalide.`, '22023');
+    }
+
+    const latest_contacted_at = item.latest_contacted_at;
+    if (latest_contacted_at !== null && (typeof latest_contacted_at !== 'string' || isNaN(Date.parse(latest_contacted_at)))) {
+      throw new FinanceServiceError(`Élément #${idx} : latest_contacted_at invalide.`, '22023');
+    }
+
+    const latest_promise_to_pay_date = item.latest_promise_to_pay_date;
+    if (latest_promise_to_pay_date !== null && (typeof latest_promise_to_pay_date !== 'string' || !isValidCalendarDate(latest_promise_to_pay_date))) {
+      throw new FinanceServiceError(`Élément #${idx} : latest_promise_to_pay_date invalide.`, '22023');
+    }
+
+    const latest_next_follow_up_date = item.latest_next_follow_up_date;
+    if (latest_next_follow_up_date !== null && (typeof latest_next_follow_up_date !== 'string' || !isValidCalendarDate(latest_next_follow_up_date))) {
+      throw new FinanceServiceError(`Élément #${idx} : latest_next_follow_up_date invalide.`, '22023');
+    }
+
+    const last_contacted_by_name = item.last_contacted_by_name;
+    if (last_contacted_by_name !== null && typeof last_contacted_by_name !== 'string') {
+      throw new FinanceServiceError(`Élément #${idx} : last_contacted_by_name invalide.`, '22023');
+    }
+
+    return {
+      invoice_id,
+      invoice_number,
+      student_id,
+      student_name,
+      student_number,
+      class_name,
+      invoice_due_date,
+      days_overdue,
+      currency: currency as Currency,
+      total_amount,
+      paid_amount,
+      remaining_balance,
+      invoice_status: invoice_status as 'issued' | 'partially_paid',
+      collection_status: collection_status as CollectionStatus,
+      priority_level: priority_level as CollectionPriorityLevel,
+      priority_score,
+      priority_reasons: priority_reasons as string[],
+      effective_follow_up_date,
+      latest_action_id,
+      latest_action_type: latest_action_type as CollectionActionType | null,
+      latest_contacted_at,
+      latest_promise_to_pay_date,
+      latest_next_follow_up_date,
+      last_contacted_by_name
+    };
+  });
+
+  const has_more = data.has_more;
+  if (typeof has_more !== 'boolean') {
+    throw new FinanceServiceError("Propriété 'has_more' invalide dans la liste des priorités (booléen requis).", '22023');
+  }
+
+  let next_cursor: CollectionPrioritiesCursor | null = null;
+  if (has_more) {
+    if (!isObject(data.next_cursor)) {
+      throw new FinanceServiceError("Curseur de pagination 'next_cursor' manquant alors que has_more = true.", '22023');
+    }
+
+    const priority_score = data.next_cursor.priority_score;
+    if (typeof priority_score !== 'number' || !Number.isInteger(priority_score) || priority_score < 0) {
+      throw new FinanceServiceError("Curseur invalide : 'priority_score' doit être un entier >= 0.", '22023');
+    }
+
+    const effective_date = data.next_cursor.effective_date;
+    if (typeof effective_date !== 'string' || !isValidCalendarDate(effective_date)) {
+      throw new FinanceServiceError("Curseur invalide : 'effective_date' doit être une date calendrier valide.", '22023');
+    }
+
+    const invoice_id = data.next_cursor.invoice_id;
+    if (typeof invoice_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invoice_id)) {
+      throw new FinanceServiceError("Curseur invalide : 'invoice_id' doit être un UUID valide.", '22023');
+    }
+
+    next_cursor = { priority_score, effective_date, invoice_id };
+  } else {
+    if (data.next_cursor !== null) {
+      throw new FinanceServiceError("Curseur 'next_cursor' doit être null lorsque has_more = false.", '22023');
+    }
+  }
+
+  return {
+    business_date,
+    items,
+    has_more,
+    next_cursor
+  };
+}
+
+export async function getSchoolCollectionDashboard(): Promise<CollectionDashboardResponse> {
+  try {
+    const { data, error } = await supabase.rpc('get_school_collection_dashboard');
+    if (error) {
+      throw mapPostgresError(error);
+    }
+    return validateCollectionDashboardResponse(data);
+  } catch (err: unknown) {
+    if (err instanceof FinanceServiceError) throw err;
+    throw mapPostgresError(err);
+  }
+}
+
+export async function getSchoolCollectionPriorities(
+  filters?: CollectionPrioritiesFilters,
+  cursor?: CollectionPrioritiesCursor | null
+): Promise<CollectionPrioritiesResponse> {
+  let p_currency: 'USD' | 'CDF' | null = null;
+  if (filters?.p_currency === 'USD' || filters?.p_currency === 'CDF') {
+    p_currency = filters.p_currency;
+  }
+
+  let p_priority_filter: CollectionPriorityLevel | 'all' | null = null;
+  if (filters?.p_priority_filter && filters.p_priority_filter !== 'all' && VALID_COLLECTION_PRIORITY_LEVELS.includes(filters.p_priority_filter as CollectionPriorityLevel)) {
+    p_priority_filter = filters.p_priority_filter as CollectionPriorityLevel;
+  } else if (filters?.p_priority_filter === 'all') {
+    p_priority_filter = 'all';
+  }
+
+  let p_limit = filters?.p_limit ?? 20;
+  if (p_limit < 1 || p_limit > 100) {
+    throw new FinanceServiceError('La limite de pagination p_limit doit être comprise entre 1 et 100.', '22023');
+  }
+
+  if (cursor) {
+    if (cursor.priority_score === undefined || cursor.priority_score === null || !cursor.effective_date || !cursor.invoice_id) {
+      throw new FinanceServiceError('Le curseur de priorités doit contenir priority_score, effective_date et invoice_id tous les trois.', '22023');
+    }
+    if (typeof cursor.priority_score !== 'number' || cursor.priority_score < 0) {
+      throw new FinanceServiceError('Le score du curseur doit être un entier >= 0.', '22023');
+    }
+  }
+
+  const rpcParams = {
+    p_currency,
+    p_priority_filter,
+    p_limit,
+    p_cursor_priority_score: cursor ? cursor.priority_score : null,
+    p_cursor_effective_date: cursor ? cursor.effective_date : null,
+    p_cursor_invoice_id: cursor ? cursor.invoice_id : null
+  };
+
+  try {
+    const { data, error } = await supabase.rpc('get_school_collection_priorities', rpcParams);
+    if (error) {
+      throw mapPostgresError(error);
+    }
+    return validateCollectionPrioritiesResponse(data);
   } catch (err: unknown) {
     if (err instanceof FinanceServiceError) throw err;
     throw mapPostgresError(err);
