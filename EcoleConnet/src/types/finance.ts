@@ -417,20 +417,25 @@ export interface CollectionFollowupItem {
   invoice_number: string;
   student_id: string;
   student_name: string;
-  student_matricule: string;
-  class_name: string;
-  due_date: string;
+  student_number: string;
+  class_name: string | null;
+  invoice_due_date: string;
   days_overdue: number;
   currency: Currency;
   total_amount: number;
   paid_amount: number;
   remaining_balance: number;
+  invoice_status: string;
   collection_status: CollectionStatus;
-  last_action_type: CollectionActionType | null;
-  last_contacted_at: string | null;
+  effective_follow_up_date: string;
+  latest_action_id: string | null;
+  latest_action_type: CollectionActionType | null;
+  latest_note: string | null;
+  latest_idempotency_key: string | null;
+  latest_contacted_at: string | null;
   latest_promise_to_pay_date: string | null;
   latest_next_follow_up_date: string | null;
-  effective_follow_up_date: string;
+  last_contacted_by_name: string | null;
 }
 
 export interface CollectionFollowupsCursor {

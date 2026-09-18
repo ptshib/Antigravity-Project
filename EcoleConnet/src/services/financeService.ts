@@ -1355,12 +1355,12 @@ export function validateCollectionFollowupsResponse(data: unknown): CollectionFo
     if (!student_id) throw new FinanceServiceError(`Élément #${index} : 'student_id' manquant.`);
 
     const student_name = getStringProperty(item, 'student_name') ?? '';
-    const student_matricule = getStringProperty(item, 'student_matricule') ?? '';
-    const class_name = getStringProperty(item, 'class_name') ?? '';
+    const student_number = getStringProperty(item, 'student_number') ?? '';
+    const class_name = getStringProperty(item, 'class_name');
 
-    const due_date = getStringProperty(item, 'due_date');
-    if (!due_date || !/^\d{4}-\d{2}-\d{2}$/.test(due_date) || isNaN(Date.parse(due_date)) || new Date(due_date).toISOString().substring(0, 10) !== due_date) {
-      throw new FinanceServiceError(`Élément #${index} : 'due_date' invalide ou date calendrier impossible ('${due_date}').`);
+    const invoice_due_date = getStringProperty(item, 'invoice_due_date');
+    if (!invoice_due_date || !/^\d{4}-\d{2}-\d{2}$/.test(invoice_due_date) || isNaN(Date.parse(invoice_due_date)) || new Date(invoice_due_date).toISOString().substring(0, 10) !== invoice_due_date) {
+      throw new FinanceServiceError(`Élément #${index} : 'invoice_due_date' invalide ou date calendrier impossible ('${invoice_due_date}').`);
     }
 
     const days_overdue = getNumberProperty(item, 'days_overdue');
@@ -1388,19 +1388,25 @@ export function validateCollectionFollowupsResponse(data: unknown): CollectionFo
       throw new FinanceServiceError(`Élément #${index} : 'remaining_balance' incohérent ou supérieur au total.`);
     }
 
+    const invoice_status = getStringProperty(item, 'invoice_status') || '';
+
     const collection_status = getStringProperty(item, 'collection_status') as CollectionStatus;
     if (!collection_status || !VALID_COLLECTION_STATUSES.includes(collection_status)) {
       throw new FinanceServiceError(`Élément #${index} : 'collection_status' invalide ('${collection_status}').`);
     }
 
-    const last_action_type = getStringProperty(item, 'last_action_type') as CollectionActionType | null;
-    if (last_action_type !== null && last_action_type !== undefined && !VALID_ACTION_TYPES.includes(last_action_type)) {
-      throw new FinanceServiceError(`Élément #${index} : 'last_action_type' invalide ('${last_action_type}').`);
+    const latest_action_id = getStringProperty(item, 'latest_action_id');
+    const latest_action_type = getStringProperty(item, 'latest_action_type') as CollectionActionType | null;
+    if (latest_action_type !== null && latest_action_type !== undefined && !VALID_ACTION_TYPES.includes(latest_action_type)) {
+      throw new FinanceServiceError(`Élément #${index} : 'latest_action_type' invalide ('${latest_action_type}').`);
     }
 
-    const last_contacted_at = getStringProperty(item, 'last_contacted_at');
-    if (last_contacted_at !== null && last_contacted_at !== undefined && isNaN(Date.parse(last_contacted_at))) {
-      throw new FinanceServiceError(`Élément #${index} : 'last_contacted_at' invalide.`);
+    const latest_note = getStringProperty(item, 'latest_note');
+    const latest_idempotency_key = getStringProperty(item, 'latest_idempotency_key');
+
+    const latest_contacted_at = getStringProperty(item, 'latest_contacted_at');
+    if (latest_contacted_at !== null && latest_contacted_at !== undefined && isNaN(Date.parse(latest_contacted_at))) {
+      throw new FinanceServiceError(`Élément #${index} : 'latest_contacted_at' invalide.`);
     }
 
     const latest_promise_to_pay_date = getStringProperty(item, 'latest_promise_to_pay_date');
@@ -1413,6 +1419,8 @@ export function validateCollectionFollowupsResponse(data: unknown): CollectionFo
       throw new FinanceServiceError(`Élément #${index} : 'latest_next_follow_up_date' invalide.`);
     }
 
+    const last_contacted_by_name = getStringProperty(item, 'last_contacted_by_name');
+
     const effective_follow_up_date = getStringProperty(item, 'effective_follow_up_date');
     if (!effective_follow_up_date || !/^\d{4}-\d{2}-\d{2}$/.test(effective_follow_up_date) || isNaN(Date.parse(effective_follow_up_date))) {
       throw new FinanceServiceError(`Élément #${index} : 'effective_follow_up_date' invalide.`);
@@ -1423,20 +1431,25 @@ export function validateCollectionFollowupsResponse(data: unknown): CollectionFo
       invoice_number,
       student_id,
       student_name,
-      student_matricule,
-      class_name,
-      due_date,
+      student_number,
+      class_name: class_name || null,
+      invoice_due_date,
       days_overdue,
       currency,
       total_amount,
       paid_amount,
       remaining_balance,
+      invoice_status,
       collection_status,
-      last_action_type: last_action_type || null,
-      last_contacted_at: last_contacted_at || null,
+      effective_follow_up_date,
+      latest_action_id: latest_action_id || null,
+      latest_action_type: latest_action_type || null,
+      latest_note: latest_note || null,
+      latest_idempotency_key: latest_idempotency_key || null,
+      latest_contacted_at: latest_contacted_at || null,
       latest_promise_to_pay_date: latest_promise_to_pay_date || null,
       latest_next_follow_up_date: latest_next_follow_up_date || null,
-      effective_follow_up_date
+      last_contacted_by_name: last_contacted_by_name || null
     };
   });
 

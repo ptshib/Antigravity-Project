@@ -275,8 +275,8 @@ export const CollectionFollowupsTable: React.FC<CollectionFollowupsTableProps> =
                     {/* Élève */}
                     <td className="py-3 px-4">
                       <div className="font-semibold text-slate-900">{item.student_name}</div>
-                      {item.student_matricule && (
-                        <div className="text-[10px] font-mono text-slate-500">{item.student_matricule}</div>
+                      {item.student_number && (
+                        <div className="text-[10px] font-mono text-slate-500">{item.student_number}</div>
                       )}
                     </td>
 
@@ -287,7 +287,7 @@ export const CollectionFollowupsTable: React.FC<CollectionFollowupsTableProps> =
 
                     {/* Échéance */}
                     <td className="py-3 px-4 text-slate-600">
-                      {item.due_date}
+                      {item.invoice_due_date}
                     </td>
 
                     {/* Retard */}
@@ -317,14 +317,14 @@ export const CollectionFollowupsTable: React.FC<CollectionFollowupsTableProps> =
 
                     {/* Dernière action */}
                     <td className="py-3 px-4 text-slate-600">
-                      {item.last_action_type ? (
+                      {item.latest_action_type ? (
                         <div>
                           <span className="font-semibold text-slate-800">
-                            {ACTION_TYPE_LABELS[item.last_action_type] || item.last_action_type}
+                            {ACTION_TYPE_LABELS[item.latest_action_type] || item.latest_action_type}
                           </span>
-                          {item.last_contacted_at && (
+                          {item.latest_contacted_at && (
                             <span className="text-[10px] text-slate-400 block">
-                              {new Date(item.last_contacted_at).toLocaleDateString('fr-FR')}
+                              {new Date(item.latest_contacted_at).toLocaleDateString('fr-FR')}
                             </span>
                           )}
                         </div>

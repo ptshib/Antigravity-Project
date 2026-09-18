@@ -1055,19 +1055,24 @@ export async function runFinanceFrontendTests(): Promise<{ total: number; passed
           invoice_number: 'FAC-2026-0001',
           student_id: '66666666-6666-6666-6666-666666666666',
           student_name: 'Kabongo Marc',
-          student_matricule: 'MAT-001',
+          student_number: 'MAT-001',
           class_name: '6ème C',
-          due_date: '2026-08-30',
+          invoice_due_date: '2026-08-30',
           days_overdue: 18,
           currency: 'USD',
           total_amount: 150,
           paid_amount: 50,
           remaining_balance: 100,
+          invoice_status: 'partially_paid',
           collection_status: 'promise_pending',
-          last_action_type: 'phone',
-          last_contacted_at: '2026-09-17T14:30:00Z',
+          latest_action_id: '11111111-1111-1111-1111-111111111111',
+          latest_action_type: 'phone',
+          latest_note: 'Appel passé',
+          latest_idempotency_key: '44444444-4444-4444-4444-444444444444',
+          latest_contacted_at: '2026-09-17T14:30:00Z',
           latest_promise_to_pay_date: '2026-09-25',
           latest_next_follow_up_date: '2026-09-26',
+          last_contacted_by_name: 'Agent Finance',
           effective_follow_up_date: '2026-09-25'
         }
       ],
@@ -1351,19 +1356,24 @@ export async function runFinanceFrontendTests(): Promise<{ total: number; passed
         invoice_number: `FAC-P1-${i}`,
         student_id: `66666666-6666-6666-6666-6666666666${idxStr}`,
         student_name: `Élève P1 ${i}`,
-        student_matricule: `MAT-P1-${i}`,
+        student_number: `MAT-P1-${i}`,
         class_name: '6ème A',
-        due_date: '2026-08-30',
+        invoice_due_date: '2026-08-30',
         days_overdue: 18,
         currency: 'USD' as const,
         total_amount: 100,
         paid_amount: 0,
         remaining_balance: 100,
+        invoice_status: 'issued',
         collection_status: 'followup_due' as const,
-        last_action_type: null,
-        last_contacted_at: null,
+        latest_action_id: null,
+        latest_action_type: null,
+        latest_note: null,
+        latest_idempotency_key: null,
+        latest_contacted_at: null,
         latest_promise_to_pay_date: null,
         latest_next_follow_up_date: null,
+        last_contacted_by_name: null,
         effective_follow_up_date: '2026-10-15' // Date future dans le curseur
       };
     });
@@ -1373,19 +1383,24 @@ export async function runFinanceFrontendTests(): Promise<{ total: number; passed
       invoice_number: 'FAC-P2-0',
       student_id: '66666666-6666-6666-6666-666666666699',
       student_name: 'Élève P2 0',
-      student_matricule: 'MAT-P2-0',
+      student_number: 'MAT-P2-0',
       class_name: '6ème A',
-      due_date: '2026-08-30',
+      invoice_due_date: '2026-08-30',
       days_overdue: 18,
       currency: 'USD' as const,
       total_amount: 100,
       paid_amount: 0,
       remaining_balance: 100,
+      invoice_status: 'issued',
       collection_status: 'promise_pending' as const,
-      last_action_type: 'phone' as const,
-      last_contacted_at: '2026-09-17T10:00:00Z',
+      latest_action_id: '11111111-1111-1111-1111-111111111111',
+      latest_action_type: 'phone' as const,
+      latest_note: 'Note test',
+      latest_idempotency_key: '44444444-4444-4444-4444-444444444444',
+      latest_contacted_at: '2026-09-17T10:00:00Z',
       latest_promise_to_pay_date: '2026-10-20',
       latest_next_follow_up_date: null,
+      last_contacted_by_name: 'Agent Finance',
       effective_follow_up_date: '2026-10-20'
     };
 
@@ -1746,17 +1761,18 @@ export async function runFinanceFrontendTests(): Promise<{ total: number; passed
             invoice_number: 'FAC-2026-0001',
             student_id: '66666666-6666-6666-6666-666666666666',
             student_name: 'Kabongo Marc',
-            student_matricule: 'MAT-001',
+            student_number: 'MAT-001',
             class_name: '6ème C',
-            due_date: '2026-02-31',
+            invoice_due_date: '2026-02-31',
             days_overdue: 18,
             currency: 'USD',
             total_amount: 150,
             paid_amount: 50,
             remaining_balance: 100,
+            invoice_status: 'partially_paid',
             collection_status: 'promise_pending',
-            last_action_type: 'phone',
-            last_contacted_at: '2026-09-17T14:30:00Z',
+            latest_action_type: 'phone',
+            latest_contacted_at: '2026-09-17T14:30:00Z',
             latest_promise_to_pay_date: '2026-09-25',
             latest_next_follow_up_date: '2026-09-26',
             effective_follow_up_date: '2026-09-25'
@@ -1794,17 +1810,18 @@ export async function runFinanceFrontendTests(): Promise<{ total: number; passed
             invoice_number: 'FAC-2026-0001',
             student_id: '66666666-6666-6666-6666-666666666666',
             student_name: 'Kabongo Marc',
-            student_matricule: 'MAT-001',
+            student_number: 'MAT-001',
             class_name: '6ème C',
-            due_date: '2026-08-30',
+            invoice_due_date: '2026-08-30',
             days_overdue: 18,
             currency: 'USD',
             total_amount: 100,
             paid_amount: 150,
             remaining_balance: 0,
+            invoice_status: 'issued',
             collection_status: 'promise_pending',
-            last_action_type: 'phone',
-            last_contacted_at: '2026-09-17T14:30:00Z',
+            latest_action_type: 'phone',
+            latest_contacted_at: '2026-09-17T14:30:00Z',
             latest_promise_to_pay_date: '2026-09-25',
             latest_next_follow_up_date: '2026-09-26',
             effective_follow_up_date: '2026-09-25'
@@ -1832,17 +1849,18 @@ export async function runFinanceFrontendTests(): Promise<{ total: number; passed
             invoice_number: 'FAC-2026-0001',
             student_id: '66666666-6666-6666-6666-666666666666',
             student_name: 'Kabongo Marc',
-            student_matricule: 'MAT-001',
+            student_number: 'MAT-001',
             class_name: '6ème C',
-            due_date: '2026-08-30',
+            invoice_due_date: '2026-08-30',
             days_overdue: 18,
             currency: 'USD',
             total_amount: 100,
             paid_amount: 0,
             remaining_balance: 100,
+            invoice_status: 'issued',
             collection_status: 'unknown_status' as any,
-            last_action_type: 'phone',
-            last_contacted_at: '2026-09-17T14:30:00Z',
+            latest_action_type: 'phone',
+            latest_contacted_at: '2026-09-17T14:30:00Z',
             latest_promise_to_pay_date: '2026-09-25',
             latest_next_follow_up_date: '2026-09-26',
             effective_follow_up_date: '2026-09-25'
@@ -1857,6 +1875,219 @@ export async function runFinanceFrontendTests(): Promise<{ total: number; passed
     assert(caught, 'TEST 9.7.15 : CollectionStatus inconnu rejeté');
   } catch (err: unknown) {
     assert(false, `TEST 9.7.15 : Exception inattendue : ${err}`);
+  }
+
+  // =========================================================================
+  // 9.8 TESTS DE CONTRAT ANTI-DIVERGENCE (SQL vs TS)
+  // =========================================================================
+
+  // 9.8.1 Réponse contenant invoice_due_date valide : acceptée
+  try {
+    const validRes = validateCollectionFollowupsResponse({
+      items: [
+        {
+          invoice_id: '22222222-2222-2222-2222-222222222222',
+          invoice_number: 'FAC-2026-0001',
+          student_id: '66666666-6666-6666-6666-666666666666',
+          student_name: 'Kabongo Marc',
+          student_number: 'MAT-001',
+          class_name: '6ème C',
+          invoice_due_date: '2026-08-30',
+          days_overdue: 18,
+          currency: 'USD',
+          total_amount: 150,
+          paid_amount: 50,
+          remaining_balance: 100,
+          invoice_status: 'partially_paid',
+          collection_status: 'promise_pending',
+          latest_action_id: null,
+          latest_action_type: null,
+          latest_note: null,
+          latest_idempotency_key: null,
+          latest_contacted_at: null,
+          latest_promise_to_pay_date: null,
+          latest_next_follow_up_date: null,
+          last_contacted_by_name: null,
+          effective_follow_up_date: '2026-08-30'
+        }
+      ],
+      has_more: false,
+      next_cursor: null
+    });
+    assert(validRes.items[0].invoice_due_date === '2026-08-30', 'TEST 9.8.1 : Réponse avec invoice_due_date valide acceptée');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.8.1 : Exception inattendue : ${err}`);
+  }
+
+  // 9.8.2 Réponse contenant seulement due_date : rejetée
+  try {
+    let caught = false;
+    try {
+      validateCollectionFollowupsResponse({
+        items: [
+          {
+            invoice_id: '22222222-2222-2222-2222-222222222222',
+            invoice_number: 'FAC-2026-0001',
+            student_id: '66666666-6666-6666-6666-666666666666',
+            student_name: 'Kabongo Marc',
+            student_number: 'MAT-001',
+            class_name: '6ème C',
+            due_date: '2026-08-30', // Ancien nom erroné
+            days_overdue: 18,
+            currency: 'USD',
+            total_amount: 150,
+            paid_amount: 50,
+            remaining_balance: 100,
+            invoice_status: 'partially_paid',
+            collection_status: 'promise_pending',
+            effective_follow_up_date: '2026-08-30'
+          }
+        ],
+        has_more: false,
+        next_cursor: null
+      });
+    } catch (err: any) {
+      caught = err?.message?.includes('invoice_due_date');
+    }
+    assert(caught, 'TEST 9.8.2 : Réponse contenant seulement due_date rejetée avec mention de invoice_due_date');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.8.2 : Exception inattendue : ${err}`);
+  }
+
+  // 9.8.3 invoice_due_date null : rejetée
+  try {
+    let caught = false;
+    try {
+      validateCollectionFollowupsResponse({
+        items: [
+          {
+            invoice_id: '22222222-2222-2222-2222-222222222222',
+            invoice_number: 'FAC-2026-0001',
+            student_id: '66666666-6666-6666-6666-666666666666',
+            student_name: 'Kabongo Marc',
+            student_number: 'MAT-001',
+            class_name: '6ème C',
+            invoice_due_date: null,
+            days_overdue: 18,
+            currency: 'USD',
+            total_amount: 150,
+            paid_amount: 50,
+            remaining_balance: 100,
+            invoice_status: 'partially_paid',
+            collection_status: 'promise_pending',
+            effective_follow_up_date: '2026-08-30'
+          }
+        ],
+        has_more: false,
+        next_cursor: null
+      });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 9.8.3 : invoice_due_date null rejetée');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.8.3 : Exception inattendue : ${err}`);
+  }
+
+  // 9.8.4 Fixture construite avec exactement les 23 clés SQL
+  try {
+    const canonical23KeysFixture = {
+      invoice_id: '22222222-2222-2222-2222-222222222222',
+      invoice_number: 'FAC-2026-0001',
+      student_id: '66666666-6666-6666-6666-666666666666',
+      student_name: 'Kabongo Marc',
+      student_number: 'MAT-001',
+      class_name: '6ème C',
+      invoice_due_date: '2026-08-30',
+      days_overdue: 18,
+      currency: 'USD',
+      total_amount: 150,
+      paid_amount: 50,
+      remaining_balance: 100,
+      invoice_status: 'partially_paid',
+      collection_status: 'promise_pending',
+      effective_follow_up_date: '2026-09-25',
+      latest_action_id: '11111111-1111-1111-1111-111111111111',
+      latest_action_type: 'phone',
+      latest_note: 'Appel passé',
+      latest_idempotency_key: '44444444-4444-4444-4444-444444444444',
+      latest_contacted_at: '2026-09-17T14:30:00Z',
+      latest_promise_to_pay_date: '2026-09-25',
+      latest_next_follow_up_date: '2026-09-26',
+      last_contacted_by_name: 'Agent Finance'
+    };
+
+    const res = validateCollectionFollowupsResponse({
+      items: [canonical23KeysFixture],
+      has_more: false,
+      next_cursor: null
+    });
+
+    const parsedItem = res.items[0];
+    const hasAll23Keys =
+      parsedItem.invoice_id === canonical23KeysFixture.invoice_id &&
+      parsedItem.invoice_number === canonical23KeysFixture.invoice_number &&
+      parsedItem.student_id === canonical23KeysFixture.student_id &&
+      parsedItem.student_name === canonical23KeysFixture.student_name &&
+      parsedItem.student_number === canonical23KeysFixture.student_number &&
+      parsedItem.class_name === canonical23KeysFixture.class_name &&
+      parsedItem.invoice_due_date === canonical23KeysFixture.invoice_due_date &&
+      parsedItem.days_overdue === canonical23KeysFixture.days_overdue &&
+      parsedItem.currency === canonical23KeysFixture.currency &&
+      parsedItem.total_amount === canonical23KeysFixture.total_amount &&
+      parsedItem.paid_amount === canonical23KeysFixture.paid_amount &&
+      parsedItem.remaining_balance === canonical23KeysFixture.remaining_balance &&
+      parsedItem.invoice_status === canonical23KeysFixture.invoice_status &&
+      parsedItem.collection_status === canonical23KeysFixture.collection_status &&
+      parsedItem.effective_follow_up_date === canonical23KeysFixture.effective_follow_up_date &&
+      parsedItem.latest_action_id === canonical23KeysFixture.latest_action_id &&
+      parsedItem.latest_action_type === canonical23KeysFixture.latest_action_type &&
+      parsedItem.latest_note === canonical23KeysFixture.latest_note &&
+      parsedItem.latest_idempotency_key === canonical23KeysFixture.latest_idempotency_key &&
+      parsedItem.latest_contacted_at === canonical23KeysFixture.latest_contacted_at &&
+      parsedItem.latest_promise_to_pay_date === canonical23KeysFixture.latest_promise_to_pay_date &&
+      parsedItem.latest_next_follow_up_date === canonical23KeysFixture.latest_next_follow_up_date &&
+      parsedItem.last_contacted_by_name === canonical23KeysFixture.last_contacted_by_name;
+
+    assert(hasAll23Keys, 'TEST 9.8.4 : Fixture construite avec exactement les 23 clés SQL valides');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.8.4 : Exception inattendue : ${err}`);
+  }
+
+  // 9.8.5 Aucune propriété supplémentaire ne doit masquer un champ obligatoire manquant
+  try {
+    let caught = false;
+    try {
+      validateCollectionFollowupsResponse({
+        items: [
+          {
+            invoice_id: '22222222-2222-2222-2222-222222222222',
+            invoice_number: 'FAC-2026-0001',
+            student_id: '66666666-6666-6666-6666-666666666666',
+            student_name: 'Kabongo Marc',
+            student_number: 'MAT-001',
+            class_name: '6ème C',
+            invoice_due_date: null, // Champ obligatoire manquant/null
+            due_date: '2026-08-30', // Propriété superflue présente
+            days_overdue: 18,
+            currency: 'USD',
+            total_amount: 150,
+            paid_amount: 50,
+            remaining_balance: 100,
+            invoice_status: 'partially_paid',
+            collection_status: 'promise_pending',
+            effective_follow_up_date: '2026-08-30'
+          }
+        ],
+        has_more: false,
+        next_cursor: null
+      });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 9.8.5 : Propriété supplémentaire ne masque pas un champ obligatoire manquant (invoice_due_date=null)');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.8.5 : Exception inattendue : ${err}`);
   }
 
   // 21. fermeture pendant sauvegarde : aucun setState tardif

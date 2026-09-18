@@ -376,7 +376,7 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
               student_name: item.student_name,
               remaining_balance: item.remaining_balance,
               currency: item.currency,
-              due_date: item.due_date
+              due_date: item.invoice_due_date
             })}
             onViewHistory={(item) => setHistoryModalInvoice({
               invoiceId: item.invoice_id,
