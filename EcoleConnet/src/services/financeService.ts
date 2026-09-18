@@ -1306,9 +1306,14 @@ export function validateCollectionHistoryResponse(data: unknown): CollectionHist
     throw new FinanceServiceError('Format de réponse invalide pour get_invoice_collection_history (non-objet).');
   }
 
-  const total_actions_count = getNumberProperty(data, 'total_actions_count');
-  if (total_actions_count === null || !isFinite(total_actions_count) || total_actions_count < 0 || !Number.isInteger(total_actions_count)) {
-    throw new FinanceServiceError("Propriété 'total_actions_count' invalide (doit être un entier >= 0).");
+  const invoice_id = getStringProperty(data, 'invoice_id');
+  if (!invoice_id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invoice_id)) {
+    throw new FinanceServiceError("Propriété 'invoice_id' manquante ou format UUID invalide.");
+  }
+
+  const total_actions = getNumberProperty(data, 'total_actions');
+  if (total_actions === null || !isFinite(total_actions) || total_actions < 0 || !Number.isInteger(total_actions)) {
+    throw new FinanceServiceError("Propriété 'total_actions' invalide (doit être un entier >= 0).");
   }
 
   const actionsRaw = data['actions'];
@@ -1319,7 +1324,8 @@ export function validateCollectionHistoryResponse(data: unknown): CollectionHist
   const actions = actionsRaw.map((act, idx) => validateCollectionActionItem(act, `#${idx}`));
 
   return {
-    total_actions_count,
+    invoice_id,
+    total_actions,
     actions
   };
 }

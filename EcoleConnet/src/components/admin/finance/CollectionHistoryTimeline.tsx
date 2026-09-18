@@ -55,7 +55,7 @@ export const CollectionHistoryTimeline: React.FC<CollectionHistoryTimelineProps>
       if (!isMountedRef.current || currentReqId !== reqIdRef.current) return;
 
       setActions(data.actions);
-      setTotalCount(data.total_actions_count);
+      setTotalCount(data.total_actions);
     } catch (err: unknown) {
       if (!isMountedRef.current || currentReqId !== reqIdRef.current) return;
       if (err instanceof FinanceServiceError) {

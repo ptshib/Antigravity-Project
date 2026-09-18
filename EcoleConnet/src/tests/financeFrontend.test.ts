@@ -1042,11 +1042,12 @@ export async function runFinanceFrontendTests(): Promise<{ total: number; passed
     assert(parsedCreate.is_idempotent_replay === false && parsedCreate.action.action_type === 'phone', 'TEST 9.1.1 : Parsing valide du contrat de création d’action');
 
     const validHistoryPayload = {
-      total_actions_count: 1,
+      invoice_id: '22222222-2222-2222-2222-222222222222',
+      total_actions: 1,
       actions: [validCreatePayload.action]
     };
     const parsedHistory = validateCollectionHistoryResponse(validHistoryPayload);
-    assert(parsedHistory.total_actions_count === 1 && parsedHistory.actions.length === 1, 'TEST 9.1.2 : Parsing valide du contrat d’historique');
+    assert(parsedHistory.total_actions === 1 && parsedHistory.actions.length === 1 && parsedHistory.invoice_id === '22222222-2222-2222-2222-222222222222', 'TEST 9.1.2 : Parsing valide du contrat d’historique');
 
     const validFollowupsPayload = {
       items: [
@@ -1230,7 +1231,8 @@ export async function runFinanceFrontendTests(): Promise<{ total: number; passed
       if (fn === 'get_invoice_collection_history') {
         return {
           data: {
-            total_actions_count: 0,
+            invoice_id: '22222222-2222-2222-2222-222222222222',
+            total_actions: 0,
             actions: []
           },
           error: null
@@ -1685,11 +1687,12 @@ export async function runFinanceFrontendTests(): Promise<{ total: number; passed
   // 13. historique vide correctement accepté
   try {
     const emptyHistoryPayload = {
-      total_actions_count: 0,
+      invoice_id: '22222222-2222-2222-2222-222222222222',
+      total_actions: 0,
       actions: []
     };
     const validated = validateCollectionHistoryResponse(emptyHistoryPayload);
-    assert(validated.total_actions_count === 0 && validated.actions.length === 0, 'TEST 9.7.8 : Historique vide correctement accepté');
+    assert(validated.total_actions === 0 && validated.actions.length === 0 && validated.invoice_id === '22222222-2222-2222-2222-222222222222', 'TEST 9.7.8 : Historique vide correctement accepté');
   } catch (err: unknown) {
     assert(false, `TEST 9.7.8 : Exception inattendue : ${err}`);
   }
@@ -2088,6 +2091,118 @@ export async function runFinanceFrontendTests(): Promise<{ total: number; passed
     assert(caught, 'TEST 9.8.5 : Propriété supplémentaire ne masque pas un champ obligatoire manquant (invoice_due_date=null)');
   } catch (err: unknown) {
     assert(false, `TEST 9.8.5 : Exception inattendue : ${err}`);
+  }
+
+  // 9.8.6 Réponse d'historique avec total_actions = 0 et invoice_id valide : acceptée
+  try {
+    const res = validateCollectionHistoryResponse({
+      invoice_id: '22222222-2222-2222-2222-222222222222',
+      total_actions: 0,
+      actions: []
+    });
+    assert(res.total_actions === 0 && res.invoice_id === '22222222-2222-2222-2222-222222222222', 'TEST 9.8.6 : Réponse d’historique minimale (total_actions=0, actions=[]) acceptée');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.8.6 : Exception inattendue : ${err}`);
+  }
+
+  // 9.8.7 Réponse contenant seulement total_actions_count (sans total_actions) : rejetée
+  try {
+    let caught = false;
+    try {
+      validateCollectionHistoryResponse({
+        invoice_id: '22222222-2222-2222-2222-222222222222',
+        total_actions_count: 5, // Nom erroné
+        actions: []
+      });
+    } catch (err: any) {
+      caught = err?.message?.includes('total_actions');
+    }
+    assert(caught, 'TEST 9.8.7 : Réponse contenant seulement total_actions_count rejetée avec mention de total_actions');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.8.7 : Exception inattendue : ${err}`);
+  }
+
+  // 9.8.8 total_actions null, négatif ou décimal : rejetée
+  try {
+    let caughtNull = false;
+    let caughtNeg = false;
+    let caughtFloat = false;
+
+    try {
+      validateCollectionHistoryResponse({ invoice_id: '22222222-2222-2222-2222-222222222222', total_actions: null, actions: [] });
+    } catch { caughtNull = true; }
+
+    try {
+      validateCollectionHistoryResponse({ invoice_id: '22222222-2222-2222-2222-222222222222', total_actions: -1, actions: [] });
+    } catch { caughtNeg = true; }
+
+    try {
+      validateCollectionHistoryResponse({ invoice_id: '22222222-2222-2222-2222-222222222222', total_actions: 2.5, actions: [] });
+    } catch { caughtFloat = true; }
+
+    assert(caughtNull && caughtNeg && caughtFloat, 'TEST 9.8.8 : total_actions null, négatif (-1) ou décimal (2.5) rejeté');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.8.8 : Exception inattendue : ${err}`);
+  }
+
+  // 9.8.9 Fixture d'action avec exactement les 12 clés SQL valides
+  try {
+    const canonicalAction12Keys = {
+      id: '11111111-1111-1111-1111-111111111111',
+      invoice_id: '22222222-2222-2222-2222-222222222222',
+      school_id: '33333333-3333-3333-3333-333333333333',
+      action_type: 'phone',
+      note: 'Note valide de 15 chars',
+      idempotency_key: '44444444-4444-4444-4444-444444444444',
+      contacted_at: '2026-09-17T14:30:00Z',
+      promise_to_pay_date: '2026-09-25',
+      next_follow_up_date: '2026-09-26',
+      created_by: '55555555-5555-5555-5555-555555555555',
+      created_by_name: 'Agent Finance',
+      created_at: '2026-09-17T14:30:00Z'
+    };
+
+    const res = validateCollectionHistoryResponse({
+      invoice_id: '22222222-2222-2222-2222-222222222222',
+      total_actions: 1,
+      actions: [canonicalAction12Keys]
+    });
+
+    assert(res.actions.length === 1 && res.actions[0].id === canonicalAction12Keys.id, 'TEST 9.8.9 : Action d’historique avec 12 clés SQL exactes acceptée');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.8.9 : Exception inattendue : ${err}`);
+  }
+
+  // 9.8.10 Action d'historique manquant d'une clé obligatoire (idempotency_key manquante)
+  try {
+    let caught = false;
+    try {
+      validateCollectionHistoryResponse({
+        invoice_id: '22222222-2222-2222-2222-222222222222',
+        total_actions: 1,
+        actions: [
+          {
+            id: '11111111-1111-1111-1111-111111111111',
+            invoice_id: '22222222-2222-2222-2222-222222222222',
+            school_id: '33333333-3333-3333-3333-333333333333',
+            action_type: 'phone',
+            note: 'Note valide',
+            // idempotency_key manquant
+            contacted_at: '2026-09-17T14:30:00Z',
+            promise_to_pay_date: null,
+            next_follow_up_date: null,
+            created_by: '55555555-5555-5555-5555-555555555555',
+            created_by_name: 'Agent Finance',
+            created_at: '2026-09-17T14:30:00Z'
+          }
+        ]
+      });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 9.8.10 : Action d’historique manquante d’une clé obligatoire (idempotency_key) rejetée');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.8.10 : Exception inattendue : ${err}`);
   }
 
   // 21. fermeture pendant sauvegarde : aucun setState tardif

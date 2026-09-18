@@ -408,7 +408,8 @@ export interface CreateCollectionActionResponse {
 }
 
 export interface CollectionHistoryResponse {
-  total_actions_count: number;
+  invoice_id: string;
+  total_actions: number;
   actions: CollectionHistoryAction[];
 }
 
