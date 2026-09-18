@@ -373,3 +373,88 @@ export interface OverdueInvoicesFilters {
   p_search?: string | null;
   p_limit?: number;
 }
+
+// ---------------------------------------------------------------------------
+// CONTRATS TYPESCRIPT STRICTS POUR FINANCE 4B (SUIVI DE RECOUVREMENT)
+// ---------------------------------------------------------------------------
+
+export type CollectionActionType = 'phone' | 'email' | 'sms' | 'whatsapp' | 'meeting' | 'note';
+
+export type CollectionStatus =
+  | 'never_contacted'
+  | 'contacted'
+  | 'promise_pending'
+  | 'promise_overdue'
+  | 'followup_due';
+
+export interface CollectionHistoryAction {
+  id: string;
+  invoice_id: string;
+  school_id: string;
+  action_type: CollectionActionType;
+  note: string;
+  idempotency_key: string;
+  contacted_at: string;
+  promise_to_pay_date: string | null;
+  next_follow_up_date: string | null;
+  created_by: string;
+  created_by_name: string;
+  created_at: string;
+}
+
+export interface CreateCollectionActionResponse {
+  is_idempotent_replay: boolean;
+  action: CollectionHistoryAction;
+}
+
+export interface CollectionHistoryResponse {
+  total_actions_count: number;
+  actions: CollectionHistoryAction[];
+}
+
+export interface CollectionFollowupItem {
+  invoice_id: string;
+  invoice_number: string;
+  student_id: string;
+  student_name: string;
+  student_matricule: string;
+  class_name: string;
+  due_date: string;
+  days_overdue: number;
+  currency: Currency;
+  total_amount: number;
+  paid_amount: number;
+  remaining_balance: number;
+  collection_status: CollectionStatus;
+  last_action_type: CollectionActionType | null;
+  last_contacted_at: string | null;
+  latest_promise_to_pay_date: string | null;
+  latest_next_follow_up_date: string | null;
+  effective_follow_up_date: string;
+}
+
+export interface CollectionFollowupsCursor {
+  effective_date: string;
+  invoice_id: string;
+}
+
+export interface CollectionFollowupsResponse {
+  items: CollectionFollowupItem[];
+  has_more: boolean;
+  next_cursor: CollectionFollowupsCursor | null;
+}
+
+export interface CollectionFollowupsFilters {
+  currency?: Currency | 'ALL' | null;
+  status_filter?: CollectionStatus | 'ALL' | null;
+  limit?: number;
+}
+
+export interface CreateCollectionActionInput {
+  invoice_id: string;
+  action_type: CollectionActionType;
+  note: string;
+  idempotency_key: string;
+  promise_to_pay_date?: string | null;
+  next_follow_up_date?: string | null;
+}

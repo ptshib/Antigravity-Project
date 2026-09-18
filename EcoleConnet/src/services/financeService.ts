@@ -21,7 +21,16 @@ import type {
   OverdueInvoicesCursor,
   AgingBucketKey,
   CurrencyAgingSummary,
-  AgingBucketSummary
+  AgingBucketSummary,
+  CollectionActionType,
+  CollectionStatus,
+  CollectionHistoryAction,
+  CreateCollectionActionResponse,
+  CollectionHistoryResponse,
+  CollectionFollowupsCursor,
+  CollectionFollowupsResponse,
+  CollectionFollowupsFilters,
+  CreateCollectionActionInput
 } from '../types/finance';
 
 /**
@@ -1169,6 +1178,422 @@ export async function getSchoolOverdueInvoicesAdmin(
       throw mapPostgresError(error);
     }
     return validateOverdueInvoicesResponse(data);
+  } catch (err: unknown) {
+    if (err instanceof FinanceServiceError) throw err;
+    throw mapPostgresError(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// VALIDATEURS ET SERVICES POUR FINANCE 4B (SUIVI DE RECOUVREMENT)
+// ---------------------------------------------------------------------------
+
+const VALID_ACTION_TYPES: CollectionActionType[] = ['phone', 'email', 'sms', 'whatsapp', 'meeting', 'note'];
+const VALID_COLLECTION_STATUSES: CollectionStatus[] = [
+  'never_contacted',
+  'contacted',
+  'promise_pending',
+  'promise_overdue',
+  'followup_due'
+];
+
+function validateCollectionActionItem(item: unknown, indexLabel: string): CollectionHistoryAction {
+  if (!isObject(item)) {
+    throw new FinanceServiceError(`Action ${indexLabel} invalide (non-objet).`);
+  }
+
+  const id = getStringProperty(item, 'id');
+  if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    throw new FinanceServiceError(`Action ${indexLabel} : 'id' manquant ou format UUID invalide.`);
+  }
+
+  const invoice_id = getStringProperty(item, 'invoice_id');
+  if (!invoice_id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invoice_id)) {
+    throw new FinanceServiceError(`Action ${indexLabel} : 'invoice_id' manquant ou format UUID invalide.`);
+  }
+
+  const school_id = getStringProperty(item, 'school_id');
+  if (!school_id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(school_id)) {
+    throw new FinanceServiceError(`Action ${indexLabel} : 'school_id' manquant ou format UUID invalide.`);
+  }
+
+  const action_type = getStringProperty(item, 'action_type') as CollectionActionType;
+  if (!action_type || !VALID_ACTION_TYPES.includes(action_type)) {
+    throw new FinanceServiceError(`Action ${indexLabel} : 'action_type' invalide ('${action_type}').`);
+  }
+
+  const note = getStringProperty(item, 'note');
+  if (note === null || typeof note !== 'string') {
+    throw new FinanceServiceError(`Action ${indexLabel} : 'note' manquante ou non-chaîne.`);
+  }
+  const noteTrimmed = note.trim();
+  if (noteTrimmed.length < 5 || noteTrimmed.length > 1000) {
+    throw new FinanceServiceError(`Action ${indexLabel} : 'note' doit contenir entre 5 et 1000 caractères après trim.`);
+  }
+
+  const idempotency_key = getStringProperty(item, 'idempotency_key');
+  if (!idempotency_key || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idempotency_key)) {
+    throw new FinanceServiceError(`Action ${indexLabel} : 'idempotency_key' manquante ou format UUID invalide.`);
+  }
+
+  const contacted_at = getStringProperty(item, 'contacted_at');
+  if (!contacted_at || isNaN(Date.parse(contacted_at))) {
+    throw new FinanceServiceError(`Action ${indexLabel} : 'contacted_at' invalide ou non parseable.`);
+  }
+
+  const promise_to_pay_date = getStringProperty(item, 'promise_to_pay_date');
+  if (promise_to_pay_date !== null && promise_to_pay_date !== undefined) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(promise_to_pay_date) || isNaN(Date.parse(promise_to_pay_date))) {
+      throw new FinanceServiceError(`Action ${indexLabel} : 'promise_to_pay_date' invalide (attendu YYYY-MM-DD).`);
+    }
+  }
+
+  const next_follow_up_date = getStringProperty(item, 'next_follow_up_date');
+  if (next_follow_up_date !== null && next_follow_up_date !== undefined) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(next_follow_up_date) || isNaN(Date.parse(next_follow_up_date))) {
+      throw new FinanceServiceError(`Action ${indexLabel} : 'next_follow_up_date' invalide (attendu YYYY-MM-DD).`);
+    }
+  }
+
+  const created_by = getStringProperty(item, 'created_by');
+  if (!created_by) {
+    throw new FinanceServiceError(`Action ${indexLabel} : 'created_by' manquant.`);
+  }
+
+  const created_by_name = getStringProperty(item, 'created_by_name') ?? '';
+
+  const created_at = getStringProperty(item, 'created_at');
+  if (!created_at || isNaN(Date.parse(created_at))) {
+    throw new FinanceServiceError(`Action ${indexLabel} : 'created_at' invalide ou non parseable.`);
+  }
+
+  return {
+    id,
+    invoice_id,
+    school_id,
+    action_type,
+    note: noteTrimmed,
+    idempotency_key,
+    contacted_at,
+    promise_to_pay_date: promise_to_pay_date || null,
+    next_follow_up_date: next_follow_up_date || null,
+    created_by,
+    created_by_name,
+    created_at
+  };
+}
+
+export function validateCreateCollectionActionResponse(data: unknown): CreateCollectionActionResponse {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Format de réponse invalide pour create_invoice_collection_action (non-objet).');
+  }
+
+  if (typeof data['is_idempotent_replay'] !== 'boolean') {
+    throw new FinanceServiceError("Propriété 'is_idempotent_replay' manquante ou non booléenne.");
+  }
+
+  const actionRaw = data['action'];
+  const action = validateCollectionActionItem(actionRaw, 'action');
+
+  return {
+    is_idempotent_replay: Boolean(data['is_idempotent_replay']),
+    action
+  };
+}
+
+export function validateCollectionHistoryResponse(data: unknown): CollectionHistoryResponse {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Format de réponse invalide pour get_invoice_collection_history (non-objet).');
+  }
+
+  const total_actions_count = getNumberProperty(data, 'total_actions_count');
+  if (total_actions_count === null || !isFinite(total_actions_count) || total_actions_count < 0 || !Number.isInteger(total_actions_count)) {
+    throw new FinanceServiceError("Propriété 'total_actions_count' invalide (doit être un entier >= 0).");
+  }
+
+  const actionsRaw = data['actions'];
+  if (!Array.isArray(actionsRaw)) {
+    throw new FinanceServiceError("Propriété 'actions' manquante ou non tableau.");
+  }
+
+  const actions = actionsRaw.map((act, idx) => validateCollectionActionItem(act, `#${idx}`));
+
+  return {
+    total_actions_count,
+    actions
+  };
+}
+
+export function validateCollectionFollowupsResponse(data: unknown): CollectionFollowupsResponse {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Format de réponse invalide pour get_school_collection_followups (non-objet).');
+  }
+
+  if (typeof data['has_more'] !== 'boolean') {
+    throw new FinanceServiceError("Propriété 'has_more' manquante ou non booléenne.");
+  }
+
+  const itemsRaw = data['items'];
+  if (!Array.isArray(itemsRaw)) {
+    throw new FinanceServiceError("Propriété 'items' manquante ou non tableau.");
+  }
+
+  const items = itemsRaw.map((item, index) => {
+    if (!isObject(item)) {
+      throw new FinanceServiceError(`Élément #${index} invalide dans la liste des relances (non-objet).`);
+    }
+
+    const invoice_id = getStringProperty(item, 'invoice_id');
+    if (!invoice_id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invoice_id)) {
+      throw new FinanceServiceError(`Élément #${index} : 'invoice_id' manquant ou UUID invalide.`);
+    }
+
+    const invoice_number = getStringProperty(item, 'invoice_number');
+    if (!invoice_number) throw new FinanceServiceError(`Élément #${index} : 'invoice_number' manquant.`);
+
+    const student_id = getStringProperty(item, 'student_id');
+    if (!student_id) throw new FinanceServiceError(`Élément #${index} : 'student_id' manquant.`);
+
+    const student_name = getStringProperty(item, 'student_name') ?? '';
+    const student_matricule = getStringProperty(item, 'student_matricule') ?? '';
+    const class_name = getStringProperty(item, 'class_name') ?? '';
+
+    const due_date = getStringProperty(item, 'due_date');
+    if (!due_date || !/^\d{4}-\d{2}-\d{2}$/.test(due_date) || isNaN(Date.parse(due_date)) || new Date(due_date).toISOString().substring(0, 10) !== due_date) {
+      throw new FinanceServiceError(`Élément #${index} : 'due_date' invalide ou date calendrier impossible ('${due_date}').`);
+    }
+
+    const days_overdue = getNumberProperty(item, 'days_overdue');
+    if (days_overdue === null || !isFinite(days_overdue) || days_overdue < 0 || !Number.isInteger(days_overdue)) {
+      throw new FinanceServiceError(`Élément #${index} : 'days_overdue' invalide (doit être un entier >= 0).`);
+    }
+
+    const currency = getStringProperty(item, 'currency') as Currency;
+    if (currency !== 'USD' && currency !== 'CDF') {
+      throw new FinanceServiceError(`Élément #${index} : 'currency' invalide ('${currency}').`);
+    }
+
+    const total_amount = getNumberProperty(item, 'total_amount');
+    if (total_amount === null || !isFinite(total_amount) || total_amount <= 0) {
+      throw new FinanceServiceError(`Élément #${index} : 'total_amount' invalide ou non strictement positif.`);
+    }
+
+    const paid_amount = getNumberProperty(item, 'paid_amount');
+    if (paid_amount === null || !isFinite(paid_amount) || paid_amount < 0 || paid_amount > total_amount) {
+      throw new FinanceServiceError(`Élément #${index} : 'paid_amount' incohérent ou supérieur au total.`);
+    }
+
+    const remaining_balance = getNumberProperty(item, 'remaining_balance');
+    if (remaining_balance === null || !isFinite(remaining_balance) || remaining_balance < 0 || remaining_balance > total_amount) {
+      throw new FinanceServiceError(`Élément #${index} : 'remaining_balance' incohérent ou supérieur au total.`);
+    }
+
+    const collection_status = getStringProperty(item, 'collection_status') as CollectionStatus;
+    if (!collection_status || !VALID_COLLECTION_STATUSES.includes(collection_status)) {
+      throw new FinanceServiceError(`Élément #${index} : 'collection_status' invalide ('${collection_status}').`);
+    }
+
+    const last_action_type = getStringProperty(item, 'last_action_type') as CollectionActionType | null;
+    if (last_action_type !== null && last_action_type !== undefined && !VALID_ACTION_TYPES.includes(last_action_type)) {
+      throw new FinanceServiceError(`Élément #${index} : 'last_action_type' invalide ('${last_action_type}').`);
+    }
+
+    const last_contacted_at = getStringProperty(item, 'last_contacted_at');
+    if (last_contacted_at !== null && last_contacted_at !== undefined && isNaN(Date.parse(last_contacted_at))) {
+      throw new FinanceServiceError(`Élément #${index} : 'last_contacted_at' invalide.`);
+    }
+
+    const latest_promise_to_pay_date = getStringProperty(item, 'latest_promise_to_pay_date');
+    if (latest_promise_to_pay_date !== null && latest_promise_to_pay_date !== undefined && (!/^\d{4}-\d{2}-\d{2}$/.test(latest_promise_to_pay_date) || isNaN(Date.parse(latest_promise_to_pay_date)))) {
+      throw new FinanceServiceError(`Élément #${index} : 'latest_promise_to_pay_date' invalide.`);
+    }
+
+    const latest_next_follow_up_date = getStringProperty(item, 'latest_next_follow_up_date');
+    if (latest_next_follow_up_date !== null && latest_next_follow_up_date !== undefined && (!/^\d{4}-\d{2}-\d{2}$/.test(latest_next_follow_up_date) || isNaN(Date.parse(latest_next_follow_up_date)))) {
+      throw new FinanceServiceError(`Élément #${index} : 'latest_next_follow_up_date' invalide.`);
+    }
+
+    const effective_follow_up_date = getStringProperty(item, 'effective_follow_up_date');
+    if (!effective_follow_up_date || !/^\d{4}-\d{2}-\d{2}$/.test(effective_follow_up_date) || isNaN(Date.parse(effective_follow_up_date))) {
+      throw new FinanceServiceError(`Élément #${index} : 'effective_follow_up_date' invalide.`);
+    }
+
+    return {
+      invoice_id,
+      invoice_number,
+      student_id,
+      student_name,
+      student_matricule,
+      class_name,
+      due_date,
+      days_overdue,
+      currency,
+      total_amount,
+      paid_amount,
+      remaining_balance,
+      collection_status,
+      last_action_type: last_action_type || null,
+      last_contacted_at: last_contacted_at || null,
+      latest_promise_to_pay_date: latest_promise_to_pay_date || null,
+      latest_next_follow_up_date: latest_next_follow_up_date || null,
+      effective_follow_up_date
+    };
+  });
+
+  const nextCursorRaw = data['next_cursor'];
+  let next_cursor: CollectionFollowupsCursor | null = null;
+
+  if (nextCursorRaw !== null && nextCursorRaw !== undefined) {
+    if (!isObject(nextCursorRaw)) {
+      throw new FinanceServiceError("Propriété 'next_cursor' invalide (ni null ni objet).");
+    }
+    const cursorEffectiveDate = getStringProperty(nextCursorRaw, 'effective_date');
+    const cursorInvoiceId = getStringProperty(nextCursorRaw, 'invoice_id');
+
+    if (!cursorEffectiveDate || !cursorInvoiceId) {
+      throw new FinanceServiceError("Curseur partiel non autorisé : 'effective_date' et 'invoice_id' doivent être tous les deux présents dans next_cursor.");
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(cursorEffectiveDate) || isNaN(Date.parse(cursorEffectiveDate))) {
+      throw new FinanceServiceError("Format YYYY-MM-DD invalide pour 'effective_date' dans next_cursor.");
+    }
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cursorInvoiceId)) {
+      throw new FinanceServiceError("Format UUID invalide pour 'invoice_id' dans next_cursor.");
+    }
+
+    next_cursor = {
+      effective_date: cursorEffectiveDate,
+      invoice_id: cursorInvoiceId
+    };
+  }
+
+  if (data['has_more'] === true && !next_cursor) {
+    throw new FinanceServiceError("Propriété next_cursor obligatoire lorsque has_more est vrai.");
+  }
+
+  if (data['has_more'] === false && next_cursor !== null) {
+    throw new FinanceServiceError("next_cursor doit être null lorsque has_more est faux.");
+  }
+
+  return {
+    items,
+    has_more: Boolean(data['has_more']),
+    next_cursor
+  };
+}
+
+export async function createInvoiceCollectionAction(
+  input: CreateCollectionActionInput
+): Promise<CreateCollectionActionResponse> {
+  if (!input.invoice_id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.invoice_id)) {
+    throw new FinanceServiceError('L’ID de la facture est obligatoire et doit être un UUID valide.', '22023');
+  }
+
+  if (!input.action_type || !VALID_ACTION_TYPES.includes(input.action_type)) {
+    throw new FinanceServiceError(`Type d’action invalide : '${input.action_type}'.`, '22023');
+  }
+
+  const trimmedNote = (input.note || '').trim();
+  if (trimmedNote.length < 5 || trimmedNote.length > 1000) {
+    throw new FinanceServiceError('La note doit contenir entre 5 et 1000 caractères.', '22023');
+  }
+
+  if (!input.idempotency_key || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.idempotency_key)) {
+    throw new FinanceServiceError('La clé d’idempotence est obligatoire et doit être un UUID valide.', '22023');
+  }
+
+  if (input.promise_to_pay_date) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.promise_to_pay_date) || isNaN(Date.parse(input.promise_to_pay_date))) {
+      throw new FinanceServiceError('La date de promesse doit être au format YYYY-MM-DD.', '22023');
+    }
+  }
+
+  if (input.next_follow_up_date) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.next_follow_up_date) || isNaN(Date.parse(input.next_follow_up_date))) {
+      throw new FinanceServiceError('La date de prochaine relance doit être au format YYYY-MM-DD.', '22023');
+    }
+  }
+
+  const rpcParams = {
+    p_invoice_id: input.invoice_id,
+    p_action_type: input.action_type,
+    p_note: trimmedNote,
+    p_idempotency_key: input.idempotency_key,
+    p_promise_to_pay_date: input.promise_to_pay_date || null,
+    p_next_follow_up_date: input.next_follow_up_date || null
+  };
+
+  try {
+    const { data, error } = await supabase.rpc('create_invoice_collection_action', rpcParams);
+    if (error) {
+      throw mapPostgresError(error);
+    }
+    return validateCreateCollectionActionResponse(data);
+  } catch (err: unknown) {
+    if (err instanceof FinanceServiceError) throw err;
+    throw mapPostgresError(err);
+  }
+}
+
+export async function getInvoiceCollectionHistory(
+  invoiceId: string
+): Promise<CollectionHistoryResponse> {
+  if (!invoiceId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(invoiceId)) {
+    throw new FinanceServiceError('L’ID de la facture est obligatoire et doit être un UUID valide.', '22023');
+  }
+
+  try {
+    const { data, error } = await supabase.rpc('get_invoice_collection_history', {
+      p_invoice_id: invoiceId
+    });
+    if (error) {
+      throw mapPostgresError(error);
+    }
+    return validateCollectionHistoryResponse(data);
+  } catch (err: unknown) {
+    if (err instanceof FinanceServiceError) throw err;
+    throw mapPostgresError(err);
+  }
+}
+
+export async function getSchoolCollectionFollowups(
+  filters?: CollectionFollowupsFilters,
+  cursor?: CollectionFollowupsCursor | null
+): Promise<CollectionFollowupsResponse> {
+  let p_currency: 'USD' | 'CDF' | null = null;
+  if (filters?.currency === 'USD' || filters?.currency === 'CDF') {
+    p_currency = filters.currency;
+  }
+
+  let p_status_filter: CollectionStatus | null = null;
+  if (filters?.status_filter && filters.status_filter !== 'ALL' && VALID_COLLECTION_STATUSES.includes(filters.status_filter as CollectionStatus)) {
+    p_status_filter = filters.status_filter as CollectionStatus;
+  }
+
+  let p_limit = filters?.limit ?? 20;
+  if (p_limit < 1 || p_limit > 100) {
+    throw new FinanceServiceError('La limite de pagination p_limit doit être comprise entre 1 et 100.', '22023');
+  }
+
+  if (cursor) {
+    if (!cursor.effective_date || !cursor.invoice_id) {
+      throw new FinanceServiceError('Le curseur de relances doit contenir effective_date et invoice_id.', '22023');
+    }
+  }
+
+  const rpcParams = {
+    p_currency,
+    p_status_filter,
+    p_limit,
+    p_cursor_effective_date: cursor?.effective_date || null,
+    p_cursor_invoice_id: cursor?.invoice_id || null
+  };
+
+  try {
+    const { data, error } = await supabase.rpc('get_school_collection_followups', rpcParams);
+    if (error) {
+      throw mapPostgresError(error);
+    }
+    return validateCollectionFollowupsResponse(data);
   } catch (err: unknown) {
     if (err instanceof FinanceServiceError) throw err;
     throw mapPostgresError(err);

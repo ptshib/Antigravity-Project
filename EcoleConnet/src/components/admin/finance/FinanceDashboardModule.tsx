@@ -10,6 +10,9 @@ import { StudentInvoicesModule } from './StudentInvoicesModule';
 import { StudentFinanceDossierModal } from './StudentFinanceDossierModal';
 import { AgingSummaryCard } from './AgingSummaryCard';
 import { OverdueInvoicesTable } from './OverdueInvoicesTable';
+import { CollectionFollowupsTable } from './CollectionFollowupsTable';
+import { RecordCollectionActionModal } from './RecordCollectionActionModal';
+import { CollectionHistoryTimeline } from './CollectionHistoryTimeline';
 import {
   DollarSign,
   TrendingUp,
@@ -50,6 +53,24 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
 
   // Dossier Modal State
   const [selectedDossierStudentId, setSelectedDossierStudentId] = useState<string | null>(null);
+
+  // Finance 4B Modal States
+  const [actionModalInvoice, setActionModalInvoice] = useState<{
+    invoice_id: string;
+    invoice_number: string;
+    student_name: string;
+    remaining_balance: number;
+    currency: 'USD' | 'CDF';
+    due_date?: string;
+  } | null>(null);
+
+  const [historyModalInvoice, setHistoryModalInvoice] = useState<{
+    invoiceId: string;
+    invoiceNumber: string;
+    studentName: string;
+  } | null>(null);
+
+  const [refreshFollowupsTrigger, setRefreshFollowupsTrigger] = useState<number>(0);
 
   // Finance 4A State (Aging Summary)
   const [agingSummary, setAgingSummary] = useState<AgingSummaryResponse | null>(null);
@@ -344,7 +365,26 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
             error={agingError}
             onRetry={fetchAgingData}
           />
-          <OverdueInvoicesTable />
+          <OverdueInvoicesTable
+            onRecordAction={(inv) => setActionModalInvoice(inv)}
+            onViewHistory={(inv) => setHistoryModalInvoice({ invoiceId: inv.invoice_id, invoiceNumber: inv.invoice_number, studentName: inv.student_name })}
+          />
+          <CollectionFollowupsTable
+            onRecordAction={(item) => setActionModalInvoice({
+              invoice_id: item.invoice_id,
+              invoice_number: item.invoice_number,
+              student_name: item.student_name,
+              remaining_balance: item.remaining_balance,
+              currency: item.currency,
+              due_date: item.due_date
+            })}
+            onViewHistory={(item) => setHistoryModalInvoice({
+              invoiceId: item.invoice_id,
+              invoiceNumber: item.invoice_number,
+              studentName: item.student_name
+            })}
+            refreshTrigger={refreshFollowupsTrigger}
+          />
         </div>
       )}
 
@@ -364,6 +404,25 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
         isOpen={!!selectedDossierStudentId}
         onClose={() => setSelectedDossierStudentId(null)}
         studentId={selectedDossierStudentId}
+      />
+
+      {/* Modals de relance et d'historique de recouvrement */}
+      <RecordCollectionActionModal
+        isOpen={!!actionModalInvoice}
+        onClose={() => setActionModalInvoice(null)}
+        invoice={actionModalInvoice}
+        businessDate={agingSummary?.meta.business_date}
+        onSuccess={() => {
+          setRefreshFollowupsTrigger((prev) => prev + 1);
+        }}
+      />
+
+      <CollectionHistoryTimeline
+        isOpen={!!historyModalInvoice}
+        onClose={() => setHistoryModalInvoice(null)}
+        invoiceId={historyModalInvoice?.invoiceId || null}
+        invoiceNumber={historyModalInvoice?.invoiceNumber}
+        studentName={historyModalInvoice?.studentName}
       />
     </div>
   );

@@ -22,7 +22,26 @@ import type {
   AgingBucketKey
 } from '../../../types/finance';
 
-export const OverdueInvoicesTable: React.FC = () => {
+export interface OverdueInvoicesTableProps {
+  onRecordAction?: (item: {
+    invoice_id: string;
+    invoice_number: string;
+    student_name: string;
+    remaining_balance: number;
+    currency: Currency;
+    due_date?: string;
+  }) => void;
+  onViewHistory?: (item: {
+    invoice_id: string;
+    invoice_number: string;
+    student_name: string;
+  }) => void;
+}
+
+export const OverdueInvoicesTable: React.FC<OverdueInvoicesTableProps> = ({
+  onRecordAction,
+  onViewHistory
+}) => {
   // Filtres
   const [selectedCurrency, setSelectedCurrency] = useState<Currency | ''>('');
   const [selectedBucket, setSelectedBucket] = useState<AgingBucketKey | ''>('');
@@ -299,6 +318,9 @@ export const OverdueInvoicesTable: React.FC = () => {
                 <th className="py-3 px-3 text-right">Payé</th>
                 <th className="py-3 px-3 text-right font-extrabold text-slate-900">Reste dû</th>
                 <th className="py-3 px-3 text-center">Statut</th>
+                {(onRecordAction || onViewHistory) && (
+                  <th className="py-3 px-3 text-center">Actions</th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -342,6 +364,43 @@ export const OverdueInvoicesTable: React.FC = () => {
                       {item.status === 'partially_paid' ? 'Partiel' : 'Émise'}
                     </span>
                   </td>
+                  {(onRecordAction || onViewHistory) && (
+                    <td className="py-3 px-3 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        {onRecordAction && (
+                          <button
+                            type="button"
+                            onClick={() => onRecordAction({
+                              invoice_id: item.invoice_id,
+                              invoice_number: item.invoice_number,
+                              student_name: item.student_name,
+                              remaining_balance: item.remaining_balance,
+                              currency: item.currency,
+                              due_date: item.due_date
+                            })}
+                            className="px-2 py-1 text-[10px] font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded border border-indigo-200 transition-colors"
+                            title="Relancer"
+                          >
+                            Relancer
+                          </button>
+                        )}
+                        {onViewHistory && (
+                          <button
+                            type="button"
+                            onClick={() => onViewHistory({
+                              invoice_id: item.invoice_id,
+                              invoice_number: item.invoice_number,
+                              student_name: item.student_name
+                            })}
+                            className="px-2 py-1 text-[10px] font-medium text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded border border-slate-200 transition-colors"
+                            title="Historique"
+                          >
+                            Historique
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

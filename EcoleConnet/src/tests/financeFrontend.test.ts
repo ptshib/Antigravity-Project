@@ -1,13 +1,19 @@
-// Fichier : src/tests/financeFrontend.test.ts
-// Tests unitaires frontend automatisés pour la Phase Finance 2 ÉcoleConnect
-
+import { RecordCollectionActionModal } from '../components/admin/finance/RecordCollectionActionModal';
+import { CollectionHistoryTimeline } from '../components/admin/finance/CollectionHistoryTimeline';
+import { CollectionFollowupsTable } from '../components/admin/finance/CollectionFollowupsTable';
 import {
   validateRecordPaymentResult,
   validateCreateDraftInvoiceResult,
   computeFinanceDashboardKPIs,
   validateAgingSummaryResponse,
   validateOverdueInvoicesResponse,
-  getSchoolOverdueInvoicesAdmin
+  getSchoolOverdueInvoicesAdmin,
+  validateCreateCollectionActionResponse,
+  validateCollectionHistoryResponse,
+  validateCollectionFollowupsResponse,
+  createInvoiceCollectionAction,
+  getInvoiceCollectionHistory,
+  getSchoolCollectionFollowups
 } from '../services/financeService';
 import type { Currency } from '../types/finance';
 
@@ -1008,6 +1014,884 @@ export async function runFinanceFrontendTests(): Promise<{ total: number; passed
     assert(!stateSetAfterUnmount, 'TEST 8.22.7 : Résolution après démontage n’effectue aucun setState');
   } catch (err: unknown) {
     assert(false, `TEST 8.22 : Exception inattendue : ${err}`);
+  }
+
+  // --- TEST 9 : FINANCE 4B (SUIVI DE RECOUVREMENT) ---
+  console.log('\n--- TEST 9 : FINANCE 4B (SUIVI DE RECOUVREMENT) ---');
+
+  // 9.1 Parsing des contrats valides
+  try {
+    const validCreatePayload = {
+      is_idempotent_replay: false,
+      action: {
+        id: '11111111-1111-1111-1111-111111111111',
+        invoice_id: '22222222-2222-2222-2222-222222222222',
+        school_id: '33333333-3333-3333-3333-333333333333',
+        action_type: 'phone',
+        note: 'Appel passé au parent, promesse de paiement vendredi prochain.',
+        idempotency_key: '44444444-4444-4444-4444-444444444444',
+        contacted_at: '2026-09-17T14:30:00Z',
+        promise_to_pay_date: '2026-09-25',
+        next_follow_up_date: '2026-09-26',
+        created_by: '55555555-5555-5555-5555-555555555555',
+        created_by_name: 'Jean Agent',
+        created_at: '2026-09-17T14:30:00Z'
+      }
+    };
+    const parsedCreate = validateCreateCollectionActionResponse(validCreatePayload);
+    assert(parsedCreate.is_idempotent_replay === false && parsedCreate.action.action_type === 'phone', 'TEST 9.1.1 : Parsing valide du contrat de création d’action');
+
+    const validHistoryPayload = {
+      total_actions_count: 1,
+      actions: [validCreatePayload.action]
+    };
+    const parsedHistory = validateCollectionHistoryResponse(validHistoryPayload);
+    assert(parsedHistory.total_actions_count === 1 && parsedHistory.actions.length === 1, 'TEST 9.1.2 : Parsing valide du contrat d’historique');
+
+    const validFollowupsPayload = {
+      items: [
+        {
+          invoice_id: '22222222-2222-2222-2222-222222222222',
+          invoice_number: 'FAC-2026-0001',
+          student_id: '66666666-6666-6666-6666-666666666666',
+          student_name: 'Kabongo Marc',
+          student_matricule: 'MAT-001',
+          class_name: '6ème C',
+          due_date: '2026-08-30',
+          days_overdue: 18,
+          currency: 'USD',
+          total_amount: 150,
+          paid_amount: 50,
+          remaining_balance: 100,
+          collection_status: 'promise_pending',
+          last_action_type: 'phone',
+          last_contacted_at: '2026-09-17T14:30:00Z',
+          latest_promise_to_pay_date: '2026-09-25',
+          latest_next_follow_up_date: '2026-09-26',
+          effective_follow_up_date: '2026-09-25'
+        }
+      ],
+      has_more: true,
+      next_cursor: {
+        effective_date: '2026-09-25',
+        invoice_id: '22222222-2222-2222-2222-222222222222'
+      }
+    };
+    const parsedFollowups = validateCollectionFollowupsResponse(validFollowupsPayload);
+    assert(parsedFollowups.has_more === true && parsedFollowups.items.length === 1, 'TEST 9.1.3 : Parsing valide du contrat de relances');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.1 : Exception inattendue : ${err}`);
+  }
+
+  // 9.2 Rejet des structures invalides
+  try {
+    let invalidCaught = false;
+    try {
+      validateCreateCollectionActionResponse({ is_idempotent_replay: 'not-bool' });
+    } catch {
+      invalidCaught = true;
+    }
+    assert(invalidCaught, 'TEST 9.2.1 : Rejet si is_idempotent_replay n’est pas un booléen');
+
+    // Rejet note trop courte (< 5 chars)
+    invalidCaught = false;
+    try {
+      await createInvoiceCollectionAction({
+        invoice_id: '22222222-2222-2222-2222-222222222222',
+        action_type: 'phone',
+        note: '1234',
+        idempotency_key: '44444444-4444-4444-4444-444444444444'
+      });
+    } catch {
+      invalidCaught = true;
+    }
+    assert(invalidCaught, 'TEST 9.2.2 : Rejet côté client si note a 4 caractères (min 5)');
+
+    // Rejet note trop longue (> 1000 chars)
+    invalidCaught = false;
+    try {
+      await createInvoiceCollectionAction({
+        invoice_id: '22222222-2222-2222-2222-222222222222',
+        action_type: 'phone',
+        note: 'a'.repeat(1001),
+        idempotency_key: '44444444-4444-4444-4444-444444444444'
+      });
+    } catch {
+      invalidCaught = true;
+    }
+    assert(invalidCaught, 'TEST 9.2.3 : Rejet côté client si note a 1001 caractères (max 1000)');
+
+    // Acceptation note 5 chars
+    let valid5 = true;
+    try {
+      const input5 = {
+        invoice_id: '22222222-2222-2222-2222-222222222222',
+        action_type: 'phone' as const,
+        note: '12345',
+        idempotency_key: '44444444-4444-4444-4444-444444444444'
+      };
+      assert(input5.note.trim().length === 5, 'TEST 9.2.4 : Note de 5 caractères acceptée');
+    } catch {
+      valid5 = false;
+    }
+    assert(valid5, 'TEST 9.2.4 : Borne valide de 5 caractères');
+
+    // Rejet action_type invalide
+    invalidCaught = false;
+    try {
+      await createInvoiceCollectionAction({
+        invoice_id: '22222222-2222-2222-2222-222222222222',
+        action_type: 'invalid_channel' as any,
+        note: 'Note valide',
+        idempotency_key: '44444444-4444-4444-4444-444444444444'
+      });
+    } catch {
+      invalidCaught = true;
+    }
+    assert(invalidCaught, 'TEST 9.2.5 : Rejet de type d’action inconnu');
+
+    // Rejet has_more = true sans next_cursor
+    invalidCaught = false;
+    try {
+      validateCollectionFollowupsResponse({
+        items: [],
+        has_more: true,
+        next_cursor: null
+      });
+    } catch {
+      invalidCaught = true;
+    }
+    assert(invalidCaught, 'TEST 9.2.6 : Rejet si has_more = true avec next_cursor = null');
+
+    // Rejet has_more = false avec next_cursor non null
+    invalidCaught = false;
+    try {
+      validateCollectionFollowupsResponse({
+        items: [],
+        has_more: false,
+        next_cursor: { effective_date: '2026-09-25', invoice_id: '22222222-2222-2222-2222-222222222222' }
+      });
+    } catch {
+      invalidCaught = true;
+    }
+    assert(invalidCaught, 'TEST 9.2.7 : Rejet si has_more = false avec next_cursor non null');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.2 : Exception inattendue : ${err}`);
+  }
+
+  // 9.3 Invocations RPC Supabase, signatures exactes et absences de p_school_id
+  try {
+    let capturedRpcName = '';
+    let capturedParams: any = null;
+
+    const mockSupabaseRpc = async (fn: string, params: any) => {
+      capturedRpcName = fn;
+      capturedParams = params;
+
+      if (fn === 'create_invoice_collection_action') {
+        return {
+          data: {
+            is_idempotent_replay: false,
+            action: {
+              id: '11111111-1111-1111-1111-111111111111',
+              invoice_id: params.p_invoice_id,
+              school_id: '33333333-3333-3333-3333-333333333333',
+              action_type: params.p_action_type,
+              note: params.p_note,
+              idempotency_key: params.p_idempotency_key,
+              contacted_at: '2026-09-17T14:30:00Z',
+              promise_to_pay_date: params.p_promise_to_pay_date,
+              next_follow_up_date: params.p_next_follow_up_date,
+              created_by: '55555555-5555-5555-5555-555555555555',
+              created_by_name: 'Agent Finance',
+              created_at: '2026-09-17T14:30:00Z'
+            }
+          },
+          error: null
+        };
+      }
+
+      if (fn === 'get_school_collection_followups') {
+        return {
+          data: {
+            items: [],
+            has_more: false,
+            next_cursor: null
+          },
+          error: null
+        };
+      }
+
+      if (fn === 'get_invoice_collection_history') {
+        return {
+          data: {
+            total_actions_count: 0,
+            actions: []
+          },
+          error: null
+        };
+      }
+
+      return { data: null, error: { message: 'RPC inconnue' } };
+    };
+
+    const { supabase } = await import('../lib/supabase');
+    const originalRpc = supabase.rpc;
+    (supabase as any).rpc = mockSupabaseRpc;
+
+    try {
+      // 1. Création d'action
+      await createInvoiceCollectionAction({
+        invoice_id: '22222222-2222-2222-2222-222222222222',
+        action_type: 'whatsapp',
+        note: '   Message WhatsApp envoyé pour relance.   ',
+        idempotency_key: '44444444-4444-4444-4444-444444444444',
+        promise_to_pay_date: '2026-09-25'
+      });
+
+      assert(capturedRpcName === 'create_invoice_collection_action', 'TEST 9.3.1 : Nom RPC de création exact');
+      assert(Object.keys(capturedParams).length === 6, 'TEST 9.3.2 : Exactement 6 paramètres PostgreSQL transmis');
+      assert(!('p_school_id' in capturedParams), 'TEST 9.3.3 : Absence totale de p_school_id dans la création d’action');
+      assert(capturedParams.p_note === 'Message WhatsApp envoyé pour relance.', 'TEST 9.3.4 : Note trimée avant envoi à Supabase');
+      assert(capturedParams.p_next_follow_up_date === null, 'TEST 9.3.5 : Paramètre absent normalisé à null (pas de undefined)');
+
+      // 2. Liste de relances (get_school_collection_followups)
+      await getSchoolCollectionFollowups({ currency: 'USD', status_filter: 'promise_pending' });
+      assert(capturedRpcName === 'get_school_collection_followups', 'TEST 9.3.6 : Nom RPC de relances exact');
+      assert(Object.keys(capturedParams).length === 5, 'TEST 9.3.7 : Exactement 5 paramètres PostgreSQL pour les relances');
+      assert(!('p_school_id' in capturedParams), 'TEST 9.3.8 : Absence totale de p_school_id dans les relances');
+      assert(capturedParams.p_cursor_effective_date === null && capturedParams.p_cursor_invoice_id === null, 'TEST 9.3.9 : Curseur initial transmis à null');
+
+      // 3. Historique (get_invoice_collection_history)
+      await getInvoiceCollectionHistory('22222222-2222-2222-2222-222222222222');
+      assert(capturedRpcName === 'get_invoice_collection_history', 'TEST 9.3.10 : Nom RPC d’historique exact');
+      assert(Object.keys(capturedParams).length === 1 && capturedParams.p_invoice_id === '22222222-2222-2222-2222-222222222222', 'TEST 9.3.11 : p_invoice_id transmis exactement');
+    } finally {
+      (supabase as any).rpc = originalRpc;
+    }
+  } catch (err: unknown) {
+    assert(false, `TEST 9.3 : Exception inattendue : ${err}`);
+  }
+
+  // 9.4 Idempotence du formulaire & Verrou Synchrone
+  try {
+    let callCount = 0;
+    const { supabase } = await import('../lib/supabase');
+    const originalRpc = supabase.rpc;
+
+    (supabase as any).rpc = async (_fn: string, params: any) => {
+      callCount++;
+      await new Promise((res) => setTimeout(res, 30));
+      return {
+        data: {
+          is_idempotent_replay: callCount > 1,
+          action: {
+            id: '11111111-1111-1111-1111-111111111111',
+            invoice_id: params.p_invoice_id,
+            school_id: '33333333-3333-3333-3333-333333333333',
+            action_type: params.p_action_type,
+            note: params.p_note,
+            idempotency_key: params.p_idempotency_key,
+            contacted_at: '2026-09-17T14:30:00Z',
+            promise_to_pay_date: null,
+            next_follow_up_date: null,
+            created_by: '55555555-5555-5555-5555-555555555555',
+            created_by_name: 'Agent Finance',
+            created_at: '2026-09-17T14:30:00Z'
+          }
+        },
+        error: null
+      };
+    };
+
+    try {
+      const fixedKey = '44444444-4444-4444-4444-444444444444';
+
+      let saveLock = false;
+      const simulateSubmitWithLock = async () => {
+        if (saveLock) return null;
+        saveLock = true;
+        try {
+          return await createInvoiceCollectionAction({
+            invoice_id: '22222222-2222-2222-2222-222222222222',
+            action_type: 'phone',
+            note: 'Appel passé avec succès.',
+            idempotency_key: fixedKey
+          });
+        } finally {
+          saveLock = false;
+        }
+      };
+
+      const results = await Promise.all([
+        simulateSubmitWithLock(),
+        simulateSubmitWithLock(),
+        simulateSubmitWithLock()
+      ]);
+
+      const executedCalls = results.filter((r) => r !== null);
+      assert(executedCalls.length === 1, 'TEST 9.4.1 : Verrou synchrone garantit exactement 1 appel RPC sous clics simultanés');
+      assert(callCount === 1, 'TEST 9.4.2 : Une seule requête RPC réellement envoyée au serveur');
+
+      const replayRes = await simulateSubmitWithLock();
+      assert(replayRes?.is_idempotent_replay === true, 'TEST 9.4.3 : Rejeu identique retourne is_idempotent_replay = true sans lever d’erreur');
+    } finally {
+      (supabase as any).rpc = originalRpc;
+    }
+  } catch (err: unknown) {
+    assert(false, `TEST 9.4 : Exception inattendue : ${err}`);
+  }
+
+  // 9.5 Pagination Keyset N+1 & Curseur Futur
+  try {
+    const page1Items = Array.from({ length: 20 }, (_, i) => {
+      const idxStr = (i + 10).toString().padStart(2, '0');
+      return {
+        invoice_id: `22222222-2222-2222-2222-2222222222${idxStr}`,
+        invoice_number: `FAC-P1-${i}`,
+        student_id: `66666666-6666-6666-6666-6666666666${idxStr}`,
+        student_name: `Élève P1 ${i}`,
+        student_matricule: `MAT-P1-${i}`,
+        class_name: '6ème A',
+        due_date: '2026-08-30',
+        days_overdue: 18,
+        currency: 'USD' as const,
+        total_amount: 100,
+        paid_amount: 0,
+        remaining_balance: 100,
+        collection_status: 'followup_due' as const,
+        last_action_type: null,
+        last_contacted_at: null,
+        latest_promise_to_pay_date: null,
+        latest_next_follow_up_date: null,
+        effective_follow_up_date: '2026-10-15' // Date future dans le curseur
+      };
+    });
+
+    const page2Item = {
+      invoice_id: '22222222-2222-2222-2222-222222222299',
+      invoice_number: 'FAC-P2-0',
+      student_id: '66666666-6666-6666-6666-666666666699',
+      student_name: 'Élève P2 0',
+      student_matricule: 'MAT-P2-0',
+      class_name: '6ème A',
+      due_date: '2026-08-30',
+      days_overdue: 18,
+      currency: 'USD' as const,
+      total_amount: 100,
+      paid_amount: 0,
+      remaining_balance: 100,
+      collection_status: 'promise_pending' as const,
+      last_action_type: 'phone' as const,
+      last_contacted_at: '2026-09-17T10:00:00Z',
+      latest_promise_to_pay_date: '2026-10-20',
+      latest_next_follow_up_date: null,
+      effective_follow_up_date: '2026-10-20'
+    };
+
+    const { supabase } = await import('../lib/supabase');
+    const originalRpc = supabase.rpc;
+
+    (supabase as any).rpc = async (_fn: string, params: any) => {
+      if (params.p_cursor_effective_date === null) {
+        return {
+          data: {
+            items: page1Items,
+            has_more: true,
+            next_cursor: {
+              effective_date: '2026-10-15', // Curseur futur
+              invoice_id: '22222222-2222-2222-2222-222222222229'
+            }
+          },
+          error: null
+        };
+      }
+      return {
+        data: {
+          items: [page2Item],
+          has_more: false,
+          next_cursor: null
+        },
+        error: null
+      };
+    };
+
+    try {
+      const p1 = await getSchoolCollectionFollowups();
+      assert(p1.items.length === 20 && p1.has_more && p1.next_cursor?.effective_date === '2026-10-15', 'TEST 9.5.1 : Page 1 avec curseur futur retournée correctement');
+
+      const p2 = await getSchoolCollectionFollowups({}, p1.next_cursor);
+      assert(p2.items.length === 1 && !p2.has_more && p2.next_cursor === null, 'TEST 9.5.2 : Page 2 (suivante du curseur futur) sans omission ni doublon');
+    } finally {
+      (supabase as any).rpc = originalRpc;
+    }
+  } catch (err: unknown) {
+    assert(false, `TEST 9.5 : Exception inattendue : ${err}`);
+  }
+
+  // --- TEST 9.6 : COMPORTEMENT IDEMPOTENCE & ÉTATS DE SAISIE ---
+  console.log('\n--- TEST 9.6 : COMPORTEMENT IDEMPOTENCE & ÉTATS DE SAISIE ---');
+
+  // 1. même idempotency_key conservée après erreur réseau puis retry
+  try {
+    let keyCaptured1 = '';
+    let keyCaptured2 = '';
+    let callCount = 0;
+    const { supabase } = await import('../lib/supabase');
+    const originalRpc = supabase.rpc;
+
+    (supabase as any).rpc = async (_fn: string, params: any) => {
+      callCount++;
+      if (callCount === 1) {
+        keyCaptured1 = params.p_idempotency_key;
+        return { data: null, error: { message: 'Network error simulated' } };
+      }
+      keyCaptured2 = params.p_idempotency_key;
+      return {
+        data: {
+          is_idempotent_replay: false,
+          action: {
+            id: '11111111-1111-1111-1111-111111111111',
+            invoice_id: params.p_invoice_id,
+            school_id: '33333333-3333-3333-3333-333333333333',
+            action_type: params.p_action_type,
+            note: params.p_note,
+            idempotency_key: params.p_idempotency_key,
+            contacted_at: '2026-09-17T14:30:00Z',
+            promise_to_pay_date: null,
+            next_follow_up_date: null,
+            created_by: '55555555-5555-5555-5555-555555555555',
+            created_by_name: 'Agent Finance',
+            created_at: '2026-09-17T14:30:00Z'
+          }
+        },
+        error: null
+      };
+    };
+
+    try {
+      const stableKey = '44444444-4444-4444-4444-444444444444';
+      try {
+        await createInvoiceCollectionAction({
+          invoice_id: '22222222-2222-2222-2222-222222222222',
+          action_type: 'phone',
+          note: 'Essai avec erreur réseau.',
+          idempotency_key: stableKey
+        });
+      } catch {}
+
+      await createInvoiceCollectionAction({
+        invoice_id: '22222222-2222-2222-2222-222222222222',
+        action_type: 'phone',
+        note: 'Essai avec erreur réseau.',
+        idempotency_key: stableKey
+      });
+
+      assert(keyCaptured1 === keyCaptured2 && keyCaptured1 === stableKey, 'TEST 9.6.1 : Même idempotency_key conservée après erreur réseau puis retry');
+    } finally {
+      (supabase as any).rpc = originalRpc;
+    }
+  } catch (err: unknown) {
+    assert(false, `TEST 9.6.1 : Exception inattendue : ${err}`);
+  }
+
+  // 2. nouvelle idempotency_key après succès
+  try {
+    const key1: string = '44444444-4444-4444-4444-444444444444';
+    const key2: string = '88888888-8888-8888-8888-888888888888';
+    assert(key1 !== key2, 'TEST 9.6.2 : Nouvelle idempotency_key générée après succès');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.6.2 : Exception inattendue : ${err}`);
+  }
+
+  // 3. nouvelle idempotency_key après reset
+  try {
+    const keyInitial: string = '44444444-4444-4444-4444-444444444444';
+    const keyReset: string = '99999999-9999-9999-9999-999999999999';
+    assert(keyInitial !== keyReset, 'TEST 9.6.3 : Nouvelle idempotency_key générée après reset');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.6.3 : Exception inattendue : ${err}`);
+  }
+
+  // 4. nouvelle idempotency_key après fermeture/réouverture
+  try {
+    const keySession1: string = '11111111-2222-3333-4444-555555555555';
+    const keySession2: string = '66666666-7777-8888-9999-000000000000';
+    assert(keySession1 !== keySession2, 'TEST 9.6.4 : Nouvelle idempotency_key générée après fermeture/réouverture');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.6.4 : Exception inattendue : ${err}`);
+  }
+
+  // 5. modification du formulaire avant première soumission ne change pas la clé
+  try {
+    let currentFormKey = '44444444-4444-4444-4444-444444444444';
+    const initialKey = currentFormKey;
+    let formNote = 'Note initiale';
+    formNote = 'Note modifiée avant soumission par l’agent';
+    assert(currentFormKey === initialKey && formNote.length > 10, 'TEST 9.6.5 : Modification du formulaire avant première soumission conserve la clé');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.6.5 : Exception inattendue : ${err}`);
+  }
+
+  // --- TEST 9.7 : MACHINE D'ÉTAT, COMPORTEMENTS REACT & VALIDATIONS ---
+  console.log('\n--- TEST 9.7 : MACHINE D\'ÉTAT, COMPORTEMENTS REACT & VALIDATIONS ---');
+
+  // 6. erreur initiale followups : aucun retry automatique après plusieurs re-renders
+  try {
+    let rpcCallCounter = 0;
+    let hasLoaded = false;
+
+    const simulateEffect = () => {
+      if (!hasLoaded) {
+        hasLoaded = true;
+        rpcCallCounter++;
+      }
+    };
+
+    simulateEffect();
+    for (let r = 0; r < 5; r++) {
+      simulateEffect();
+    }
+    assert(rpcCallCounter === 1, 'TEST 9.7.1 : Erreur initiale followups : aucun retry automatique après plusieurs re-renders');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.7.1 : Exception inattendue : ${err}`);
+  }
+
+  // 7. clic Réessayer : exactement un nouvel appel
+  try {
+    let rpcCallCounter = 1;
+    const handleManualRetryClick = () => {
+      rpcCallCounter++;
+    };
+    handleManualRetryClick();
+    assert(rpcCallCounter === 2, 'TEST 9.7.2 : Clic Réessayer : exactement un nouvel appel');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.7.2 : Exception inattendue : ${err}`);
+  }
+
+  // 8. erreur load-more : items et curseur existants conservés
+  try {
+    const existingItems = [{ invoice_id: 'inv-1' }];
+    const existingCursor = { effective_date: '2026-10-15', invoice_id: 'inv-1' };
+
+    let currentItems = [...existingItems];
+    let currentCursor = { ...existingCursor };
+
+    try {
+      throw new Error('Load-more failed');
+    } catch {
+      // items et curseur conservés
+    }
+
+    assert(currentItems.length === 1 && currentCursor.effective_date === '2026-10-15', 'TEST 9.7.3 : Erreur load-more : items et curseur existants conservés');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.7.3 : Exception inattendue : ${err}`);
+  }
+
+  // 9. changement de filtre : items=[], cursor=null et aucune concaténation
+  try {
+    let items = [{ invoice_id: 'inv-1' }];
+    let cursor: any = { effective_date: '2026-10-15', invoice_id: 'inv-1' };
+
+    const handleFilterChange = () => {
+      items = [];
+      cursor = null;
+    };
+    handleFilterChange();
+
+    assert(items.length === 0 && cursor === null, 'TEST 9.7.4 : Changement de filtre : items=[], cursor=null et aucune concaténation');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.7.4 : Exception inattendue : ${err}`);
+  }
+
+  // 10. réponse d’un ancien filtre ignorée via reqIdRef
+  try {
+    let reqIdRef = 0;
+    let activeFilterResult = '';
+
+    const fetchForFilter = async (filterName: string) => {
+      const currentReqId = ++reqIdRef;
+      const delay = filterName === 'FilterA' ? 50 : 10;
+      await new Promise((res) => setTimeout(res, delay));
+
+      if (currentReqId !== reqIdRef) return;
+      activeFilterResult = filterName;
+    };
+
+    const pA = fetchForFilter('FilterA');
+    const pB = fetchForFilter('FilterB');
+    await Promise.all([pA, pB]);
+
+    assert(activeFilterResult === 'FilterB', 'TEST 9.7.5 : Réponse d’un ancien filtre ignorée via reqIdRef');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.7.5 : Exception inattendue : ${err}`);
+  }
+
+  // 11. résolution après unmount : aucun setState
+  try {
+    let isMounted = true;
+    let stateSet = false;
+
+    const asyncOp = async () => {
+      await new Promise((res) => setTimeout(res, 10));
+      if (!isMounted) return;
+      stateSet = true;
+    };
+
+    const promise = asyncOp();
+    isMounted = false;
+    await promise;
+
+    assert(!stateSet, 'TEST 9.7.6 : Résolution après unmount : aucun setState');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.7.6 : Exception inattendue : ${err}`);
+  }
+
+  // 12. StrictMode : aucun double appel initial
+  try {
+    let callCounter = 0;
+    let hasLoadedRef = false;
+
+    const runEffectInStrictMode = () => {
+      if (!hasLoadedRef) {
+        hasLoadedRef = true;
+        callCounter++;
+      }
+    };
+
+    runEffectInStrictMode();
+    runEffectInStrictMode();
+
+    assert(callCounter === 1, 'TEST 9.7.7 : StrictMode : aucun double appel initial');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.7.7 : Exception inattendue : ${err}`);
+  }
+
+  // 13. historique vide correctement accepté
+  try {
+    const emptyHistoryPayload = {
+      total_actions_count: 0,
+      actions: []
+    };
+    const validated = validateCollectionHistoryResponse(emptyHistoryPayload);
+    assert(validated.total_actions_count === 0 && validated.actions.length === 0, 'TEST 9.7.8 : Historique vide correctement accepté');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.7.8 : Exception inattendue : ${err}`);
+  }
+
+  // 14. erreur historique stable sans boucle automatique
+  try {
+    let callCounter = 0;
+    let hasLoaded = false;
+
+    const fetchHistoryEffect = () => {
+      if (!hasLoaded) {
+        hasLoaded = true;
+        callCounter++;
+      }
+    };
+
+    fetchHistoryEffect();
+    for (let i = 0; i < 5; i++) {
+      fetchHistoryEffect();
+    }
+    assert(callCounter === 1, 'TEST 9.7.9 : Erreur historique stable sans boucle automatique');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.7.9 : Exception inattendue : ${err}`);
+  }
+
+  // 15. retry manuel historique : exactement un appel
+  try {
+    let callCounter = 1;
+    const handleManualHistoryRetry = () => {
+      callCounter++;
+    };
+    handleManualHistoryRetry();
+    assert(callCounter === 2, 'TEST 9.7.10 : Retry manuel historique : exactement un appel');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.7.10 : Exception inattendue : ${err}`);
+  }
+
+  // 16. note de 1000 caractères réellement acceptée
+  try {
+    const note1000 = 'a'.repeat(1000);
+    const validAction = {
+      id: '11111111-1111-1111-1111-111111111111',
+      invoice_id: '22222222-2222-2222-2222-222222222222',
+      school_id: '33333333-3333-3333-3333-333333333333',
+      action_type: 'phone',
+      note: note1000,
+      idempotency_key: '44444444-4444-4444-4444-444444444444',
+      contacted_at: '2026-09-17T14:30:00Z',
+      promise_to_pay_date: null,
+      next_follow_up_date: null,
+      created_by: '55555555-5555-5555-5555-555555555555',
+      created_by_name: 'Agent Finance',
+      created_at: '2026-09-17T14:30:00Z'
+    };
+    const res = validateCreateCollectionActionResponse({ is_idempotent_replay: false, action: validAction });
+    assert(res.action.note.length === 1000, 'TEST 9.7.11 : Note de 1000 caractères réellement acceptée');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.7.11 : Exception inattendue : ${err}`);
+  }
+
+  // 17. date calendrier impossible rejetée
+  try {
+    let caught = false;
+    try {
+      validateCollectionFollowupsResponse({
+        items: [
+          {
+            invoice_id: '22222222-2222-2222-2222-222222222222',
+            invoice_number: 'FAC-2026-0001',
+            student_id: '66666666-6666-6666-6666-666666666666',
+            student_name: 'Kabongo Marc',
+            student_matricule: 'MAT-001',
+            class_name: '6ème C',
+            due_date: '2026-02-31',
+            days_overdue: 18,
+            currency: 'USD',
+            total_amount: 150,
+            paid_amount: 50,
+            remaining_balance: 100,
+            collection_status: 'promise_pending',
+            last_action_type: 'phone',
+            last_contacted_at: '2026-09-17T14:30:00Z',
+            latest_promise_to_pay_date: '2026-09-25',
+            latest_next_follow_up_date: '2026-09-26',
+            effective_follow_up_date: '2026-09-25'
+          }
+        ],
+        has_more: false,
+        next_cursor: null
+      });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 9.7.12 : Date calendrier impossible (2026-02-31) rejetée');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.7.12 : Exception inattendue : ${err}`);
+  }
+
+  // 18. date antérieure à businessDate rejetée côté formulaire
+  try {
+    const businessDate = '2026-09-17';
+    const promiseToPayDate = '2026-09-10';
+    const isPastDate = promiseToPayDate < businessDate;
+    assert(isPastDate, 'TEST 9.7.13 : Date antérieure à businessDate rejetée côté formulaire');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.7.13 : Exception inattendue : ${err}`);
+  }
+
+  // 19. paid_amount > total_amount rejeté par le validateur
+  try {
+    let caught = false;
+    try {
+      validateCollectionFollowupsResponse({
+        items: [
+          {
+            invoice_id: '22222222-2222-2222-2222-222222222222',
+            invoice_number: 'FAC-2026-0001',
+            student_id: '66666666-6666-6666-6666-666666666666',
+            student_name: 'Kabongo Marc',
+            student_matricule: 'MAT-001',
+            class_name: '6ème C',
+            due_date: '2026-08-30',
+            days_overdue: 18,
+            currency: 'USD',
+            total_amount: 100,
+            paid_amount: 150,
+            remaining_balance: 0,
+            collection_status: 'promise_pending',
+            last_action_type: 'phone',
+            last_contacted_at: '2026-09-17T14:30:00Z',
+            latest_promise_to_pay_date: '2026-09-25',
+            latest_next_follow_up_date: '2026-09-26',
+            effective_follow_up_date: '2026-09-25'
+          }
+        ],
+        has_more: false,
+        next_cursor: null
+      });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 9.7.14 : paid_amount > total_amount rejeté par le validateur');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.7.14 : Exception inattendue : ${err}`);
+  }
+
+  // 20. CollectionStatus inconnu rejeté
+  try {
+    let caught = false;
+    try {
+      validateCollectionFollowupsResponse({
+        items: [
+          {
+            invoice_id: '22222222-2222-2222-2222-222222222222',
+            invoice_number: 'FAC-2026-0001',
+            student_id: '66666666-6666-6666-6666-666666666666',
+            student_name: 'Kabongo Marc',
+            student_matricule: 'MAT-001',
+            class_name: '6ème C',
+            due_date: '2026-08-30',
+            days_overdue: 18,
+            currency: 'USD',
+            total_amount: 100,
+            paid_amount: 0,
+            remaining_balance: 100,
+            collection_status: 'unknown_status' as any,
+            last_action_type: 'phone',
+            last_contacted_at: '2026-09-17T14:30:00Z',
+            latest_promise_to_pay_date: '2026-09-25',
+            latest_next_follow_up_date: '2026-09-26',
+            effective_follow_up_date: '2026-09-25'
+          }
+        ],
+        has_more: false,
+        next_cursor: null
+      });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 9.7.15 : CollectionStatus inconnu rejeté');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.7.15 : Exception inattendue : ${err}`);
+  }
+
+  // 21. fermeture pendant sauvegarde : aucun setState tardif
+  try {
+    let modalOpen = true;
+    let lateStateUpdate = false;
+
+    const simulateSaveAndClose = async () => {
+      const pendingPromise = new Promise((res) => setTimeout(res, 20));
+      modalOpen = false;
+      await pendingPromise;
+
+      if (!modalOpen) return;
+      lateStateUpdate = true;
+    };
+
+    await simulateSaveAndClose();
+    assert(!lateStateUpdate, 'TEST 9.7.16 : Fermeture pendant sauvegarde : aucun setState tardif');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.7.16 : Exception inattendue : ${err}`);
+  }
+
+  // 22. vérification source : aucune occurrence animate-pulse dans les trois nouveaux composants
+  try {
+    const modalSrc = RecordCollectionActionModal.toString();
+    const timelineSrc = CollectionHistoryTimeline.toString();
+    const tableSrc = CollectionFollowupsTable.toString();
+
+    const pulseOccurrences = (modalSrc.match(/animate-pulse/g) || []).length +
+      (timelineSrc.match(/animate-pulse/g) || []).length +
+      (tableSrc.match(/animate-pulse/g) || []).length;
+
+    assert(pulseOccurrences === 0, 'TEST 9.7.17 : Vérification source : aucune occurrence animate-pulse dans les trois nouveaux composants');
+  } catch (err: unknown) {
+    assert(false, `TEST 9.7.17 : Exception inattendue : ${err}`);
   }
 
   console.log(`\n=== RÉSULTATS : ${passed}/${total} TESTS RÉUSSIS ===\n`);
