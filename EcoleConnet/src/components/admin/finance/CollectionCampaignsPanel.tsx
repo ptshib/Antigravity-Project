@@ -195,16 +195,16 @@ export const CollectionCampaignsPanel: React.FC = () => {
               id="filter-status"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as CampaignStatus | 'ALL')}
-              className="px-3 py-1.5 border border-gray-300 rounded-md text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              className="px-3 py-1.5 border border-gray-300 rounded-md text-xs font-medium text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="ALL">Tous les statuts</option>
-              <option value="draft">Brouillon</option>
-              <option value="scheduled">Planifiée</option>
-              <option value="processing">En cours</option>
-              <option value="completed">Terminée</option>
-              <option value="partially_failed">Partiellement échouée</option>
-              <option value="failed">Échouée</option>
-              <option value="cancelled">Annulée</option>
+              <option value="ALL" className="text-slate-900 bg-white">Tous les statuts</option>
+              <option value="draft" className="text-slate-900 bg-white">Brouillon</option>
+              <option value="scheduled" className="text-slate-900 bg-white">Planifiée</option>
+              <option value="processing" className="text-slate-900 bg-white">En cours</option>
+              <option value="completed" className="text-slate-900 bg-white">Terminée</option>
+              <option value="partially_failed" className="text-slate-900 bg-white">Partiellement échouée</option>
+              <option value="failed" className="text-slate-900 bg-white">Échouée</option>
+              <option value="cancelled" className="text-slate-900 bg-white">Annulée</option>
             </select>
           </div>
 
@@ -216,12 +216,12 @@ export const CollectionCampaignsPanel: React.FC = () => {
               id="filter-channel"
               value={channelFilter}
               onChange={(e) => setChannelFilter(e.target.value as CampaignChannel | 'ALL')}
-              className="px-3 py-1.5 border border-gray-300 rounded-md text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              className="px-3 py-1.5 border border-gray-300 rounded-md text-xs font-medium text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="ALL">Tous les canaux</option>
-              <option value="sms">SMS</option>
-              <option value="email">E-mail</option>
-              <option value="whatsapp">WhatsApp</option>
+              <option value="ALL" className="text-slate-900 bg-white">Tous les canaux</option>
+              <option value="sms" className="text-slate-900 bg-white">SMS</option>
+              <option value="email" className="text-slate-900 bg-white">E-mail</option>
+              <option value="whatsapp" className="text-slate-900 bg-white">WhatsApp</option>
             </select>
           </div>
         </div>

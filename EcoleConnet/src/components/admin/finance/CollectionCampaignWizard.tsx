@@ -215,7 +215,7 @@ export const CollectionCampaignWizard: React.FC<CollectionCampaignWizardProps> =
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="ex: Relance Impayés Mars 2026 - SMS"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-slate-900 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
 
@@ -227,11 +227,11 @@ export const CollectionCampaignWizard: React.FC<CollectionCampaignWizardProps> =
                   id="campaign-channel"
                   value={channel}
                   onChange={(e) => setChannel(e.target.value as CampaignChannel)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="sms">SMS (Simulé MOCK)</option>
-                  <option value="email">E-mail (Simulé MOCK)</option>
-                  <option value="whatsapp">WhatsApp (Simulé MOCK)</option>
+                  <option value="sms" className="text-slate-900 bg-white">SMS (Simulé MOCK)</option>
+                  <option value="email" className="text-slate-900 bg-white">E-mail (Simulé MOCK)</option>
+                  <option value="whatsapp" className="text-slate-900 bg-white">WhatsApp (Simulé MOCK)</option>
                 </select>
               </div>
 
@@ -244,7 +244,7 @@ export const CollectionCampaignWizard: React.FC<CollectionCampaignWizardProps> =
                   rows={4}
                   value={template}
                   onChange={(e) => setTemplate(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs font-mono"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-slate-900 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs font-mono"
                 />
                 <p className="text-[11px] text-gray-500 mt-1">
                   Variables disponibles : {'{{parent_name}}'}, {'{{student_name}}'}, {'{{invoice_number}}'}, {'{{remaining_balance}}'}, {'{{currency}}'}.
@@ -260,11 +260,11 @@ export const CollectionCampaignWizard: React.FC<CollectionCampaignWizardProps> =
                     id="campaign-currency"
                     value={currency}
                     onChange={(e) => setCurrency(e.target.value as Currency | '')}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="">Toutes les devises</option>
-                    <option value="USD">USD</option>
-                    <option value="CDF">CDF</option>
+                    <option value="" className="text-slate-900 bg-white">Toutes les devises</option>
+                    <option value="USD" className="text-slate-900 bg-white">USD</option>
+                    <option value="CDF" className="text-slate-900 bg-white">CDF</option>
                   </select>
                 </div>
 
@@ -276,12 +276,12 @@ export const CollectionCampaignWizard: React.FC<CollectionCampaignWizardProps> =
                     id="campaign-priority"
                     value={priority}
                     onChange={(e) => setPriority(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="">Tous les niveaux</option>
-                    <option value="critical">Critique (&gt; 90 jours)</option>
-                    <option value="high">Élevé (&gt; 60 jours)</option>
-                    <option value="normal">Normal (&lt; 60 jours)</option>
+                    <option value="" className="text-slate-900 bg-white">Tous les niveaux</option>
+                    <option value="critical" className="text-slate-900 bg-white">Critique (&gt; 90 jours)</option>
+                    <option value="high" className="text-slate-900 bg-white">Élevé (&gt; 60 jours)</option>
+                    <option value="normal" className="text-slate-900 bg-white">Normal (&lt; 60 jours)</option>
                   </select>
                 </div>
               </div>
@@ -298,7 +298,7 @@ export const CollectionCampaignWizard: React.FC<CollectionCampaignWizardProps> =
                     value={minDaysOverdue}
                     onChange={(e) => setMinDaysOverdue(e.target.value)}
                     placeholder="ex: 15"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-slate-900 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
 
@@ -313,7 +313,7 @@ export const CollectionCampaignWizard: React.FC<CollectionCampaignWizardProps> =
                     value={maxDaysOverdue}
                     onChange={(e) => setMaxDaysOverdue(e.target.value)}
                     placeholder="ex: 90"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-slate-900 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
               </div>

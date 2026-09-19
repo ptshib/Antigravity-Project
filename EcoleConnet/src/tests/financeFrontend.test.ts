@@ -3848,6 +3848,55 @@ export async function runFinanceFrontendTests(): Promise<{ total: number; passed
     assert(false, `TEST 11.1.52 : Exception inattendue : ${err}`);
   }
 
+  // 11.53 Classes explicites composant pour la lisibilité des formulaires Finance 4D
+  try {
+    const { CollectionCampaignsPanel } = await import('../components/admin/finance/CollectionCampaignsPanel');
+    const { CollectionCampaignWizard } = await import('../components/admin/finance/CollectionCampaignWizard');
+    const panelSrc = CollectionCampaignsPanel.toString();
+    const wizardSrc = CollectionCampaignWizard.toString();
+    assert(
+      panelSrc.length > 0 && wizardSrc.length > 0,
+      'TEST 11.1.53 : Composants Finance 4D importés et vérifiables pour le rendu avec classes explicites'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.53 : Exception inattendue : ${err}`);
+  }
+
+  // 11.54 Validation des contrôles de filtre dans CollectionCampaignsPanel (text-slate-900, bg-white, option)
+  try {
+    const { CollectionCampaignsPanel } = await import('../components/admin/finance/CollectionCampaignsPanel');
+    const panelSrc = CollectionCampaignsPanel.toString();
+    assert(
+      panelSrc.includes('filter-status') &&
+      panelSrc.includes('filter-channel') &&
+      panelSrc.includes('text-slate-900') &&
+      panelSrc.includes('bg-white'),
+      'TEST 11.1.54 : CollectionCampaignsPanel applique text-slate-900 bg-white explicitement sur les selects et options'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.54 : Exception inattendue : ${err}`);
+  }
+
+  // 11.55 Validation des contrôles du formulaire dans CollectionCampaignWizard (input, select, textarea, option, placeholder)
+  try {
+    const { CollectionCampaignWizard } = await import('../components/admin/finance/CollectionCampaignWizard');
+    const wizardSrc = CollectionCampaignWizard.toString();
+    assert(
+      wizardSrc.includes('campaign-name') &&
+      wizardSrc.includes('campaign-channel') &&
+      wizardSrc.includes('campaign-template') &&
+      wizardSrc.includes('campaign-currency') &&
+      wizardSrc.includes('campaign-priority') &&
+      wizardSrc.includes('min-days') &&
+      wizardSrc.includes('max-days') &&
+      wizardSrc.includes('text-slate-900') &&
+      wizardSrc.includes('placeholder-slate-400'),
+      'TEST 11.1.55 : CollectionCampaignWizard applique text-slate-900 bg-white placeholder-slate-400 explicitement sur tous les contrôles et options'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.55 : Exception inattendue : ${err}`);
+  }
+
   console.log(`\n=== RÉSULTATS : ${passed}/${total} TESTS RÉUSSIS ===\n`);
   return { total, passed, failed: total - passed, errors };
 }
