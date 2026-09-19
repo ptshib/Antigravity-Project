@@ -37,7 +37,25 @@ import type {
   CollectionPriorityItem,
   CollectionPrioritiesCursor,
   CollectionPrioritiesResponse,
-  CollectionPrioritiesFilters
+  CollectionPrioritiesFilters,
+  CampaignChannel,
+  CampaignStatus,
+  CampaignRecipientStatus,
+  CampaignDeliveryAttemptStatus,
+  CampaignFilters,
+  CampaignCursor,
+  CampaignPreviewRecipient,
+  PreviewCampaignInput,
+  CampaignPreviewResponse,
+  CreateCampaignInput,
+  CollectionCampaignSummary,
+  CollectionDeliveryAttempt,
+  CollectionCampaignRecipient,
+  CreateCampaignResponse,
+  CollectionCampaignListResponse,
+  CollectionCampaignDetailResponse,
+  ScheduleCampaignResponse,
+  CancelCampaignResponse
 } from '../types/finance';
 
 /**
@@ -2023,6 +2041,602 @@ export async function getSchoolCollectionPriorities(
       throw mapPostgresError(error);
     }
     return validateCollectionPrioritiesResponse(data);
+  } catch (err: unknown) {
+    if (err instanceof FinanceServiceError) throw err;
+    throw mapPostgresError(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// VALIDATEURS ET FONCTIONS SERVICE STRICTES POUR FINANCE 4D (CAMPAGNES MOCK)
+// ---------------------------------------------------------------------------
+
+const VALID_CAMPAIGN_CHANNELS: CampaignChannel[] = ['sms', 'email', 'whatsapp'];
+const VALID_CAMPAIGN_STATUSES: CampaignStatus[] = [
+  'draft',
+  'scheduled',
+  'processing',
+  'completed',
+  'partially_failed',
+  'failed',
+  'cancelled'
+];
+const VALID_RECIPIENT_STATUSES: CampaignRecipientStatus[] = [
+  'pending',
+  'processing',
+  'success',
+  'failed',
+  'skipped'
+];
+const VALID_ATTEMPT_STATUSES: CampaignDeliveryAttemptStatus[] = ['success', 'failed'];
+
+export function validateCollectionCampaignSummary(data: unknown): CollectionCampaignSummary {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Format de réponse invalide pour la campagne (non-objet).');
+  }
+
+  const id = getStringProperty(data, 'id');
+  if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    throw new FinanceServiceError('Propriété "id" invalide ou absente (UUID attendu).');
+  }
+
+  const school_id = getStringProperty(data, 'school_id');
+  if (!school_id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(school_id)) {
+    throw new FinanceServiceError('Propriété "school_id" invalide ou absente.');
+  }
+
+  const name = getStringProperty(data, 'name');
+  if (!name || name.trim() === '') {
+    throw new FinanceServiceError('Propriété "name" invalide ou vide.');
+  }
+
+  const channel = getStringProperty(data, 'channel') as CampaignChannel;
+  if (!channel || !VALID_CAMPAIGN_CHANNELS.includes(channel)) {
+    throw new FinanceServiceError('Propriété "channel" invalide (sms, email, whatsapp attendu).');
+  }
+
+  const status = getStringProperty(data, 'status') as CampaignStatus;
+  if (!status || !VALID_CAMPAIGN_STATUSES.includes(status)) {
+    throw new FinanceServiceError('Propriété "status" invalide pour la campagne.');
+  }
+
+  const recipient_count = getNumberProperty(data, 'recipient_count') ?? 0;
+  const pending_count = getNumberProperty(data, 'pending_count') ?? 0;
+  const processing_count = getNumberProperty(data, 'processing_count') ?? 0;
+  const success_count = getNumberProperty(data, 'success_count') ?? 0;
+  const failed_count = getNumberProperty(data, 'failed_count') ?? 0;
+  const skipped_count = getNumberProperty(data, 'skipped_count') ?? 0;
+
+  if (
+    recipient_count < 0 ||
+    pending_count < 0 ||
+    processing_count < 0 ||
+    success_count < 0 ||
+    failed_count < 0 ||
+    skipped_count < 0
+  ) {
+    throw new FinanceServiceError('Les compteurs de destinataires doivent être des entiers >= 0.');
+  }
+
+  if (recipient_count !== pending_count + processing_count + success_count + failed_count + skipped_count) {
+    throw new FinanceServiceError('Invariant des compteurs de campagne violé.');
+  }
+
+  const created_by = getStringProperty(data, 'created_by') || '';
+  const idempotency_key = getStringProperty(data, 'idempotency_key') || '';
+  const created_at = getStringProperty(data, 'created_at') || '';
+  const updated_at = getStringProperty(data, 'updated_at') || '';
+
+  return {
+    id,
+    school_id,
+    name,
+    channel,
+    status,
+    scheduled_at: getStringProperty(data, 'scheduled_at'),
+    claimed_at: getStringProperty(data, 'claimed_at'),
+    claimed_by: getStringProperty(data, 'claimed_by'),
+    processing_started_at: getStringProperty(data, 'processing_started_at'),
+    completed_at: getStringProperty(data, 'completed_at'),
+    created_by,
+    idempotency_key,
+    filter_criteria: isObject(data['filter_criteria']) ? data['filter_criteria'] : {},
+    template_snapshot: isObject(data['template_snapshot']) ? data['template_snapshot'] : {},
+    recipient_count,
+    pending_count,
+    processing_count,
+    success_count,
+    failed_count,
+    skipped_count,
+    created_at,
+    updated_at
+  };
+}
+
+export function validateCollectionDeliveryAttempt(data: unknown): CollectionDeliveryAttempt {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Tentative de livraison invalide (non-objet).');
+  }
+
+  const id = getStringProperty(data, 'id') || '';
+  const attempt_number = getNumberProperty(data, 'attempt_number') ?? 1;
+  const provider = getStringProperty(data, 'provider') || 'mock';
+  const status = getStringProperty(data, 'status') as CampaignDeliveryAttemptStatus;
+  if (!status || !VALID_ATTEMPT_STATUSES.includes(status)) {
+    throw new FinanceServiceError('Statut de tentative de livraison invalide.');
+  }
+
+  return {
+    id,
+    attempt_number,
+    provider,
+    provider_message_id: getStringProperty(data, 'provider_message_id'),
+    status,
+    error_code: getStringProperty(data, 'error_code'),
+    error_message: getStringProperty(data, 'error_message'),
+    attempted_at: getStringProperty(data, 'attempted_at') || new Date().toISOString()
+  };
+}
+
+export function validateCollectionCampaignRecipient(data: unknown): CollectionCampaignRecipient {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Destinataire invalide (non-objet).');
+  }
+
+  const id = getStringProperty(data, 'id') || '';
+  const campaign_id = getStringProperty(data, 'campaign_id') || '';
+  const invoice_id = getStringProperty(data, 'invoice_id') || '';
+  const student_id = getStringProperty(data, 'student_id') || '';
+  const parent_profile_id = getStringProperty(data, 'parent_profile_id') || '';
+  const delivery_status = getStringProperty(data, 'delivery_status') as CampaignRecipientStatus;
+
+  if (!delivery_status || !VALID_RECIPIENT_STATUSES.includes(delivery_status)) {
+    throw new FinanceServiceError('Statut de livraison du destinataire invalide.');
+  }
+
+  const latest_attempt_raw = data['latest_attempt'];
+  const latest_attempt = isObject(latest_attempt_raw) ? validateCollectionDeliveryAttempt(latest_attempt_raw) : null;
+
+  return {
+    id,
+    campaign_id,
+    invoice_id,
+    student_id,
+    parent_profile_id,
+    delivery_status,
+    skip_reason: getStringProperty(data, 'skip_reason'),
+    invoice_snapshot: isObject(data['invoice_snapshot']) ? data['invoice_snapshot'] : {},
+    student_snapshot: isObject(data['student_snapshot']) ? data['student_snapshot'] : {},
+    parent_snapshot: isObject(data['parent_snapshot']) ? data['parent_snapshot'] : {},
+    attempt_count: getNumberProperty(data, 'attempt_count') ?? 0,
+    last_attempt_at: getStringProperty(data, 'last_attempt_at'),
+    delivered_at: getStringProperty(data, 'delivered_at'),
+    failed_at: getStringProperty(data, 'failed_at'),
+    latest_attempt
+  };
+}
+
+export function validateCampaignPreviewResponse(data: unknown): CampaignPreviewResponse {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Format de réponse invalide pour preview_school_collection_campaign.');
+  }
+
+  if (data['success'] !== true) {
+    throw new FinanceServiceError('La prévisualisation de la campagne a échoué côté serveur.');
+  }
+
+  if ('targeted_invoices' in data || 'sample_recipients' in data || 'eligible_recipients' in data || 'skipped_recipients' in data) {
+    throw new FinanceServiceError('Propriété obsolète ou incorrecte détectée dans la réponse de prévisualisation (target_invoices_count, preview_recipients, total_eligible_recipients, total_skipped_recipients attendus).');
+  }
+
+  const channel = getStringProperty(data, 'channel') as CampaignChannel;
+  if (!channel || !VALID_CAMPAIGN_CHANNELS.includes(channel)) {
+    throw new FinanceServiceError('Canal invalide dans la prévisualisation.');
+  }
+
+  const currency_raw = getStringProperty(data, 'currency');
+  const currency = (currency_raw === 'USD' || currency_raw === 'CDF') ? currency_raw : null;
+
+  const target_invoices_count = getNumberProperty(data, 'target_invoices_count') ?? 0;
+  const total_eligible_recipients = getNumberProperty(data, 'total_eligible_recipients') ?? 0;
+  const total_skipped_recipients = getNumberProperty(data, 'total_skipped_recipients') ?? 0;
+  const total_overdue_amount = getNumberProperty(data, 'total_overdue_amount') ?? 0;
+
+  const rawRecipients = Array.isArray(data['preview_recipients']) ? data['preview_recipients'] : [];
+  const preview_recipients: CampaignPreviewRecipient[] = rawRecipients.map((rec) => {
+    if (!isObject(rec)) throw new FinanceServiceError('Destinataire de prévisualisation invalide.');
+    const is_eligible = Boolean(rec['is_eligible']);
+    const rawContact = getStringProperty(rec, 'channel_contact');
+    const channel_contact = (rawContact && rawContact.trim() !== '') ? rawContact.trim() : null;
+    const skip_reason = getStringProperty(rec, 'skip_reason');
+
+    if (is_eligible) {
+      if (!channel_contact) {
+        throw new FinanceServiceError('Rejet : Destinataire admissible sans channel_contact.');
+      }
+      if (skip_reason !== null) {
+        throw new FinanceServiceError('Rejet : Destinataire admissible avec skip_reason non-null.');
+      }
+    } else {
+      if (channel_contact !== null) {
+        throw new FinanceServiceError('Rejet : Destinataire skipped avec channel_contact non-null.');
+      }
+      if (!skip_reason) {
+        throw new FinanceServiceError('Rejet : Destinataire skipped avec skip_reason null.');
+      }
+    }
+
+    return {
+      invoice_id: getStringProperty(rec, 'invoice_id') || '',
+      invoice_number: getStringProperty(rec, 'invoice_number') || '',
+      student_id: getStringProperty(rec, 'student_id') || '',
+      student_name: getStringProperty(rec, 'student_name') || '',
+      parent_profile_id: getStringProperty(rec, 'parent_profile_id') || '',
+      parent_name: getStringProperty(rec, 'parent_name') || '',
+      channel_contact,
+      remaining_balance: getNumberProperty(rec, 'remaining_balance') ?? 0,
+      currency: (getStringProperty(rec, 'currency') as Currency) || 'USD',
+      days_overdue: getNumberProperty(rec, 'days_overdue') ?? 0,
+      is_eligible,
+      skip_reason
+    };
+  });
+
+  return {
+    success: true,
+    channel,
+    currency,
+    target_invoices_count,
+    total_eligible_recipients,
+    total_skipped_recipients,
+    total_overdue_amount,
+    preview_recipients
+  };
+}
+
+export function validateCreateCampaignResponse(data: unknown): CreateCampaignResponse {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Format de réponse invalide pour create_school_collection_campaign.');
+  }
+
+  if (data['success'] !== true) {
+    throw new FinanceServiceError('La création de la campagne a échoué côté serveur.');
+  }
+
+  if ('campaign_id' in data && !('campaign' in data)) {
+    throw new FinanceServiceError('Propriété obsolète "campaign_id" à la racine de la réponse de création (objet "campaign" attendu).');
+  }
+
+  const campaign = validateCollectionCampaignSummary(data['campaign']);
+  const rawRecipients = Array.isArray(data['recipients']) ? data['recipients'] : [];
+  const recipients = rawRecipients.map(validateCollectionCampaignRecipient);
+  const recipients_has_more = Boolean(data['recipients_has_more']);
+  const next_cursor_recipient_id = getStringProperty(data, 'next_cursor_recipient_id');
+
+  if (recipients_has_more && !next_cursor_recipient_id) {
+    throw new FinanceServiceError('Incohérence curseur : recipients_has_more = true mais next_cursor_recipient_id est null.');
+  }
+  if (!recipients_has_more && next_cursor_recipient_id) {
+    throw new FinanceServiceError('Incohérence curseur : recipients_has_more = false mais next_cursor_recipient_id est défini.');
+  }
+
+  return {
+    success: true,
+    campaign,
+    recipients,
+    recipients_has_more,
+    next_cursor_recipient_id,
+    is_idempotent_replay: Boolean(data['is_idempotent_replay'])
+  };
+}
+
+export function validateCollectionCampaignListResponse(data: unknown): CollectionCampaignListResponse {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Format de réponse invalide pour get_school_collection_campaigns.');
+  }
+
+  if (data['success'] !== true) {
+    throw new FinanceServiceError('La récupération des campagnes a échoué.');
+  }
+
+  if ('items' in data || 'next_cursor' in data) {
+    throw new FinanceServiceError('Propriété obsolète ou incorrecte ("items" ou "next_cursor") détectée dans la liste des campagnes.');
+  }
+
+  if (!Array.isArray(data['campaigns'])) {
+    throw new FinanceServiceError('Propriété "campaigns" invalide ou absente (tableau attendu).');
+  }
+
+  const rawCampaigns = data['campaigns'];
+  const campaigns = rawCampaigns.map(validateCollectionCampaignSummary);
+  const has_more = Boolean(data['has_more']);
+  const next_cursor_created_at = getStringProperty(data, 'next_cursor_created_at');
+  const next_cursor_id = getStringProperty(data, 'next_cursor_id');
+
+  if (has_more && (!next_cursor_created_at || !next_cursor_id)) {
+    throw new FinanceServiceError('Incohérence curseur : has_more = true mais le curseur est incomplet.');
+  }
+  if (!has_more && (next_cursor_created_at || next_cursor_id)) {
+    throw new FinanceServiceError('Incohérence curseur : has_more = false mais le curseur est non-null.');
+  }
+
+  return {
+    success: true,
+    campaigns,
+    has_more,
+    next_cursor_created_at,
+    next_cursor_id
+  };
+}
+
+export function validateCollectionCampaignDetailResponse(data: unknown): CollectionCampaignDetailResponse {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Format de réponse invalide pour get_school_collection_campaign.');
+  }
+
+  if (data['success'] !== true) {
+    throw new FinanceServiceError('La récupération du détail de la campagne a échoué.');
+  }
+
+  if (!('campaign' in data) && 'campaign_id' in data) {
+    throw new FinanceServiceError('Propriété obsolète "campaign_id" à la racine de la réponse détaillée (objet "campaign" attendu).');
+  }
+
+  if (!Array.isArray(data['recipients'])) {
+    throw new FinanceServiceError('Propriété "recipients" invalide ou absente (tableau attendu).');
+  }
+
+  const campaign = validateCollectionCampaignSummary(data['campaign']);
+  const rawRecipients = Array.isArray(data['recipients']) ? data['recipients'] : [];
+  const recipients = rawRecipients.map(validateCollectionCampaignRecipient);
+  const recipients_has_more = Boolean(data['recipients_has_more']);
+  const next_cursor_recipient_id = getStringProperty(data, 'next_cursor_recipient_id');
+
+  if (recipients_has_more && !next_cursor_recipient_id) {
+    throw new FinanceServiceError('Incohérence curseur destinataires : recipients_has_more = true sans next_cursor_recipient_id.');
+  }
+  if (!recipients_has_more && next_cursor_recipient_id) {
+    throw new FinanceServiceError('Incohérence curseur destinataires : recipients_has_more = false avec next_cursor_recipient_id.');
+  }
+
+  return {
+    success: true,
+    campaign,
+    recipients,
+    recipients_has_more,
+    next_cursor_recipient_id
+  };
+}
+
+export function validateScheduleCampaignResponse(data: unknown): ScheduleCampaignResponse {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Format de réponse invalide pour schedule_school_collection_campaign.');
+  }
+
+  if (data['success'] !== true) {
+    throw new FinanceServiceError('La planification de la campagne a échoué.');
+  }
+
+  if ('campaign' in data && !('campaign_id' in data)) {
+    throw new FinanceServiceError('Propriété obsolète "campaign" à la racine de la réponse de planification ("campaign_id" string attendu).');
+  }
+
+  const campaign_id = getStringProperty(data, 'campaign_id') || '';
+  const scheduled_at = getStringProperty(data, 'scheduled_at') || '';
+
+  return {
+    success: true,
+    campaign_id,
+    status: 'scheduled',
+    scheduled_at
+  };
+}
+
+export function validateCancelCampaignResponse(data: unknown): CancelCampaignResponse {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Format de réponse invalide pour cancel_school_collection_campaign.');
+  }
+
+  if (data['success'] !== true) {
+    throw new FinanceServiceError('L annulation de la campagne a échoué.');
+  }
+
+  if ('cancelled_at' in data && !('cancelled_pending_count' in data)) {
+    throw new FinanceServiceError('Propriété obsolète "cancelled_at" détectée dans la réponse d annulation ("cancelled_pending_count" attendu).');
+  }
+
+  const campaign_id = getStringProperty(data, 'campaign_id') || '';
+  const cancelled_pending_count = getNumberProperty(data, 'cancelled_pending_count') ?? 0;
+
+  return {
+    success: true,
+    campaign_id,
+    status: 'cancelled',
+    cancelled_pending_count
+  };
+}
+
+// ---------------------------------------------------------------------------
+// FONCTIONS SERVICE RPC POUR FINANCE 4D
+// ---------------------------------------------------------------------------
+
+export async function previewCollectionCampaign(
+  input: PreviewCampaignInput
+): Promise<CampaignPreviewResponse> {
+  if (!input.p_channel || !VALID_CAMPAIGN_CHANNELS.includes(input.p_channel)) {
+    throw new FinanceServiceError('Canal de campagne invalide.', '22023');
+  }
+
+  if (!input.p_template || input.p_template.trim().length < 10) {
+    throw new FinanceServiceError('Le modèle de message doit contenir au moins 10 caractères.', '22023');
+  }
+
+  const rpcParams = {
+    p_channel: input.p_channel,
+    p_template: input.p_template.trim(),
+    p_currency: input.p_currency ?? null,
+    p_priority: input.p_priority ?? null,
+    p_min_days_overdue: input.p_min_days_overdue ?? null,
+    p_max_days_overdue: input.p_max_days_overdue ?? null,
+    p_class_ids: input.p_class_ids ?? null
+  };
+
+  try {
+    const { data, error } = await supabase.rpc('preview_school_collection_campaign', rpcParams);
+    if (error) throw mapPostgresError(error);
+    return validateCampaignPreviewResponse(data);
+  } catch (err: unknown) {
+    if (err instanceof FinanceServiceError) throw err;
+    throw mapPostgresError(err);
+  }
+}
+
+export async function createCollectionCampaign(
+  input: CreateCampaignInput
+): Promise<CreateCampaignResponse> {
+  if (!input.p_name || input.p_name.trim().length < 3) {
+    throw new FinanceServiceError('Le nom de la campagne doit contenir au moins 3 caractères.', '22023');
+  }
+
+  if (!input.p_channel || !VALID_CAMPAIGN_CHANNELS.includes(input.p_channel)) {
+    throw new FinanceServiceError('Canal de campagne invalide.', '22023');
+  }
+
+  if (!input.p_template || input.p_template.trim().length < 10) {
+    throw new FinanceServiceError('Le modèle de message doit contenir au moins 10 caractères.', '22023');
+  }
+
+  if (!input.p_idempotency_key || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.p_idempotency_key)) {
+    throw new FinanceServiceError('Clé d idempotence invalide (UUID v4 requis).', '22023');
+  }
+
+  const rpcParams = {
+    p_name: input.p_name.trim(),
+    p_channel: input.p_channel,
+    p_template: input.p_template.trim(),
+    p_idempotency_key: input.p_idempotency_key,
+    p_currency: input.p_currency ?? null,
+    p_priority: input.p_priority ?? null,
+    p_min_days_overdue: input.p_min_days_overdue ?? null,
+    p_max_days_overdue: input.p_max_days_overdue ?? null,
+    p_class_ids: input.p_class_ids ?? null
+  };
+
+  try {
+    const { data, error } = await supabase.rpc('create_school_collection_campaign', rpcParams);
+    if (error) throw mapPostgresError(error);
+    return validateCreateCampaignResponse(data);
+  } catch (err: unknown) {
+    if (err instanceof FinanceServiceError) throw err;
+    throw mapPostgresError(err);
+  }
+}
+
+export async function getCollectionCampaigns(
+  filters?: CampaignFilters,
+  cursor?: CampaignCursor | null
+): Promise<CollectionCampaignListResponse> {
+  const p_status = (filters?.p_status && filters.p_status !== 'ALL') ? filters.p_status : null;
+  const p_channel = (filters?.p_channel && filters.p_channel !== 'ALL') ? filters.p_channel : null;
+  const p_limit = filters?.p_limit ?? 20;
+
+  if (p_limit < 1 || p_limit > 100) {
+    throw new FinanceServiceError('La limite de pagination p_limit doit être comprise entre 1 et 100.', '22023');
+  }
+
+  if (cursor) {
+    if (!cursor.created_at || !cursor.id) {
+      throw new FinanceServiceError('Le curseur de campagnes doit contenir created_at et id tous les deux.', '22023');
+    }
+  }
+
+  const rpcParams = {
+    p_status,
+    p_channel,
+    p_limit,
+    p_cursor_created_at: cursor ? cursor.created_at : null,
+    p_cursor_id: cursor ? cursor.id : null
+  };
+
+  try {
+    const { data, error } = await supabase.rpc('get_school_collection_campaigns', rpcParams);
+    if (error) throw mapPostgresError(error);
+    return validateCollectionCampaignListResponse(data);
+  } catch (err: unknown) {
+    if (err instanceof FinanceServiceError) throw err;
+    throw mapPostgresError(err);
+  }
+}
+
+export async function getCollectionCampaignDetail(
+  campaignId: string,
+  recipientsLimit = 50,
+  cursorRecipientId?: string | null
+): Promise<CollectionCampaignDetailResponse> {
+  if (!campaignId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(campaignId)) {
+    throw new FinanceServiceError('ID de campagne invalide.', '22023');
+  }
+
+  if (recipientsLimit < 1 || recipientsLimit > 200) {
+    throw new FinanceServiceError('La limite destinataires doit être comprise entre 1 et 200.', '22023');
+  }
+
+  const rpcParams = {
+    p_campaign_id: campaignId,
+    p_recipients_limit: recipientsLimit,
+    p_cursor_recipient_id: cursorRecipientId ?? null
+  };
+
+  try {
+    const { data, error } = await supabase.rpc('get_school_collection_campaign', rpcParams);
+    if (error) throw mapPostgresError(error);
+    return validateCollectionCampaignDetailResponse(data);
+  } catch (err: unknown) {
+    if (err instanceof FinanceServiceError) throw err;
+    throw mapPostgresError(err);
+  }
+}
+
+export async function scheduleCollectionCampaign(
+  campaignId: string,
+  scheduledAt?: string | null
+): Promise<ScheduleCampaignResponse> {
+  if (!campaignId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(campaignId)) {
+    throw new FinanceServiceError('ID de campagne invalide.', '22023');
+  }
+
+  const rpcParams = {
+    p_campaign_id: campaignId,
+    p_scheduled_at: scheduledAt ?? null
+  };
+
+  try {
+    const { data, error } = await supabase.rpc('schedule_school_collection_campaign', rpcParams);
+    if (error) throw mapPostgresError(error);
+    return validateScheduleCampaignResponse(data);
+  } catch (err: unknown) {
+    if (err instanceof FinanceServiceError) throw err;
+    throw mapPostgresError(err);
+  }
+}
+
+export async function cancelCollectionCampaign(
+  campaignId: string,
+  reason?: string | null
+): Promise<CancelCampaignResponse> {
+  if (!campaignId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(campaignId)) {
+    throw new FinanceServiceError('ID de campagne invalide.', '22023');
+  }
+
+  const rpcParams = {
+    p_campaign_id: campaignId,
+    p_reason: reason ?? null
+  };
+
+  try {
+    const { data, error } = await supabase.rpc('cancel_school_collection_campaign', rpcParams);
+    if (error) throw mapPostgresError(error);
+    return validateCancelCampaignResponse(data);
   } catch (err: unknown) {
     if (err instanceof FinanceServiceError) throw err;
     throw mapPostgresError(err);

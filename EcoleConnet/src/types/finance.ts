@@ -551,3 +551,195 @@ export interface CollectionPrioritiesFilters {
   p_priority_filter?: CollectionPriorityLevel | 'all' | null;
   p_limit?: number;
 }
+
+// ---------------------------------------------------------------------------
+// CONTRATS TYPESCRIPT STRICTS POUR FINANCE 4D (CAMPAGNES DE RELANCE MOCK)
+// ---------------------------------------------------------------------------
+
+export type CampaignChannel = 'sms' | 'email' | 'whatsapp';
+
+export type CampaignStatus =
+  | 'draft'
+  | 'scheduled'
+  | 'processing'
+  | 'completed'
+  | 'partially_failed'
+  | 'failed'
+  | 'cancelled';
+
+export type CampaignRecipientStatus =
+  | 'pending'
+  | 'processing'
+  | 'success'
+  | 'failed'
+  | 'skipped';
+
+export type CampaignDeliveryAttemptStatus = 'success' | 'failed';
+
+export interface CampaignFilters {
+  p_status?: CampaignStatus | 'ALL' | null;
+  p_channel?: CampaignChannel | 'ALL' | null;
+  p_limit?: number;
+}
+
+export interface CampaignCursor {
+  created_at: string;
+  id: string;
+}
+
+export interface CampaignRecipientCursor {
+  recipient_id: string;
+}
+
+export interface CampaignPreviewRecipient {
+  invoice_id: string;
+  invoice_number: string;
+  student_id: string;
+  student_name: string;
+  parent_profile_id: string;
+  parent_name: string;
+  channel_contact: string | null;
+  remaining_balance: number;
+  currency: Currency;
+  days_overdue: number;
+  is_eligible: boolean;
+  skip_reason: string | null;
+}
+
+export interface CampaignFilterCriteria {
+  currency?: Currency | null;
+  priority?: string | null;
+  min_days_overdue?: number | null;
+  max_days_overdue?: number | null;
+  class_ids?: string[] | null;
+}
+
+export interface CampaignTemplateSnapshot {
+  raw: string;
+}
+
+export interface PreviewCampaignInput {
+  p_channel: CampaignChannel;
+  p_template: string;
+  p_currency?: Currency | null;
+  p_priority?: string | null;
+  p_min_days_overdue?: number | null;
+  p_max_days_overdue?: number | null;
+  p_class_ids?: string[] | null;
+}
+
+export interface CampaignPreviewResponse {
+  success: boolean;
+  channel: CampaignChannel;
+  currency: Currency | null;
+  target_invoices_count: number;
+  total_eligible_recipients: number;
+  total_skipped_recipients: number;
+  total_overdue_amount: number;
+  preview_recipients: CampaignPreviewRecipient[];
+}
+
+export interface CreateCampaignInput {
+  p_name: string;
+  p_channel: CampaignChannel;
+  p_template: string;
+  p_idempotency_key: string;
+  p_currency?: Currency | null;
+  p_priority?: string | null;
+  p_min_days_overdue?: number | null;
+  p_max_days_overdue?: number | null;
+  p_class_ids?: string[] | null;
+}
+
+export interface CollectionCampaignSummary {
+  id: string;
+  school_id: string;
+  name: string;
+  channel: CampaignChannel;
+  status: CampaignStatus;
+  scheduled_at: string | null;
+  claimed_at: string | null;
+  claimed_by: string | null;
+  processing_started_at: string | null;
+  completed_at: string | null;
+  created_by: string;
+  idempotency_key: string;
+  filter_criteria: CampaignFilterCriteria | Record<string, unknown>;
+  template_snapshot: CampaignTemplateSnapshot | Record<string, unknown>;
+  recipient_count: number;
+  pending_count: number;
+  processing_count: number;
+  success_count: number;
+  failed_count: number;
+  skipped_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CollectionDeliveryAttempt {
+  id: string;
+  attempt_number: number;
+  provider: string;
+  provider_message_id: string | null;
+  status: CampaignDeliveryAttemptStatus;
+  error_code: string | null;
+  error_message: string | null;
+  attempted_at: string;
+}
+
+export interface CollectionCampaignRecipient {
+  id: string;
+  campaign_id: string;
+  invoice_id: string;
+  student_id: string;
+  parent_profile_id: string;
+  delivery_status: CampaignRecipientStatus;
+  skip_reason: string | null;
+  invoice_snapshot: Record<string, unknown>;
+  student_snapshot: Record<string, unknown>;
+  parent_snapshot: Record<string, unknown>;
+  attempt_count: number;
+  last_attempt_at: string | null;
+  delivered_at: string | null;
+  failed_at: string | null;
+  latest_attempt: CollectionDeliveryAttempt | null;
+}
+
+export interface CreateCampaignResponse {
+  success: boolean;
+  campaign: CollectionCampaignSummary;
+  recipients: CollectionCampaignRecipient[];
+  recipients_has_more: boolean;
+  next_cursor_recipient_id: string | null;
+  is_idempotent_replay: boolean;
+}
+
+export interface CollectionCampaignListResponse {
+  success: boolean;
+  campaigns: CollectionCampaignSummary[];
+  has_more: boolean;
+  next_cursor_created_at: string | null;
+  next_cursor_id: string | null;
+}
+
+export interface CollectionCampaignDetailResponse {
+  success: boolean;
+  campaign: CollectionCampaignSummary;
+  recipients: CollectionCampaignRecipient[];
+  recipients_has_more: boolean;
+  next_cursor_recipient_id: string | null;
+}
+
+export interface ScheduleCampaignResponse {
+  success: boolean;
+  campaign_id: string;
+  status: 'scheduled';
+  scheduled_at: string;
+}
+
+export interface CancelCampaignResponse {
+  success: boolean;
+  campaign_id: string;
+  status: 'cancelled';
+  cancelled_pending_count: number;
+}

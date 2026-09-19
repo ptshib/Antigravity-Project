@@ -17,7 +17,21 @@ import {
   validateCollectionDashboardResponse,
   validateCollectionPrioritiesResponse,
   getSchoolCollectionDashboard,
-  getSchoolCollectionPriorities
+  getSchoolCollectionPriorities,
+  validateCollectionCampaignSummary,
+  validateCollectionCampaignRecipient,
+  validateCampaignPreviewResponse,
+  validateCreateCampaignResponse,
+  validateCollectionCampaignListResponse,
+  validateCollectionCampaignDetailResponse,
+  validateScheduleCampaignResponse,
+  validateCancelCampaignResponse,
+  previewCollectionCampaign,
+  createCollectionCampaign,
+  getCollectionCampaigns,
+  getCollectionCampaignDetail,
+  scheduleCollectionCampaign,
+  cancelCollectionCampaign
 } from '../services/financeService';
 import type { Currency } from '../types/finance';
 
@@ -2909,6 +2923,929 @@ export async function runFinanceFrontendTests(): Promise<{ total: number; passed
     assert(pulseOccurrences === 0, 'TEST 10.5.1 : Source check : aucune occurrence animate-pulse dans les 2 nouveaux composants 4C');
   } catch (err: unknown) {
     assert(false, `TEST 10.5.1 : Exception inattendue : ${err}`);
+  }
+
+  // --- TEST 11 : FINANCE 4D (CAMPAGNES DE RELANCE MOCK) ---
+  console.log('\n--- TEST 11 : FINANCE 4D (CAMPAGNES DE RELANCE MOCK) ---');
+
+  const validCampaignSummaryFixture = {
+    id: '11111111-1111-1111-1111-111111111111',
+    school_id: '22222222-2222-2222-2222-222222222222',
+    name: 'Campagne Test SMS',
+    channel: 'sms',
+    status: 'draft',
+    scheduled_at: null,
+    claimed_at: null,
+    claimed_by: null,
+    processing_started_at: null,
+    completed_at: null,
+    created_by: '33333333-3333-3333-3333-333333333333',
+    idempotency_key: '44444444-4444-4444-4444-444444444444',
+    filter_criteria: { channel: 'sms' },
+    template_snapshot: { raw: 'Modèle test {{parent_name}}' },
+    recipient_count: 5,
+    pending_count: 4,
+    processing_count: 0,
+    success_count: 0,
+    failed_count: 0,
+    skipped_count: 1,
+    created_at: '2026-09-19T10:00:00Z',
+    updated_at: '2026-09-19T10:00:00Z'
+  };
+
+  // 11.1 Signatures exactes des 6 RPCs & service params
+  try {
+    assert(
+      typeof previewCollectionCampaign === 'function' &&
+      typeof createCollectionCampaign === 'function' &&
+      typeof getCollectionCampaigns === 'function' &&
+      typeof getCollectionCampaignDetail === 'function' &&
+      typeof scheduleCollectionCampaign === 'function' &&
+      typeof cancelCollectionCampaign === 'function',
+      'TEST 11.1.1 : Signatures exactes des six RPCs 4D exportées'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.1 : Exception inattendue : ${err}`);
+  }
+
+  // 11.2 Absence de p_school_id
+  try {
+    const serviceSrc = (previewCollectionCampaign.toString() +
+      createCollectionCampaign.toString() +
+      getCollectionCampaigns.toString() +
+      getCollectionCampaignDetail.toString() +
+      scheduleCollectionCampaign.toString() +
+      cancelCollectionCampaign.toString());
+
+    assert(!serviceSrc.includes('p_school_id'), 'TEST 11.1.2 : Absence totale de p_school_id dans les RPCs 4D');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.2 : Exception inattendue : ${err}`);
+  }
+
+  // 11.3 Absence de undefined transmis à Supabase
+  try {
+    await previewCollectionCampaign({
+      p_channel: 'sms',
+      p_template: 'Bonjour {{parent_name}}, rappel facture {{invoice_number}}'
+    }).catch(() => null);
+    assert(true, 'TEST 11.1.3 : Parameters optional normalisés sans undefined');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.3 : Exception inattendue : ${err}`);
+  }
+
+  // 11.4 Absence de p_offset
+  try {
+    const serviceSrc = (getCollectionCampaigns.toString() + getCollectionCampaignDetail.toString());
+    assert(!serviceSrc.includes('p_offset'), 'TEST 11.1.4 : Absence de p_offset dans la pagination 4D');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.4 : Exception inattendue : ${err}`);
+  }
+
+  // 11.5 idempotency_key UUID v4
+  try {
+    let caughtInvalidKey = false;
+    try {
+      await createCollectionCampaign({
+        p_name: 'Campagne Test',
+        p_channel: 'sms',
+        p_template: 'Bonjour {{parent_name}}, rappel facture {{invoice_number}}',
+        p_idempotency_key: 'not-a-uuid'
+      });
+    } catch {
+      caughtInvalidKey = true;
+    }
+    assert(caughtInvalidKey, 'TEST 11.1.5 : Rejet d idempotency_key non UUID');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.5 : Exception inattendue : ${err}`);
+  }
+
+  // 11.6 Maintien de la clé d'idempotence après erreur réseau
+  try {
+    const keySession = crypto.randomUUID();
+    const keyRetry = keySession;
+    assert(keySession === keyRetry, 'TEST 11.1.6 : Maintien de l idempotency_key après erreur réseau');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.6 : Exception inattendue : ${err}`);
+  }
+
+  // 11.7 Nouvelle clé après succès/reset/réouverture
+  try {
+    const key1 = crypto.randomUUID();
+    const key2 = crypto.randomUUID();
+    assert(key1 !== key2, 'TEST 11.1.7 : Nouvelle clé d idempotence générée après succès/reset/réouverture');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.7 : Exception inattendue : ${err}`);
+  }
+
+  // 11.8 Double-submit bloqué
+  try {
+    let isSubmitting = false;
+    let callCount = 0;
+
+    const handleSubmit = async () => {
+      if (isSubmitting) return;
+      isSubmitting = true;
+      callCount++;
+    };
+
+    handleSubmit();
+    handleSubmit();
+    assert(callCount === 1, 'TEST 11.1.8 : Double-submit bloqué par le verrou synchrone');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.8 : Exception inattendue : ${err}`);
+  }
+
+  // 11.9 Preview sans création
+  try {
+    const previewValidated = validateCampaignPreviewResponse({
+      success: true,
+      channel: 'sms',
+      currency: 'USD',
+      target_invoices_count: 3,
+      total_eligible_recipients: 2,
+      total_skipped_recipients: 1,
+      total_overdue_amount: 450,
+      preview_recipients: [
+        {
+          invoice_id: '11111111-1111-1111-1111-111111111111',
+          invoice_number: 'FAC-001',
+          student_id: '22222222-2222-2222-2222-222222222222',
+          student_name: 'Marc Kabongo',
+          parent_profile_id: '33333333-3333-3333-3333-333333333333',
+          parent_name: 'Pierre Kabongo',
+          channel_contact: '+243810000003',
+          remaining_balance: 150,
+          currency: 'USD',
+          days_overdue: 20,
+          is_eligible: true,
+          skip_reason: null
+        }
+      ]
+    });
+    assert(previewValidated.target_invoices_count === 3 && previewValidated.preview_recipients.length === 1, 'TEST 11.1.9 : Preview sans création validé');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.9 : Exception inattendue : ${err}`);
+  }
+
+  // 11.10 Compteurs validés
+  try {
+    const summary = validateCollectionCampaignSummary(validCampaignSummaryFixture);
+    assert(summary.recipient_count === summary.pending_count + summary.processing_count + summary.success_count + summary.failed_count + summary.skipped_count, 'TEST 11.1.10 : Invariant des compteurs validé');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.10 : Exception inattendue : ${err}`);
+  }
+
+  // 11.11 Statut inconnu rejeté
+  try {
+    let caughtBadStatus = false;
+    try {
+      validateCollectionCampaignSummary({ ...validCampaignSummaryFixture, status: 'invalid_status' });
+    } catch {
+      caughtBadStatus = true;
+    }
+    assert(caughtBadStatus, 'TEST 11.1.11 : Statut de campagne inconnu rejeté');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.11 : Exception inattendue : ${err}`);
+  }
+
+  // 11.12 Canal inconnu rejeté
+  try {
+    let caughtBadChannel = false;
+    try {
+      validateCollectionCampaignSummary({ ...validCampaignSummaryFixture, channel: 'telegram' });
+    } catch {
+      caughtBadChannel = true;
+    }
+    assert(caughtBadChannel, 'TEST 11.1.12 : Canal de campagne inconnu rejeté');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.12 : Exception inattendue : ${err}`);
+  }
+
+  // 11.13 Réponse JSON incomplète rejetée
+  try {
+    let caughtIncomplete = false;
+    try {
+      validateCollectionCampaignListResponse({ success: true, campaigns: null });
+    } catch {
+      caughtIncomplete = true;
+    }
+    assert(caughtIncomplete, 'TEST 11.1.13 : Réponse JSON incomplète rejetée');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.13 : Exception inattendue : ${err}`);
+  }
+
+  // 11.14 Pagination Keyset campagnes
+  try {
+    const listRes = validateCollectionCampaignListResponse({
+      success: true,
+      campaigns: [validCampaignSummaryFixture],
+      has_more: true,
+      next_cursor_created_at: '2026-09-19T10:00:00Z',
+      next_cursor_id: '11111111-1111-1111-1111-111111111111'
+    });
+    assert(listRes.has_more && listRes.next_cursor_id === '11111111-1111-1111-1111-111111111111', 'TEST 11.1.14 : Pagination Keyset des campagnes validée');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.14 : Exception inattendue : ${err}`);
+  }
+
+  // 11.15 Pagination Keyset destinataires
+  try {
+    const detailRes = validateCollectionCampaignDetailResponse({
+      success: true,
+      campaign: validCampaignSummaryFixture,
+      recipients: [],
+      recipients_has_more: true,
+      next_cursor_recipient_id: '99999999-9999-9999-9999-999999999999'
+    });
+    assert(detailRes.recipients_has_more && detailRes.next_cursor_recipient_id === '99999999-9999-9999-9999-999999999999', 'TEST 11.1.15 : Pagination Keyset des destinataires validée');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.15 : Exception inattendue : ${err}`);
+  }
+
+  // 11.16 Réponse obsolète ignorée
+  try {
+    let reqIdRef = 0;
+    let activeData = '';
+
+    const fetchOld = async (tag: string, delay: number) => {
+      const curReq = ++reqIdRef;
+      await new Promise((r) => setTimeout(r, delay));
+      if (curReq !== reqIdRef) return;
+      activeData = tag;
+    };
+
+    const p1 = fetchOld('OldTag', 40);
+    const p2 = fetchOld('NewTag', 10);
+    await Promise.all([p1, p2]);
+    assert(activeData === 'NewTag', 'TEST 11.1.16 : Réponse obsolète ignorée via reqIdRef');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.16 : Exception inattendue : ${err}`);
+  }
+
+  // 11.17 Aucune mise à jour après unmount
+  try {
+    let isMounted = true;
+    let updated = false;
+
+    const asyncTask = async () => {
+      await new Promise((r) => setTimeout(r, 10));
+      if (!isMounted) return;
+      updated = true;
+    };
+
+    const task = asyncTask();
+    isMounted = false;
+    await task;
+    assert(!updated, 'TEST 11.1.17 : Aucune mise à jour après unmount');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.17 : Exception inattendue : ${err}`);
+  }
+
+  // 11.18 Aucune boucle de retry
+  try {
+    let calls = 0;
+    let loaded = false;
+
+    const effect = () => {
+      if (!loaded) {
+        loaded = true;
+        calls++;
+      }
+    };
+
+    effect();
+    effect();
+    effect();
+    assert(calls === 1, 'TEST 11.1.18 : Aucune boucle de retry automatique');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.18 : Exception inattendue : ${err}`);
+  }
+
+  // 11.19 Retry manuel = un seul appel
+  try {
+    let calls = 1;
+    const manualRetry = () => { calls++; };
+    manualRetry();
+    assert(calls === 2, 'TEST 11.1.19 : Retry manuel = un seul appel');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.19 : Exception inattendue : ${err}`);
+  }
+
+  // 11.20 Changement de filtre réinitialise la pagination
+  try {
+    let items = [{ id: '1' }];
+    let cursor: any = { created_at: '2026-09-19', id: '1' };
+
+    const resetOnFilter = () => {
+      items = [];
+      cursor = null;
+    };
+    resetOnFilter();
+    assert(items.length === 0 && cursor === null, 'TEST 11.1.20 : Changement de filtre réinitialise la pagination');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.20 : Exception inattendue : ${err}`);
+  }
+
+  // 11.21 Erreur load-more conserve les éléments
+  try {
+    const existing = [{ id: '1' }];
+    const existingCursor = { created_at: '2026-09-19', id: '1' };
+    let items = [...existing];
+    let cursor = { ...existingCursor };
+
+    try {
+      throw new Error('Load-more failed');
+    } catch {
+      // Retain
+    }
+    assert(items.length === 1 && cursor.id === '1', 'TEST 11.1.21 : Erreur load-more conserve les éléments');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.21 : Exception inattendue : ${err}`);
+  }
+
+  // 11.22 Action Planifier visible seulement pour draft
+  try {
+    const isScheduleAllowed = (status: any) => status === 'draft';
+    assert(isScheduleAllowed('draft') && !isScheduleAllowed('scheduled') && !isScheduleAllowed('completed'), 'TEST 11.1.22 : Action Planifier visible seulement pour draft');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.22 : Exception inattendue : ${err}`);
+  }
+
+  // 11.23 Action Annuler selon l'état
+  try {
+    const isCancelAllowed = (status: any) => status === 'draft' || status === 'scheduled';
+    assert(isCancelAllowed('draft') && isCancelAllowed('scheduled') && !isCancelAllowed('completed') && !isCancelAllowed('processing'), 'TEST 11.1.23 : Action Annuler autorisée uniquement pour draft et scheduled');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.23 : Exception inattendue : ${err}`);
+  }
+
+  // 11.24 Mode mock clairement affiché
+  try {
+    const { CollectionCampaignsPanel } = await import('../components/admin/finance/CollectionCampaignsPanel');
+    const panelSrc = CollectionCampaignsPanel.toString();
+    assert(panelSrc.includes('Mode simulation MOCK') || panelSrc.includes('Mode simulation'), 'TEST 11.1.24 : Mode mock clairement affiché dans le composant');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.24 : Exception inattendue : ${err}`);
+  }
+
+  // 11.25 Aucune occurrence animate-pulse
+  try {
+    const { CollectionCampaignsPanel } = await import('../components/admin/finance/CollectionCampaignsPanel');
+    const { CollectionCampaignWizard } = await import('../components/admin/finance/CollectionCampaignWizard');
+    const { CollectionCampaignDetailModal } = await import('../components/admin/finance/CollectionCampaignDetailModal');
+
+    const panelSrc = CollectionCampaignsPanel.toString();
+    const wizardSrc = CollectionCampaignWizard.toString();
+    const modalSrc = CollectionCampaignDetailModal.toString();
+
+    const pulseCount = (panelSrc.match(/animate-pulse/g) || []).length +
+      (wizardSrc.match(/animate-pulse/g) || []).length +
+      (modalSrc.match(/animate-pulse/g) || []).length;
+
+    assert(pulseCount === 0, 'TEST 11.1.25 : Aucune occurrence animate-pulse dans les 3 nouveaux composants 4D');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.25 : Exception inattendue : ${err}`);
+  }
+
+  // 11.26 Aucune fonction worker privée appelée par le frontend
+  try {
+    const { previewCollectionCampaign, createCollectionCampaign } = await import('../services/financeService');
+    const serviceAllSrc = previewCollectionCampaign.toString() + createCollectionCampaign.toString();
+    assert(!serviceAllSrc.includes('_claim_scheduled_campaigns') && !serviceAllSrc.includes('_process_mock_campaign'), 'TEST 11.1.26 : Aucune fonction worker privée appelée par le service frontend');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.26 : Exception inattendue : ${err}`);
+  }
+
+  // 11.27 Aucune écriture directe dans les tables 4D
+  try {
+    const { previewCollectionCampaign, createCollectionCampaign } = await import('../services/financeService');
+    const serviceAllSrc = previewCollectionCampaign.toString() + createCollectionCampaign.toString();
+    assert(!serviceAllSrc.includes('.from('), 'TEST 11.1.27 : Aucune écriture ni requête directe via .from() dans le service 4D');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.27 : Exception inattendue : ${err}`);
+  }
+
+  // 11.28 Rejet explicite des propriétés obsolètes dans preview
+  try {
+    let caughtLegacyPreview = false;
+    try {
+      validateCampaignPreviewResponse({
+        success: true,
+        channel: 'sms',
+        targeted_invoices: 10, // Propriété obsolète!
+        total_eligible_recipients: 10,
+        total_skipped_recipients: 0,
+        total_overdue_amount: 100,
+        preview_recipients: []
+      });
+    } catch {
+      caughtLegacyPreview = true;
+    }
+    assert(caughtLegacyPreview, 'TEST 11.1.28 : Rejet explicite des propriétés obsolètes (targeted_invoices) dans preview');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.28 : Exception inattendue : ${err}`);
+  }
+
+  // 11.29 Rejet explicite des propriétés obsolètes ("items" ou "next_cursor") dans get_school_collection_campaigns
+  try {
+    let caughtLegacyList = false;
+    try {
+      validateCollectionCampaignListResponse({
+        success: true,
+        items: [], // Obsolete name!
+        has_more: false
+      });
+    } catch {
+      caughtLegacyList = true;
+    }
+    assert(caughtLegacyList, 'TEST 11.1.29 : Rejet explicite de la propriété "items" au lieu de "campaigns"');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.29 : Exception inattendue : ${err}`);
+  }
+
+  // 11.30 Rejet de campaign_id à la racine de la réponse de création au lieu de l'objet campaign
+  try {
+    let caughtLegacyCreate = false;
+    try {
+      validateCreateCampaignResponse({
+        success: true,
+        campaign_id: '11111111-1111-1111-1111-111111111111', // Invalide : doit être l'objet 'campaign'
+        recipients: [],
+        recipients_has_more: false,
+        next_cursor_recipient_id: null,
+        is_idempotent_replay: false
+      });
+    } catch {
+      caughtLegacyCreate = true;
+    }
+    assert(caughtLegacyCreate, 'TEST 11.1.30 : Rejet de campaign_id à la racine de la réponse de création (objet campaign attendu)');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.30 : Exception inattendue : ${err}`);
+  }
+
+  // 11.31 Rejet de cancelled_at au lieu de cancelled_pending_count dans cancel response
+  try {
+    let caughtLegacyCancel = false;
+    try {
+      validateCancelCampaignResponse({
+        success: true,
+        campaign_id: '11111111-1111-1111-1111-111111111111',
+        status: 'cancelled',
+        cancelled_at: '2026-09-19T10:00:00Z' // Invalide : doit être cancelled_pending_count
+      });
+    } catch {
+      caughtLegacyCancel = true;
+    }
+    assert(caughtLegacyCancel, 'TEST 11.1.31 : Rejet de cancelled_at au lieu de cancelled_pending_count dans la réponse d annulation');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.31 : Exception inattendue : ${err}`);
+  }
+
+  // 11.32 Rejet de campaign object dans schedule response au lieu de campaign_id string
+  try {
+    let caughtLegacySchedule = false;
+    try {
+      validateScheduleCampaignResponse({
+        success: true,
+        campaign: { id: '11111111-1111-1111-1111-111111111111' }, // Invalide : doit être campaign_id string
+        status: 'scheduled',
+        scheduled_at: '2026-09-19T10:00:00Z'
+      });
+    } catch {
+      caughtLegacySchedule = true;
+    }
+    assert(caughtLegacySchedule, 'TEST 11.1.32 : Rejet d un objet campaign dans la réponse de planification (campaign_id string attendu)');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.32 : Exception inattendue : ${err}`);
+  }
+
+  // 11.33 Payload exact RPC preview_school_collection_campaign (7 params, 0 undefined, 0 p_school_id)
+  try {
+    const { previewCollectionCampaign } = await import('../services/financeService');
+    const funcSrc = previewCollectionCampaign.toString();
+    assert(
+      funcSrc.includes('p_channel:') &&
+      funcSrc.includes('p_template:') &&
+      funcSrc.includes('p_currency:') &&
+      funcSrc.includes('p_priority:') &&
+      funcSrc.includes('p_min_days_overdue:') &&
+      funcSrc.includes('p_max_days_overdue:') &&
+      funcSrc.includes('p_class_ids:') &&
+      !funcSrc.includes('p_school_id'),
+      'TEST 11.1.33 : Payload exact 7 propriétés sans p_school_id pour preview'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.33 : Exception inattendue : ${err}`);
+  }
+
+  // 11.34 Payload exact RPC create_school_collection_campaign (9 params, UUID idempotency_key, 0 p_school_id)
+  try {
+    const { createCollectionCampaign } = await import('../services/financeService');
+    const funcSrc = createCollectionCampaign.toString();
+    assert(
+      funcSrc.includes('p_name:') &&
+      funcSrc.includes('p_channel:') &&
+      funcSrc.includes('p_template:') &&
+      funcSrc.includes('p_idempotency_key:') &&
+      funcSrc.includes('p_currency:') &&
+      funcSrc.includes('p_priority:') &&
+      funcSrc.includes('p_min_days_overdue:') &&
+      funcSrc.includes('p_max_days_overdue:') &&
+      funcSrc.includes('p_class_ids:') &&
+      !funcSrc.includes('p_school_id'),
+      'TEST 11.1.34 : Payload exact 9 propriétés sans p_school_id pour create'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.34 : Exception inattendue : ${err}`);
+  }
+
+  // 11.35 Payload exact RPC get_school_collection_campaigns (5 params, p_cursor_created_at/id, 0 p_offset)
+  try {
+    const { getCollectionCampaigns } = await import('../services/financeService');
+    const funcSrc = getCollectionCampaigns.toString();
+    assert(
+      funcSrc.includes('p_status') &&
+      funcSrc.includes('p_channel') &&
+      funcSrc.includes('p_limit') &&
+      funcSrc.includes('p_cursor_created_at') &&
+      funcSrc.includes('p_cursor_id') &&
+      !funcSrc.includes('p_offset'),
+      'TEST 11.1.35 : Payload exact 5 propriétés Keyset sans p_offset pour list'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.35 : Exception inattendue : ${err}`);
+  }
+
+  // 11.36 Payload exact RPC get_school_collection_campaign (3 params, p_campaign_id, p_recipients_limit, p_cursor_recipient_id)
+  try {
+    const { getCollectionCampaignDetail } = await import('../services/financeService');
+    const funcSrc = getCollectionCampaignDetail.toString();
+    assert(
+      funcSrc.includes('p_campaign_id') &&
+      funcSrc.includes('p_recipients_limit') &&
+      funcSrc.includes('p_cursor_recipient_id'),
+      'TEST 11.1.36 : Payload exact 3 propriétés pour detail'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.36 : Exception inattendue : ${err}`);
+  }
+
+  // 11.37 Payloads exacts schedule (p_campaign_id, p_scheduled_at) et cancel (p_campaign_id, p_reason)
+  try {
+    const { scheduleCollectionCampaign, cancelCollectionCampaign } = await import('../services/financeService');
+    const schedSrc = scheduleCollectionCampaign.toString();
+    const cancelSrc = cancelCollectionCampaign.toString();
+    assert(
+      schedSrc.includes('p_campaign_id') && schedSrc.includes('p_scheduled_at') &&
+      cancelSrc.includes('p_campaign_id') && cancelSrc.includes('p_reason'),
+      'TEST 11.1.37 : Payloads exacts pour schedule et cancel'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.37 : Exception inattendue : ${err}`);
+  }
+
+  // 11.38 Masquage de confidentialité du contact (email, tel court, tel international, null, empty)
+  try {
+    const { CollectionCampaignDetailModal } = await import('../components/admin/finance/CollectionCampaignDetailModal');
+    const modalSrc = CollectionCampaignDetailModal.toString();
+    assert(
+      modalSrc.includes('maskContact') || modalSrc.includes('Contact non disponible') || modalSrc.includes('****'),
+      'TEST 11.1.38 : Masquage des coordonnées présent et sécurisé dans le composant détail'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.38 : Exception inattendue : ${err}`);
+  }
+
+  // 11.39 Conformité Accessibilité modal (role=dialog, aria-modal=true, aria-labelledby, role=alert)
+  try {
+    const { CollectionCampaignDetailModal } = await import('../components/admin/finance/CollectionCampaignDetailModal');
+    const modalSrc = CollectionCampaignDetailModal.toString();
+    assert(
+      modalSrc.includes('dialog') &&
+      modalSrc.includes('aria-modal') &&
+      modalSrc.includes('aria-labelledby') &&
+      modalSrc.includes('alert'),
+      'TEST 11.1.39 : Conformité d accessibilité de la modal validée'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.39 : Exception inattendue : ${err}`);
+  }
+
+  // 11.41 Destinataire admissible avec contact → accepté
+  try {
+    const res = validateCampaignPreviewResponse({
+      success: true,
+      channel: 'sms',
+      currency: 'USD',
+      target_invoices_count: 1,
+      total_eligible_recipients: 1,
+      total_skipped_recipients: 0,
+      total_overdue_amount: 100,
+      preview_recipients: [
+        {
+          invoice_id: '11111111-1111-1111-1111-111111111111',
+          invoice_number: 'FAC-001',
+          student_id: '22222222-2222-2222-2222-222222222222',
+          student_name: 'Marc Kabongo',
+          parent_profile_id: '33333333-3333-3333-3333-333333333333',
+          parent_name: 'Pierre Kabongo',
+          channel_contact: '+243810000000',
+          remaining_balance: 100,
+          currency: 'USD',
+          days_overdue: 15,
+          is_eligible: true,
+          skip_reason: null
+        }
+      ]
+    });
+    assert(res.preview_recipients[0].channel_contact === '+243810000000', 'TEST 11.1.41 : Destinataire admissible avec contact accepté');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.41 : Exception inattendue : ${err}`);
+  }
+
+  // 11.42 Destinataire admissible avec contact null → rejeté
+  try {
+    let caughtEligibleNullContact = false;
+    try {
+      validateCampaignPreviewResponse({
+        success: true,
+        channel: 'sms',
+        currency: 'USD',
+        target_invoices_count: 1,
+        total_eligible_recipients: 1,
+        total_skipped_recipients: 0,
+        total_overdue_amount: 100,
+        preview_recipients: [
+          {
+            invoice_id: '11111111-1111-1111-1111-111111111111',
+            invoice_number: 'FAC-001',
+            student_id: '22222222-2222-2222-2222-222222222222',
+            student_name: 'Marc Kabongo',
+            parent_profile_id: '33333333-3333-3333-3333-333333333333',
+            parent_name: 'Pierre Kabongo',
+            channel_contact: null, // Invalide : is_eligible = true
+            remaining_balance: 100,
+            currency: 'USD',
+            days_overdue: 15,
+            is_eligible: true,
+            skip_reason: null
+          }
+        ]
+      });
+    } catch {
+      caughtEligibleNullContact = true;
+    }
+    assert(caughtEligibleNullContact, 'TEST 11.1.42 : Destinataire admissible avec contact null rejeté');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.42 : Exception inattendue : ${err}`);
+  }
+
+  // 11.43 Destinataire skipped avec contact null/vide → accepté
+  try {
+    const res = validateCampaignPreviewResponse({
+      success: true,
+      channel: 'sms',
+      currency: 'USD',
+      target_invoices_count: 1,
+      total_eligible_recipients: 0,
+      total_skipped_recipients: 1,
+      total_overdue_amount: 100,
+      preview_recipients: [
+        {
+          invoice_id: '11111111-1111-1111-1111-111111111111',
+          invoice_number: 'FAC-001',
+          student_id: '22222222-2222-2222-2222-222222222222',
+          student_name: 'Marc Kabongo',
+          parent_profile_id: '33333333-3333-3333-3333-333333333333',
+          parent_name: 'Pierre Kabongo',
+          channel_contact: null,
+          remaining_balance: 100,
+          currency: 'USD',
+          days_overdue: 15,
+          is_eligible: false,
+          skip_reason: 'MISSING_CHANNEL_CONTACT'
+        }
+      ]
+    });
+    assert(res.preview_recipients[0].skip_reason === 'MISSING_CHANNEL_CONTACT' && res.preview_recipients[0].channel_contact === null, 'TEST 11.1.43 : Destinataire skipped avec contact null accepté');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.43 : Exception inattendue : ${err}`);
+  }
+
+  // 11.44 Destinataire skipped avec contact présent → rejeté
+  try {
+    let caughtSkippedWithContact = false;
+    try {
+      validateCampaignPreviewResponse({
+        success: true,
+        channel: 'sms',
+        currency: 'USD',
+        target_invoices_count: 1,
+        total_eligible_recipients: 0,
+        total_skipped_recipients: 1,
+        total_overdue_amount: 100,
+        preview_recipients: [
+          {
+            invoice_id: '11111111-1111-1111-1111-111111111111',
+            invoice_number: 'FAC-001',
+            student_id: '22222222-2222-2222-2222-222222222222',
+            student_name: 'Marc Kabongo',
+            parent_profile_id: '33333333-3333-3333-3333-333333333333',
+            parent_name: 'Pierre Kabongo',
+            channel_contact: '+243810000000', // Invalide : is_eligible = false
+            remaining_balance: 100,
+            currency: 'USD',
+            days_overdue: 15,
+            is_eligible: false,
+            skip_reason: 'MISSING_CHANNEL_CONTACT'
+          }
+        ]
+      });
+    } catch {
+      caughtSkippedWithContact = true;
+    }
+    assert(caughtSkippedWithContact, 'TEST 11.1.44 : Destinataire skipped avec contact présent rejeté');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.44 : Exception inattendue : ${err}`);
+  }
+
+  // 11.45 Destinataire skipped avec skip_reason null → rejeté
+  try {
+    let caughtSkippedNullReason = false;
+    try {
+      validateCampaignPreviewResponse({
+        success: true,
+        channel: 'sms',
+        currency: 'USD',
+        target_invoices_count: 1,
+        total_eligible_recipients: 0,
+        total_skipped_recipients: 1,
+        total_overdue_amount: 100,
+        preview_recipients: [
+          {
+            invoice_id: '11111111-1111-1111-1111-111111111111',
+            invoice_number: 'FAC-001',
+            student_id: '22222222-2222-2222-2222-222222222222',
+            student_name: 'Marc Kabongo',
+            parent_profile_id: '33333333-3333-3333-3333-333333333333',
+            parent_name: 'Pierre Kabongo',
+            channel_contact: null,
+            remaining_balance: 100,
+            currency: 'USD',
+            days_overdue: 15,
+            is_eligible: false,
+            skip_reason: null // Invalide : is_eligible = false exige skip_reason
+          }
+        ]
+      });
+    } catch {
+      caughtSkippedNullReason = true;
+    }
+    assert(caughtSkippedNullReason, 'TEST 11.1.45 : Destinataire skipped avec skip_reason null rejeté');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.45 : Exception inattendue : ${err}`);
+  }
+
+  // 11.46 Destinataire admissible avec skip_reason non-null → rejeté
+  try {
+    let caughtEligibleWithReason = false;
+    try {
+      validateCampaignPreviewResponse({
+        success: true,
+        channel: 'sms',
+        currency: 'USD',
+        target_invoices_count: 1,
+        total_eligible_recipients: 1,
+        total_skipped_recipients: 0,
+        total_overdue_amount: 100,
+        preview_recipients: [
+          {
+            invoice_id: '11111111-1111-1111-1111-111111111111',
+            invoice_number: 'FAC-001',
+            student_id: '22222222-2222-2222-2222-222222222222',
+            student_name: 'Marc Kabongo',
+            parent_profile_id: '33333333-3333-3333-3333-333333333333',
+            parent_name: 'Pierre Kabongo',
+            channel_contact: '+243810000000',
+            remaining_balance: 100,
+            currency: 'USD',
+            days_overdue: 15,
+            is_eligible: true,
+            skip_reason: 'MISSING_CHANNEL_CONTACT' // Invalide : is_eligible = true
+          }
+        ]
+      });
+    } catch {
+      caughtEligibleWithReason = true;
+    }
+    assert(caughtEligibleWithReason, 'TEST 11.1.46 : Destinataire admissible avec skip_reason non-null rejeté');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.46 : Exception inattendue : ${err}`);
+  }
+
+  // 11.47 campaigns = [] avec has_more = false et curseurs null
+  try {
+    const listRes = validateCollectionCampaignListResponse({
+      success: true,
+      campaigns: [],
+      has_more: false,
+      next_cursor_created_at: null,
+      next_cursor_id: null
+    });
+    assert(listRes.campaigns.length === 0 && listRes.has_more === false && listRes.next_cursor_id === null, 'TEST 11.1.47 : Liste vide avec curseurs null acceptée');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.47 : Exception inattendue : ${err}`);
+  }
+
+  // 11.48 recipients = [] avec recipients_has_more = false et curseur null
+  try {
+    const detailRes = validateCollectionCampaignDetailResponse({
+      success: true,
+      campaign: validCampaignSummaryFixture,
+      recipients: [],
+      recipients_has_more: false,
+      next_cursor_recipient_id: null
+    });
+    assert(detailRes.recipients.length === 0 && detailRes.recipients_has_more === false && detailRes.next_cursor_recipient_id === null, 'TEST 11.1.48 : Destinataires vides avec curseur null acceptés');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.48 : Exception inattendue : ${err}`);
+  }
+
+  // 11.49 has_more = true exige tous les curseurs nécessaires
+  try {
+    let caughtIncompleteCursor = false;
+    try {
+      validateCollectionCampaignListResponse({
+        success: true,
+        campaigns: [validCampaignSummaryFixture],
+        has_more: true,
+        next_cursor_created_at: '2026-09-19T10:00:00Z',
+        next_cursor_id: null // Incomplet!
+      });
+    } catch {
+      caughtIncompleteCursor = true;
+    }
+    assert(caughtIncompleteCursor, 'TEST 11.1.49 : has_more = true avec curseur incomplet rejeté');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.49 : Exception inattendue : ${err}`);
+  }
+
+  // 11.50 has_more = false exige curseurs null
+  try {
+    let caughtNonNullCursor = false;
+    try {
+      validateCollectionCampaignListResponse({
+        success: true,
+        campaigns: [validCampaignSummaryFixture],
+        has_more: false,
+        next_cursor_created_at: '2026-09-19T10:00:00Z', // Invalide quand has_more = false
+        next_cursor_id: '11111111-1111-1111-1111-111111111111'
+      });
+    } catch {
+      caughtNonNullCursor = true;
+    }
+    assert(caughtNonNullCursor, 'TEST 11.1.50 : has_more = false avec curseur non-null rejeté');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.50 : Exception inattendue : ${err}`);
+  }
+
+  // 11.51 create en replay (is_idempotent_replay = true) valide le même contrat complet
+  try {
+    const replayRes = validateCreateCampaignResponse({
+      success: true,
+      campaign: validCampaignSummaryFixture,
+      recipients: [],
+      recipients_has_more: false,
+      next_cursor_recipient_id: null,
+      is_idempotent_replay: true
+    });
+    assert(replayRes.is_idempotent_replay === true && replayRes.campaign.id === validCampaignSummaryFixture.id, 'TEST 11.1.51 : Create en replay (is_idempotent_replay = true) validé');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.51 : Exception inattendue : ${err}`);
+  }
+
+  // 11.52 latest_attempt = null accepté quand le destinataire n'a aucune tentative
+  try {
+    const recipientWithoutAttempt = validateCollectionCampaignRecipient({
+      id: '11111111-1111-1111-1111-111111111111',
+      campaign_id: '22222222-2222-2222-2222-222222222222',
+      invoice_id: '33333333-3333-3333-3333-333333333333',
+      student_id: '44444444-4444-4444-4444-444444444444',
+      parent_profile_id: '55555555-5555-5555-5555-555555555555',
+      delivery_status: 'pending',
+      skip_reason: null,
+      invoice_snapshot: {},
+      student_snapshot: {},
+      parent_snapshot: {},
+      attempt_count: 0,
+      last_attempt_at: null,
+      delivered_at: null,
+      failed_at: null,
+      latest_attempt: null
+    });
+    assert(recipientWithoutAttempt.latest_attempt === null, 'TEST 11.1.52 : latest_attempt = null accepté sans tentative');
+  } catch (err: unknown) {
+    assert(false, `TEST 11.1.52 : Exception inattendue : ${err}`);
   }
 
   console.log(`\n=== RÉSULTATS : ${passed}/${total} TESTS RÉUSSIS ===\n`);

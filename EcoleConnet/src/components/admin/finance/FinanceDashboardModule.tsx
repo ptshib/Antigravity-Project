@@ -7,6 +7,7 @@ import type { AgingSummaryResponse, CollectionDashboardResponse } from '../../..
 import { FormattedAmount } from '../../common/CurrencyBadge';
 import { SchoolFeesCatalogModule } from './SchoolFeesCatalogModule';
 import { StudentInvoicesModule } from './StudentInvoicesModule';
+import { CollectionCampaignsPanel } from './CollectionCampaignsPanel';
 import { StudentFinanceDossierModal } from './StudentFinanceDossierModal';
 import { AgingSummaryCard } from './AgingSummaryCard';
 import { OverdueInvoicesTable } from './OverdueInvoicesTable';
@@ -30,7 +31,7 @@ interface FinanceDashboardModuleProps {
   schoolId: string;
 }
 
-type FinanceSubTab = 'vue_densemble' | 'creances' | 'factures' | 'catalogue';
+type FinanceSubTab = 'vue_densemble' | 'creances' | 'factures' | 'catalogue' | 'campagnes';
 
 export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ schoolId }) => {
   const [activeSubTab, setActiveSubTab] = useState<FinanceSubTab>('vue_densemble');
@@ -262,6 +263,13 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
             <Layers className="w-3.5 h-3.5" />
             Grille Tarifaire
           </button>
+          <button
+            onClick={() => setActiveSubTab('campagnes')}
+            className={`flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${activeSubTab === 'campagnes' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            Campagnes (Mock)
+          </button>
         </div>
       </div>
 
@@ -460,6 +468,10 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
 
       {activeSubTab === 'catalogue' && (
         <SchoolFeesCatalogModule schoolId={schoolId} />
+      )}
+
+      {activeSubTab === 'campagnes' && (
+        <CollectionCampaignsPanel />
       )}
 
       {/* Dossier Financier Modal */}
