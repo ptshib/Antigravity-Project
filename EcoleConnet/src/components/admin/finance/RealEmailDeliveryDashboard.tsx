@@ -28,6 +28,8 @@ import {
   Calendar
 } from 'lucide-react';
 
+import { RealEmailCampaignWizard } from './RealEmailCampaignWizard';
+
 const BLOCKER_LABELS: Record<RealEmailReadinessBlocker, string> = {
   GLOBAL_KILL_SWITCH_DISABLED: 'L’envoi réel est désactivé au niveau de la plateforme.',
   SENDER_IDENTITY_NOT_VERIFIED: 'L’identité d’expédition n’est pas encore vérifiée.',
@@ -60,7 +62,17 @@ const JOB_STATUS_BADGE_CLASSES: Record<RealEmailJobStatus, string> = {
   complained: 'bg-purple-100 text-purple-900 border-purple-300 font-extrabold'
 };
 
-export const RealEmailDeliveryDashboard: React.FC = () => {
+export interface RealEmailDeliveryDashboardProps {
+  userRole?: string;
+  isSchoolAdmin?: boolean;
+}
+
+export const RealEmailDeliveryDashboard: React.FC<RealEmailDeliveryDashboardProps> = ({
+  userRole = 'school_admin',
+  isSchoolAdmin
+}) => {
+  const canCreateRealCampaign = isSchoolAdmin !== undefined ? isSchoolAdmin : userRole === 'school_admin';
+  const [isWizardOpen, setIsWizardOpen] = useState<boolean>(false);
   // Readiness & Dashboard state
   const [readiness, setReadiness] = useState<RealEmailReadinessResponse | null>(null);
   const [dashboard, setDashboard] = useState<RealEmailDeliveryDashboardResponse | null>(null);
@@ -336,14 +348,26 @@ export const RealEmailDeliveryDashboard: React.FC = () => {
             </div>
           </div>
 
-          <button
-            onClick={() => handleGlobalRefresh(true)}
-            disabled={refreshing}
-            className="w-full sm:w-auto px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-            <span>Actualiser</span>
-          </button>
+          <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
+            {canCreateRealCampaign && (
+              <button
+                type="button"
+                onClick={() => setIsWizardOpen(true)}
+                className="w-full sm:w-auto px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs focus:ring-2 focus:ring-amber-500 focus:outline-none"
+              >
+                <Mail className="w-3.5 h-3.5" />
+                <span>Nouvelle campagne e-mail REAL</span>
+              </button>
+            )}
+            <button
+              onClick={() => handleGlobalRefresh(true)}
+              disabled={refreshing}
+              className="w-full sm:w-auto px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+              <span>Actualiser</span>
+            </button>
+          </div>
         </div>
 
         {/* Permanent Read-only Warning Banner */}
@@ -722,6 +746,14 @@ export const RealEmailDeliveryDashboard: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* REAL Email Campaign Wizard Modal */}
+      <RealEmailCampaignWizard
+        isOpen={isWizardOpen}
+        onClose={() => setIsWizardOpen(false)}
+        readiness={readiness}
+        onSuccess={() => handleGlobalRefresh(true)}
+      />
     </div>
   );
 };

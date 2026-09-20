@@ -61,7 +61,13 @@ import type {
   RealEmailDeliveryDashboardResponse,
   RealEmailJobStatus,
   RealEmailDeliveryJobsCursor,
-  RealEmailDeliveryJobsResponse
+  RealEmailDeliveryJobsResponse,
+  RealEmailCampaignSummary,
+  CreateRealEmailCampaignRequest,
+  CreateRealEmailCampaignResponse,
+  ScheduleRealEmailCampaignRequest,
+  ScheduleRealEmailCampaignResponse,
+  CampaignPriority
 } from '../types/finance';
 
 /**
@@ -3025,6 +3031,369 @@ export async function getSchoolRealEmailDeliveryJobs(
     const { data, error } = await supabase.rpc('get_school_real_email_delivery_jobs', rpcParams);
     if (error) throw mapPostgresError(error);
     return validateRealEmailDeliveryJobsResponse(data);
+  } catch (err: unknown) {
+    if (err instanceof FinanceServiceError) throw err;
+    throw mapPostgresError(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// VALIDATEURS ET RPCs POUR FINANCE 4E-5B (CRÉATION ET PLANIFICATION REAL)
+// ---------------------------------------------------------------------------
+
+const VALID_CAMPAIGN_PRIORITIES: CampaignPriority[] = ['P1_CRITICAL', 'P2_HIGH', 'P3_MEDIUM', 'P4_LOW'];
+
+const EXPECTED_CAMPAIGN_KEYS = new Set([
+  'id', 'school_id', 'name', 'channel', 'status', 'delivery_mode',
+  'scheduled_at', 'claimed_at', 'claimed_by', 'processing_started_at',
+  'completed_at', 'created_by', 'idempotency_key', 'filter_criteria',
+  'template_snapshot', 'recipient_count', 'pending_count', 'processing_count',
+  'success_count', 'failed_count', 'skipped_count', 'created_at', 'updated_at'
+]);
+
+const EXPECTED_FILTER_KEYS = new Set([
+  'currency', 'min_days_overdue', 'max_days_overdue', 'priority', 'class_ids'
+]);
+
+export function validateRealEmailCampaignSummary(data: unknown): RealEmailCampaignSummary {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Format de réponse invalide pour RealEmailCampaignSummary (non-objet).', '22023');
+  }
+
+  const keys = Object.keys(data as Record<string, unknown>);
+  if (keys.length !== 23 || !keys.every((k) => EXPECTED_CAMPAIGN_KEYS.has(k))) {
+    throw new FinanceServiceError('RealEmailCampaignSummary doit contenir exactement les 23 clés prévues sans clé supplémentaire.', '22023');
+  }
+
+  const id = getStringProperty(data, 'id');
+  if (!id || !UUID_REGEX.test(id)) {
+    throw new FinanceServiceError('Propriété "id" invalide ou non UUID dans RealEmailCampaignSummary.', '22023');
+  }
+
+  const school_id = getStringProperty(data, 'school_id');
+  if (!school_id || !UUID_REGEX.test(school_id)) {
+    throw new FinanceServiceError('Propriété "school_id" invalide ou non UUID dans RealEmailCampaignSummary.', '22023');
+  }
+
+  const name = getStringProperty(data, 'name');
+  if (!name || name.trim() === '') {
+    throw new FinanceServiceError('Propriété "name" manquante ou vide dans RealEmailCampaignSummary.', '22023');
+  }
+
+  const channel = getStringProperty(data, 'channel');
+  if (channel !== 'email') {
+    throw new FinanceServiceError(`Canal invalide dans RealEmailCampaignSummary ("email" attendu, reçu "${channel}").`, '22023');
+  }
+
+  const delivery_mode = getStringProperty(data, 'delivery_mode');
+  if (delivery_mode !== 'real') {
+    throw new FinanceServiceError(`Mode de livraison invalide dans RealEmailCampaignSummary ("real" attendu, reçu "${delivery_mode}").`, '22023');
+  }
+
+  const status = getStringProperty(data, 'status') as CampaignStatus;
+  if (!status || !VALID_CAMPAIGN_STATUSES.includes(status)) {
+    throw new FinanceServiceError(`Statut de campagne invalide dans RealEmailCampaignSummary: "${status}".`, '22023');
+  }
+
+  const created_by = getStringProperty(data, 'created_by');
+  if (!created_by || !UUID_REGEX.test(created_by)) {
+    throw new FinanceServiceError('Propriété "created_by" obligatoire (UUID v4 non-null attendu) dans RealEmailCampaignSummary.', '22023');
+  }
+
+  const idempotency_key = getStringProperty(data, 'idempotency_key');
+  if (!idempotency_key || !UUID_REGEX.test(idempotency_key)) {
+    throw new FinanceServiceError('Propriété "idempotency_key" invalide ou non UUID dans RealEmailCampaignSummary.', '22023');
+  }
+
+  const filter_criteria_raw = data['filter_criteria'];
+  if (!isObject(filter_criteria_raw)) {
+    throw new FinanceServiceError('Propriété "filter_criteria" manquante ou non-objet dans RealEmailCampaignSummary.', '22023');
+  }
+  const fc = filter_criteria_raw as Record<string, unknown>;
+  const fcKeys = Object.keys(fc);
+  if (fcKeys.length !== 5 || !fcKeys.every((k) => EXPECTED_FILTER_KEYS.has(k))) {
+    throw new FinanceServiceError('filter_criteria doit contenir exactement les 5 clés canoniques sans clé supplémentaire.', '22023');
+  }
+
+  if (fc['priority'] !== null && fc['priority'] !== undefined) {
+    if (typeof fc['priority'] !== 'string' || !VALID_CAMPAIGN_PRIORITIES.includes(fc['priority'] as CampaignPriority)) {
+      throw new FinanceServiceError(`Priorité invalide "${fc['priority']}" dans filter_criteria (P1_CRITICAL, P2_HIGH, P3_MEDIUM, P4_LOW ou null attendu).`, '22023');
+    }
+  }
+
+  const template_snapshot_raw = data['template_snapshot'];
+  if (!isObject(template_snapshot_raw)) {
+    throw new FinanceServiceError('Propriété "template_snapshot" manquante ou non-objet dans RealEmailCampaignSummary.', '22023');
+  }
+  const tsKeys = Object.keys(template_snapshot_raw as Record<string, unknown>);
+  if (
+    tsKeys.length !== 1 ||
+    tsKeys[0] !== 'raw' ||
+    typeof template_snapshot_raw['raw'] !== 'string' ||
+    template_snapshot_raw['raw'].trim() === ''
+  ) {
+    throw new FinanceServiceError('template_snapshot doit contenir exactement { raw: string } sans clé supplémentaire.', '22023');
+  }
+
+  const recipient_count = getNumberProperty(data, 'recipient_count');
+  const pending_count = getNumberProperty(data, 'pending_count');
+  const processing_count = getNumberProperty(data, 'processing_count');
+  const success_count = getNumberProperty(data, 'success_count');
+  const failed_count = getNumberProperty(data, 'failed_count');
+  const skipped_count = getNumberProperty(data, 'skipped_count');
+
+  if (
+    recipient_count === null || !Number.isInteger(recipient_count) || recipient_count < 0 ||
+    pending_count === null || !Number.isInteger(pending_count) || pending_count < 0 ||
+    processing_count === null || !Number.isInteger(processing_count) || processing_count < 0 ||
+    success_count === null || !Number.isInteger(success_count) || success_count < 0 ||
+    failed_count === null || !Number.isInteger(failed_count) || failed_count < 0 ||
+    skipped_count === null || !Number.isInteger(skipped_count) || skipped_count < 0
+  ) {
+    throw new FinanceServiceError('Les compteurs de destinataires doivent être des entiers >= 0 dans RealEmailCampaignSummary.', '22023');
+  }
+
+  if (recipient_count !== pending_count + processing_count + success_count + failed_count + skipped_count) {
+    throw new FinanceServiceError('Invariant des compteurs destinataires violé dans RealEmailCampaignSummary.', '22023');
+  }
+
+  const created_at = getStringProperty(data, 'created_at');
+  if (!created_at || isNaN(Date.parse(created_at))) {
+    throw new FinanceServiceError('created_at invalide dans RealEmailCampaignSummary.', '22023');
+  }
+
+  const updated_at = getStringProperty(data, 'updated_at');
+  if (!updated_at || isNaN(Date.parse(updated_at))) {
+    throw new FinanceServiceError('updated_at invalide dans RealEmailCampaignSummary.', '22023');
+  }
+
+  return {
+    id,
+    school_id,
+    name,
+    channel: 'email',
+    status,
+    delivery_mode: 'real',
+    scheduled_at: getStringProperty(data, 'scheduled_at'),
+    claimed_at: getStringProperty(data, 'claimed_at'),
+    claimed_by: getStringProperty(data, 'claimed_by'),
+    processing_started_at: getStringProperty(data, 'processing_started_at'),
+    completed_at: getStringProperty(data, 'completed_at'),
+    created_by,
+    idempotency_key,
+    filter_criteria: {
+      currency: fc['currency'] as Currency | null ?? null,
+      min_days_overdue: fc['min_days_overdue'] as number | null ?? null,
+      max_days_overdue: fc['max_days_overdue'] as number | null ?? null,
+      priority: fc['priority'] as CampaignPriority | null ?? null,
+      class_ids: fc['class_ids'] as string[] | null ?? null,
+    },
+    template_snapshot: { raw: template_snapshot_raw['raw'] as string },
+    recipient_count,
+    pending_count,
+    processing_count,
+    success_count,
+    failed_count,
+    skipped_count,
+    created_at,
+    updated_at
+  };
+}
+
+export function validateCreateRealEmailCampaignResponse(data: unknown): CreateRealEmailCampaignResponse {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Format de réponse invalide pour create_school_real_email_campaign (non-objet).', '22023');
+  }
+
+  if (data['success'] !== true) {
+    throw new FinanceServiceError('La création de la campagne e-mail REAL a échoué.', '22023');
+  }
+
+  const campaign = validateRealEmailCampaignSummary(data['campaign']);
+  if (campaign.status !== 'draft') {
+    throw new FinanceServiceError(`La campagne REAL créée doit être au statut 'draft' (reçu '${campaign.status}').`, '22023');
+  }
+
+  if (typeof data['is_idempotent_replay'] !== 'boolean') {
+    throw new FinanceServiceError('is_idempotent_replay boolean requis dans la réponse de création REAL.', '22023');
+  }
+
+  if (typeof data['recipients_has_more'] !== 'boolean') {
+    throw new FinanceServiceError('recipients_has_more boolean requis dans la réponse de création REAL.', '22023');
+  }
+
+  const next_cursor_recipient_id = getStringProperty(data, 'next_cursor_recipient_id');
+  if (data['recipients_has_more'] && !next_cursor_recipient_id) {
+    throw new FinanceServiceError('Incohérence curseur : recipients_has_more = true sans next_cursor_recipient_id.', '22023');
+  }
+  if (!data['recipients_has_more'] && next_cursor_recipient_id) {
+    throw new FinanceServiceError('Incohérence curseur : recipients_has_more = false avec next_cursor_recipient_id.', '22023');
+  }
+
+  const rawRecipients = Array.isArray(data['recipients']) ? data['recipients'] : [];
+  const recipients = rawRecipients.map(validateCollectionCampaignRecipient);
+
+  const safety = data['safety'];
+  if (!isObject(safety)) {
+    throw new FinanceServiceError('Safety payload manquant ou non-objet dans la réponse de création REAL.', '22023');
+  }
+
+  if (
+    safety['channel'] !== 'email' ||
+    safety['delivery_mode'] !== 'real' ||
+    safety['status'] !== 'draft' ||
+    safety['no_message_sent'] !== true
+  ) {
+    throw new FinanceServiceError('Contrat de sécurité "safety" invalide dans la réponse de création REAL.', '22023');
+  }
+
+  return {
+    success: true,
+    campaign,
+    recipients,
+    recipients_has_more: Boolean(data['recipients_has_more']),
+    next_cursor_recipient_id,
+    is_idempotent_replay: Boolean(data['is_idempotent_replay']),
+    safety: {
+      channel: 'email',
+      delivery_mode: 'real',
+      status: 'draft',
+      no_message_sent: true
+    }
+  };
+}
+
+export function validateScheduleRealEmailCampaignResponse(data: unknown): ScheduleRealEmailCampaignResponse {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Format de réponse invalide pour schedule_school_real_email_campaign (non-objet).', '22023');
+  }
+
+  if (data['success'] !== true) {
+    throw new FinanceServiceError('La planification de la campagne e-mail REAL a échoué.', '22023');
+  }
+
+  const campaign_id = getStringProperty(data, 'campaign_id');
+  if (!campaign_id || !UUID_REGEX.test(campaign_id)) {
+    throw new FinanceServiceError('campaign_id invalide ou non UUID dans la réponse de planification REAL.', '22023');
+  }
+
+  if (data['delivery_mode'] !== 'real') {
+    throw new FinanceServiceError('delivery_mode doit être "real" dans la réponse de planification REAL.', '22023');
+  }
+
+  if (data['channel'] !== 'email') {
+    throw new FinanceServiceError('channel doit être "email" dans la réponse de planification REAL.', '22023');
+  }
+
+  if (data['status'] !== 'scheduled') {
+    throw new FinanceServiceError('status doit être "scheduled" dans la réponse de planification REAL.', '22023');
+  }
+
+  const scheduled_at = getStringProperty(data, 'scheduled_at');
+  if (!scheduled_at || isNaN(Date.parse(scheduled_at))) {
+    throw new FinanceServiceError('scheduled_at invalide dans la réponse de planification REAL.', '22023');
+  }
+
+  if (data['no_message_sent'] !== true) {
+    throw new FinanceServiceError('no_message_sent doit être strictement true dans la réponse de planification REAL.', '22023');
+  }
+
+  return {
+    success: true,
+    campaign_id,
+    delivery_mode: 'real',
+    channel: 'email',
+    status: 'scheduled',
+    scheduled_at,
+    no_message_sent: true
+  };
+}
+
+export async function createSchoolRealEmailCampaign(
+  request: CreateRealEmailCampaignRequest
+): Promise<CreateRealEmailCampaignResponse> {
+  if (!request.p_name || request.p_name.trim().length < 3) {
+    throw new FinanceServiceError('Le nom de la campagne doit contenir au moins 3 caractères.', '22023');
+  }
+
+  if (!request.p_template || request.p_template.trim().length < 10) {
+    throw new FinanceServiceError('Le modèle de message doit contenir au moins 10 caractères.', '22023');
+  }
+
+  if (!request.p_idempotency_key || !UUID_REGEX.test(request.p_idempotency_key)) {
+    throw new FinanceServiceError('Clé d idempotence invalide (UUID v4 requis).', '22023');
+  }
+
+  if (request.p_confirm_real_delivery !== true || request.p_confirmation_text !== 'ENVOI EMAIL REEL') {
+    throw new FinanceServiceError('La confirmation explicite "ENVOI EMAIL REEL" avec p_confirm_real_delivery = true est obligatoire.', '22023');
+  }
+
+  if (request.p_priority !== undefined && request.p_priority !== null) {
+    if (!VALID_CAMPAIGN_PRIORITIES.includes(request.p_priority)) {
+      throw new FinanceServiceError(`Priorité invalide "${request.p_priority}".`, '22023');
+    }
+  }
+
+  const rpcParams = {
+    p_name: request.p_name.trim(),
+    p_template: request.p_template.trim(),
+    p_idempotency_key: request.p_idempotency_key,
+    p_currency: (request.p_currency !== undefined && request.p_currency !== null) ? request.p_currency : null,
+    p_priority: (request.p_priority !== undefined && request.p_priority !== null) ? request.p_priority : null,
+    p_min_days_overdue: (request.p_min_days_overdue !== undefined && request.p_min_days_overdue !== null) ? request.p_min_days_overdue : null,
+    p_max_days_overdue: (request.p_max_days_overdue !== undefined && request.p_max_days_overdue !== null) ? request.p_max_days_overdue : null,
+    p_class_ids: (request.p_class_ids !== undefined && request.p_class_ids !== null) ? request.p_class_ids : null,
+    p_confirm_real_delivery: true,
+    p_confirmation_text: 'ENVOI EMAIL REEL'
+  };
+
+  try {
+    const { data, error } = await supabase.rpc('create_school_real_email_campaign', rpcParams);
+    if (error) throw mapPostgresError(error);
+    return validateCreateRealEmailCampaignResponse(data);
+  } catch (err: unknown) {
+    if (err instanceof FinanceServiceError) throw err;
+    throw mapPostgresError(err);
+  }
+}
+
+export async function scheduleSchoolRealEmailCampaign(
+  request: ScheduleRealEmailCampaignRequest
+): Promise<ScheduleRealEmailCampaignResponse> {
+  if (!request.p_campaign_id || !UUID_REGEX.test(request.p_campaign_id)) {
+    throw new FinanceServiceError('Identifiant de campagne (p_campaign_id) invalide (UUID v4 requis).', '22023');
+  }
+
+  if (!request.p_scheduled_at || isNaN(Date.parse(request.p_scheduled_at))) {
+    throw new FinanceServiceError('Date de planification (p_scheduled_at) invalide.', '22023');
+  }
+
+  const scheduledTime = new Date(request.p_scheduled_at).getTime();
+  const now = Date.now();
+  if (scheduledTime < now) {
+    throw new FinanceServiceError('La date de planification ne peut pas être dans le passé.', '22023');
+  }
+
+  const maxFuture = now + 30 * 24 * 60 * 60 * 1000;
+  if (scheduledTime > maxFuture) {
+    throw new FinanceServiceError('La date de planification ne peut pas dépasser 30 jours dans le futur.', '22023');
+  }
+
+  if (request.p_confirm_real_delivery !== true || request.p_confirmation_text !== 'ENVOI EMAIL REEL') {
+    throw new FinanceServiceError('La confirmation explicite "ENVOI EMAIL REEL" avec p_confirm_real_delivery = true est obligatoire.', '22023');
+  }
+
+  const rpcParams = {
+    p_campaign_id: request.p_campaign_id,
+    p_scheduled_at: request.p_scheduled_at,
+    p_confirm_real_delivery: true,
+    p_confirmation_text: 'ENVOI EMAIL REEL'
+  };
+
+  try {
+    const { data, error } = await supabase.rpc('schedule_school_real_email_campaign', rpcParams);
+    if (error) throw mapPostgresError(error);
+    return validateScheduleRealEmailCampaignResponse(data);
   } catch (err: unknown) {
     if (err instanceof FinanceServiceError) throw err;
     throw mapPostgresError(err);

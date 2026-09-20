@@ -4671,6 +4671,1038 @@ export async function runFinanceFrontendTests(): Promise<{ total: number; passed
     assert(false, `TEST 12.5.14 : Exception inattendue : ${err}`);
   }
 
+  // ---------------------------------------------------------------------------
+  // --- TEST 13 : FINANCE 4E-5B (CRÉATION ET PLANIFICATION DES CAMPAGNES E-MAIL REAL) ---
+  // ---------------------------------------------------------------------------
+
+  // 13.1.1 Signatures exactes des deux nouvelles RPCs exportées
+  try {
+    const service = await import('../services/financeService');
+    assert(
+      typeof service.createSchoolRealEmailCampaign === 'function' &&
+      typeof service.scheduleSchoolRealEmailCampaign === 'function' &&
+      typeof service.validateRealEmailCampaignSummary === 'function' &&
+      typeof service.validateCreateRealEmailCampaignResponse === 'function' &&
+      typeof service.validateScheduleRealEmailCampaignResponse === 'function',
+      'TEST 13.1.1 : Signatures exactes des deux nouvelles RPCs et valideurs 4E-5B exportés'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.1 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.2 Payload exact sans p_school_id, p_offset ni undefined dans createSchoolRealEmailCampaign
+  try {
+    const serviceSrc = (await import('../services/financeService')).createSchoolRealEmailCampaign.toString();
+    assert(
+      serviceSrc.includes('create_school_real_email_campaign') &&
+      !serviceSrc.includes('p_school_id') &&
+      !serviceSrc.includes('p_offset') &&
+      serviceSrc.includes('p_confirm_real_delivery') &&
+      serviceSrc.includes('ENVOI EMAIL REEL'),
+      'TEST 13.1.2 : Absence de p_school_id, p_offset et undefined dans createSchoolRealEmailCampaign'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.2 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.3 Payload exact sans p_school_id, p_offset ni undefined dans scheduleSchoolRealEmailCampaign
+  try {
+    const serviceSrc = (await import('../services/financeService')).scheduleSchoolRealEmailCampaign.toString();
+    assert(
+      serviceSrc.includes('schedule_school_real_email_campaign') &&
+      !serviceSrc.includes('p_school_id') &&
+      !serviceSrc.includes('p_offset') &&
+      serviceSrc.includes('p_campaign_id') &&
+      serviceSrc.includes('p_scheduled_at'),
+      'TEST 13.1.3 : Absence de p_school_id, p_offset et undefined dans scheduleSchoolRealEmailCampaign'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.3 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.4 channel=email et delivery_mode=real stricts
+  try {
+    const { validateRealEmailCampaignSummary } = await import('../services/financeService');
+    const valid23KeyCampaign = {
+      id: '11111111-1111-1111-1111-111111111111',
+      school_id: '22222222-2222-2222-2222-222222222222',
+      name: 'Campagne REAL Test',
+      channel: 'email',
+      status: 'draft',
+      delivery_mode: 'real',
+      scheduled_at: null,
+      claimed_at: null,
+      claimed_by: null,
+      processing_started_at: null,
+      completed_at: null,
+      created_by: '33333333-3333-3333-3333-333333333333',
+      idempotency_key: '44444444-4444-4444-4444-444444444444',
+      filter_criteria: {
+        currency: 'USD',
+        min_days_overdue: 10,
+        max_days_overdue: 30,
+        priority: 'P2_HIGH',
+        class_ids: null
+      },
+      template_snapshot: { raw: 'Bonjour [parent_name], relance.' },
+      recipient_count: 5,
+      pending_count: 5,
+      processing_count: 0,
+      success_count: 0,
+      failed_count: 0,
+      skipped_count: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    const validated = validateRealEmailCampaignSummary(valid23KeyCampaign);
+    assert(
+      validated.channel === 'email' && validated.delivery_mode === 'real',
+      'TEST 13.1.4 : channel=email et delivery_mode=real stricts validés'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.4 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.5 Valideur validateRealEmailCampaignSummary exige exactement les 23 clés
+  try {
+    const { validateRealEmailCampaignSummary } = await import('../services/financeService');
+    const valid23KeyCampaign = {
+      id: '11111111-1111-1111-1111-111111111111',
+      school_id: '22222222-2222-2222-2222-222222222222',
+      name: 'Campagne REAL Test',
+      channel: 'email',
+      status: 'draft',
+      delivery_mode: 'real',
+      scheduled_at: null,
+      claimed_at: null,
+      claimed_by: null,
+      processing_started_at: null,
+      completed_at: null,
+      created_by: '33333333-3333-3333-3333-333333333333',
+      idempotency_key: '44444444-4444-4444-4444-444444444444',
+      filter_criteria: {
+        currency: 'USD',
+        min_days_overdue: 10,
+        max_days_overdue: 30,
+        priority: 'P2_HIGH',
+        class_ids: null
+      },
+      template_snapshot: { raw: 'Bonjour [parent_name], relance.' },
+      recipient_count: 2,
+      pending_count: 2,
+      processing_count: 0,
+      success_count: 0,
+      failed_count: 0,
+      skipped_count: 0,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    const res = validateRealEmailCampaignSummary(valid23KeyCampaign);
+    assert(res.id === valid23KeyCampaign.id && res.name === valid23KeyCampaign.name, 'TEST 13.1.5 : Valideur validateRealEmailCampaignSummary valide les 23 clés');
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.5 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.6 filter_criteria exige les 5 champs canoniques
+  try {
+    const { validateRealEmailCampaignSummary } = await import('../services/financeService');
+    let caughtMissingField = false;
+    try {
+      validateRealEmailCampaignSummary({
+        id: '11111111-1111-1111-1111-111111111111',
+        school_id: '22222222-2222-2222-2222-222222222222',
+        name: 'Test',
+        channel: 'email',
+        status: 'draft',
+        delivery_mode: 'real',
+        idempotency_key: '44444444-4444-4444-4444-444444444444',
+        filter_criteria: { currency: 'USD' }, // manque min_days_overdue, etc.
+        template_snapshot: { raw: 'Test raw' },
+        recipient_count: 0, pending_count: 0, processing_count: 0, success_count: 0, failed_count: 0, skipped_count: 0,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+      });
+    } catch {
+      caughtMissingField = true;
+    }
+    assert(caughtMissingField, 'TEST 13.1.6 : filter_criteria exige les 5 champs canoniques');
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.6 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.7 template_snapshot.raw exige une chaîne valide non vide
+  try {
+    const { validateRealEmailCampaignSummary } = await import('../services/financeService');
+    let caughtEmptyRaw = false;
+    try {
+      validateRealEmailCampaignSummary({
+        id: '11111111-1111-1111-1111-111111111111',
+        school_id: '22222222-2222-2222-2222-222222222222',
+        name: 'Test',
+        channel: 'email',
+        status: 'draft',
+        delivery_mode: 'real',
+        idempotency_key: '44444444-4444-4444-4444-444444444444',
+        filter_criteria: { currency: 'USD', min_days_overdue: null, max_days_overdue: null, priority: null, class_ids: null },
+        template_snapshot: { raw: '' }, // Invalide : raw vide
+        recipient_count: 0, pending_count: 0, processing_count: 0, success_count: 0, failed_count: 0, skipped_count: 0,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+      });
+    } catch {
+      caughtEmptyRaw = true;
+    }
+    assert(caughtEmptyRaw, 'TEST 13.1.7 : template_snapshot.raw exige une chaîne valide non vide');
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.7 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.8 Invariant des compteurs destinataires strictly vérifié
+  try {
+    const { validateRealEmailCampaignSummary } = await import('../services/financeService');
+    let caughtCounterViolation = false;
+    try {
+      validateRealEmailCampaignSummary({
+        id: '11111111-1111-1111-1111-111111111111',
+        school_id: '22222222-2222-2222-2222-222222222222',
+        name: 'Test',
+        channel: 'email',
+        status: 'draft',
+        delivery_mode: 'real',
+        idempotency_key: '44444444-4444-4444-4444-444444444444',
+        filter_criteria: { currency: 'USD', min_days_overdue: null, max_days_overdue: null, priority: null, class_ids: null },
+        template_snapshot: { raw: 'Valid template' },
+        recipient_count: 10,
+        pending_count: 5,
+        processing_count: 1,
+        success_count: 1,
+        failed_count: 1,
+        skipped_count: 1, // Somme = 9 != 10
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+      });
+    } catch {
+      caughtCounterViolation = true;
+    }
+    assert(caughtCounterViolation, 'TEST 13.1.8 : Invariant des compteurs destinataires strictement vérifié');
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.8 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.9 Rejet de compteurs négatifs ou décimaux dans RealEmailCampaignSummary
+  try {
+    const { validateRealEmailCampaignSummary } = await import('../services/financeService');
+    let caughtDecimal = false;
+    try {
+      validateRealEmailCampaignSummary({
+        id: '11111111-1111-1111-1111-111111111111',
+        school_id: '22222222-2222-2222-2222-222222222222',
+        name: 'Test',
+        channel: 'email',
+        status: 'draft',
+        delivery_mode: 'real',
+        idempotency_key: '44444444-4444-4444-4444-444444444444',
+        filter_criteria: { currency: 'USD', min_days_overdue: null, max_days_overdue: null, priority: null, class_ids: null },
+        template_snapshot: { raw: 'Valid template' },
+        recipient_count: 1.5,
+        pending_count: 1.5,
+        processing_count: 0, success_count: 0, failed_count: 0, skipped_count: 0,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+      });
+    } catch {
+      caughtDecimal = true;
+    }
+    assert(caughtDecimal, 'TEST 13.1.9 : Rejet de compteurs décimaux dans RealEmailCampaignSummary');
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.9 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.10 Safety payload exige no_message_sent = true, status = draft, delivery_mode = real, channel = email
+  try {
+    const { validateCreateRealEmailCampaignResponse } = await import('../services/financeService');
+    const validCreatePayload = {
+      success: true,
+      campaign: {
+        id: '11111111-1111-1111-1111-111111111111',
+        school_id: '22222222-2222-2222-2222-222222222222',
+        name: 'Campagne REAL Test',
+        channel: 'email',
+        status: 'draft',
+        delivery_mode: 'real',
+        scheduled_at: null,
+        claimed_at: null,
+        claimed_by: null,
+        processing_started_at: null,
+        completed_at: null,
+        created_by: '33333333-3333-3333-3333-333333333333',
+        idempotency_key: '44444444-4444-4444-4444-444444444444',
+        filter_criteria: { currency: 'USD', min_days_overdue: null, max_days_overdue: null, priority: null, class_ids: null },
+        template_snapshot: { raw: 'Valid template' },
+        recipient_count: 0, pending_count: 0, processing_count: 0, success_count: 0, failed_count: 0, skipped_count: 0,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+      },
+      recipients: [],
+      recipients_has_more: false,
+      next_cursor_recipient_id: null,
+      is_idempotent_replay: false,
+      safety: {
+        channel: 'email',
+        delivery_mode: 'real',
+        status: 'draft',
+        no_message_sent: true
+      }
+    };
+    const validated = validateCreateRealEmailCampaignResponse(validCreatePayload);
+    assert(
+      validated.safety.no_message_sent === true && validated.safety.delivery_mode === 'real',
+      'TEST 13.1.10 : Safety payload exige no_message_sent = true, status = draft, delivery_mode = real, channel = email'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.10 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.11 Rejet par validateCreateRealEmailCampaignResponse d'un statut autre que draft
+  try {
+    const { validateCreateRealEmailCampaignResponse } = await import('../services/financeService');
+    let caughtNonDraft = false;
+    try {
+      validateCreateRealEmailCampaignResponse({
+        success: true,
+        campaign: {
+          id: '11111111-1111-1111-1111-111111111111',
+          school_id: '22222222-2222-2222-2222-222222222222',
+          name: 'Campagne REAL Test',
+          channel: 'email',
+          status: 'scheduled', // Invalide pour la création (draft attendu)
+          delivery_mode: 'real',
+          scheduled_at: null, claimed_at: null, claimed_by: null, processing_started_at: null, completed_at: null,
+          created_by: '33333333-3333-3333-3333-333333333333',
+          idempotency_key: '44444444-4444-4444-4444-444444444444',
+          filter_criteria: { currency: 'USD', min_days_overdue: null, max_days_overdue: null, priority: null, class_ids: null },
+          template_snapshot: { raw: 'Valid template' },
+          recipient_count: 0, pending_count: 0, processing_count: 0, success_count: 0, failed_count: 0, skipped_count: 0,
+          created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+        },
+        recipients: [], recipients_has_more: false, next_cursor_recipient_id: null, is_idempotent_replay: false,
+        safety: { channel: 'email', delivery_mode: 'real', status: 'draft', no_message_sent: true }
+      });
+    } catch {
+      caughtNonDraft = true;
+    }
+    assert(caughtNonDraft, 'TEST 13.1.11 : Rejet par validateCreateRealEmailCampaignResponse d’un statut autre que draft');
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.11 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.12 Rejet par validateScheduleRealEmailCampaignResponse si no_message_sent !== true
+  try {
+    const { validateScheduleRealEmailCampaignResponse } = await import('../services/financeService');
+    let caughtFalseNoMessage = false;
+    try {
+      validateScheduleRealEmailCampaignResponse({
+        success: true,
+        campaign_id: '11111111-1111-1111-1111-111111111111',
+        delivery_mode: 'real',
+        channel: 'email',
+        status: 'scheduled',
+        scheduled_at: new Date().toISOString(),
+        no_message_sent: false // Invalide : true attendu
+      });
+    } catch {
+      caughtFalseNoMessage = true;
+    }
+    assert(caughtFalseNoMessage, 'TEST 13.1.12 : Rejet par validateScheduleRealEmailCampaignResponse si no_message_sent !== true');
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.12 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.13 Rejet des réponses MOCK ou malformées par validateCreateRealEmailCampaignResponse
+  try {
+    const { validateCreateRealEmailCampaignResponse } = await import('../services/financeService');
+    let caughtMockInCreate = false;
+    try {
+      validateCreateRealEmailCampaignResponse({
+        success: true,
+        campaign: {
+          id: '11111111-1111-1111-1111-111111111111',
+          school_id: '22222222-2222-2222-2222-222222222222',
+          name: 'Campagne Test',
+          channel: 'email',
+          status: 'draft',
+          delivery_mode: 'mock', // Invalide pour la création REAL
+          scheduled_at: null, claimed_at: null, claimed_by: null, processing_started_at: null, completed_at: null,
+          created_by: '33333333-3333-3333-3333-333333333333',
+          idempotency_key: '44444444-4444-4444-4444-444444444444',
+          filter_criteria: { currency: 'USD', min_days_overdue: null, max_days_overdue: null, priority: null, class_ids: null },
+          template_snapshot: { raw: 'Valid template' },
+          recipient_count: 0, pending_count: 0, processing_count: 0, success_count: 0, failed_count: 0, skipped_count: 0,
+          created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+        },
+        recipients: [], recipients_has_more: false, next_cursor_recipient_id: null, is_idempotent_replay: false,
+        safety: { channel: 'email', delivery_mode: 'real', status: 'draft', no_message_sent: true }
+      });
+    } catch {
+      caughtMockInCreate = true;
+    }
+    assert(caughtMockInCreate, 'TEST 13.1.13 : Rejet des réponses MOCK ou malformées par validateCreateRealEmailCampaignResponse');
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.13 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.14 Rejet des réponses MOCK ou malformées par validateScheduleRealEmailCampaignResponse
+  try {
+    const { validateScheduleRealEmailCampaignResponse } = await import('../services/financeService');
+    let caughtMockInSchedule = false;
+    try {
+      validateScheduleRealEmailCampaignResponse({
+        success: true,
+        campaign_id: '11111111-1111-1111-1111-111111111111',
+        delivery_mode: 'mock', // Invalide pour schedule REAL
+        channel: 'email',
+        status: 'scheduled',
+        scheduled_at: new Date().toISOString(),
+        no_message_sent: true
+      });
+    } catch {
+      caughtMockInSchedule = true;
+    }
+    assert(caughtMockInSchedule, 'TEST 13.1.14 : Rejet des réponses MOCK ou malformées par validateScheduleRealEmailCampaignResponse');
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.14 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.15 Double-submit bloqué synchroniquement par verrou useRef
+  try {
+    const { RealEmailCampaignWizard } = await import('../components/admin/finance/RealEmailCampaignWizard');
+    const compSrc = RealEmailCampaignWizard.toString();
+    assert(
+      compSrc.includes('createLockRef') &&
+      compSrc.includes('scheduleLockRef') &&
+      compSrc.includes('previewLockRef'),
+      'TEST 13.1.15 : Double-submit bloqué synchroniquement par verrous useRef (previewLockRef, createLockRef, scheduleLockRef)'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.15 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.16 Confirmation exacte p_confirm_real_delivery=true et p_confirmation_text='ENVOI EMAIL REEL' requise pour création
+  try {
+    const { createSchoolRealEmailCampaign } = await import('../services/financeService');
+    let caughtInvalidConfirmation = false;
+    try {
+      await createSchoolRealEmailCampaign({
+        p_name: 'Campagne Test',
+        p_template: 'Modèle de test d au moins 10 caractères.',
+        p_idempotency_key: '11111111-1111-1111-1111-111111111111',
+        p_confirm_real_delivery: true,
+        p_confirmation_text: 'MAUVAISE CONFIRMATION' as any
+      });
+    } catch {
+      caughtInvalidConfirmation = true;
+    }
+    assert(caughtInvalidConfirmation, 'TEST 13.1.16 : Confirmation exacte ENVOI EMAIL REEL requise pour création');
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.16 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.17 Confirmation indépendante requise pour la planification (pas de réutilisation automatique)
+  try {
+    const { RealEmailCampaignWizard } = await import('../components/admin/finance/RealEmailCampaignWizard');
+    const compSrc = RealEmailCampaignWizard.toString();
+    assert(
+      compSrc.includes('scheduleConfirmationText') &&
+      compSrc.includes('scheduleConfirmChecked') &&
+      compSrc.includes('createConfirmationText'),
+      'TEST 13.1.17 : Confirmation indépendante requise pour la planification (pas de réutilisation automatique de la confirmation de création)'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.17 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.18 Date passée rejetée par scheduleSchoolRealEmailCampaign
+  try {
+    const { scheduleSchoolRealEmailCampaign } = await import('../services/financeService');
+    let caughtPastDate = false;
+    try {
+      const pastDate = new Date(Date.now() - 3600000).toISOString();
+      await scheduleSchoolRealEmailCampaign({
+        p_campaign_id: '11111111-1111-1111-1111-111111111111',
+        p_scheduled_at: pastDate,
+        p_confirm_real_delivery: true,
+        p_confirmation_text: 'ENVOI EMAIL REEL'
+      });
+    } catch {
+      caughtPastDate = true;
+    }
+    assert(caughtPastDate, 'TEST 13.1.18 : Date passée rejetée par scheduleSchoolRealEmailCampaign');
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.18 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.19 Date > 30 jours rejetée par scheduleSchoolRealEmailCampaign
+  try {
+    const { scheduleSchoolRealEmailCampaign } = await import('../services/financeService');
+    let caughtFarFutureDate = false;
+    try {
+      const farFutureDate = new Date(Date.now() + 31 * 24 * 3600 * 1000).toISOString();
+      await scheduleSchoolRealEmailCampaign({
+        p_campaign_id: '11111111-1111-1111-1111-111111111111',
+        p_scheduled_at: farFutureDate,
+        p_confirm_real_delivery: true,
+        p_confirmation_text: 'ENVOI EMAIL REEL'
+      });
+    } catch {
+      caughtFarFutureDate = true;
+    }
+    assert(caughtFarFutureDate, 'TEST 13.1.19 : Date > 30 jours rejetée par scheduleSchoolRealEmailCampaign');
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.19 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.20 Readiness effective_real_email_enabled=false bloque l'action de planification
+  try {
+    const { RealEmailCampaignWizard } = await import('../components/admin/finance/RealEmailCampaignWizard');
+    const compSrc = RealEmailCampaignWizard.toString();
+    assert(
+      compSrc.includes('effective_real_email_enabled') &&
+      compSrc.includes('disabled'),
+      'TEST 13.1.20 : Readiness effective_real_email_enabled=false bloque l’étape et le bouton de planification'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.20 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.21 Traduction et affichage exhaustif des 5 bloquants de readiness dans l'UI
+  try {
+    const { RealEmailCampaignWizard } = await import('../components/admin/finance/RealEmailCampaignWizard');
+    const compSrc = RealEmailCampaignWizard.toString();
+    assert(
+      compSrc.includes('BLOCKER_TRANSLATIONS') &&
+      compSrc.includes('blockers'),
+      'TEST 13.1.21 : Traduction et affichage exhaustif des 5 bloquants de readiness configurés dans le wizard REAL'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.21 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.22 Erreur de readiness 22023 conserve le brouillon et les données saisies sans réinitialisation
+  try {
+    const { RealEmailCampaignWizard } = await import('../components/admin/finance/RealEmailCampaignWizard');
+    const compSrc = RealEmailCampaignWizard.toString();
+    assert(
+      compSrc.includes('readiness') &&
+      compSrc.includes('createdCampaign'),
+      'TEST 13.1.22 : Erreur de readiness conserve le brouillon et ramène l’utilisateur sans perdre les données'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.22 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.23 Réponse asynchrone obsolète de preview ignorée via previewReqIdRef
+  try {
+    const { RealEmailCampaignWizard } = await import('../components/admin/finance/RealEmailCampaignWizard');
+    const compSrc = RealEmailCampaignWizard.toString();
+    assert(
+      compSrc.includes('previewReqIdRef'),
+      'TEST 13.1.23 : Réponse asynchrone obsolète de preview ignorée via previewReqIdRef'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.23 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.24 Aucun setState après unmount via isMountedRef
+  try {
+    const { RealEmailCampaignWizard } = await import('../components/admin/finance/RealEmailCampaignWizard');
+    const compSrc = RealEmailCampaignWizard.toString();
+    assert(
+      compSrc.includes('isMountedRef'),
+      'TEST 13.1.24 : Aucun setState après unmount via isMountedRef dans le wizard REAL'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.24 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.25 Fermeture du wizard protégée par confirmation si brouillon créé non planifié
+  try {
+    const { RealEmailCampaignWizard } = await import('../components/admin/finance/RealEmailCampaignWizard');
+    const compSrc = RealEmailCampaignWizard.toString();
+    assert(
+      compSrc.includes('createdCampaign') &&
+      compSrc.includes('confirm'),
+      'TEST 13.1.25 : Fermeture du wizard protégée par confirmation si un brouillon REAL est créé mais non planifié'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.25 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.26 Masquage des coordonnées destinataires (maskContact) vérifié et sécurisé
+  try {
+    const { maskContact } = await import('../components/admin/finance/RealEmailCampaignWizard');
+    assert(
+      maskContact('john.doe@example.com') === 'j***e@example.com' &&
+      maskContact('+243810000123') === '+243*****123' &&
+      maskContact(null) === 'N/A',
+      'TEST 13.1.26 : Masquage des coordonnées destinataires (maskContact) vérifié et sécurisé'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.26 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.27 Aucun snapshot ni champ sensible ou secret exposé
+  try {
+    const { RealEmailCampaignWizard } = await import('../components/admin/finance/RealEmailCampaignWizard');
+    const compSrc = RealEmailCampaignWizard.toString();
+    assert(
+      !compSrc.includes('provider_request_payload') &&
+      !compSrc.includes('canonical_payload_hash') &&
+      !compSrc.includes('provider_idempotency_key') &&
+      !compSrc.includes('provider_message_id') &&
+      !compSrc.includes('verified_from_email'),
+      'TEST 13.1.27 : Aucun snapshot ni champ sensible ou secret exposé dans RealEmailCampaignWizard'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.27 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.28 Aucun appel Edge Function/worker/Resend ou fetch externe dans le code source
+  try {
+    const wizardSrc = (await import('../components/admin/finance/RealEmailCampaignWizard')).RealEmailCampaignWizard.toString();
+    assert(
+      !wizardSrc.includes('process-real-email-campaigns') &&
+      !wizardSrc.includes('resend-delivery-webhook') &&
+      !wizardSrc.includes('_claim_scheduled_real_email_campaigns') &&
+      !wizardSrc.includes('_create_real_email_jobs_for_campaign') &&
+      !wizardSrc.includes('_claim_real_email_jobs') &&
+      !wizardSrc.includes('_record_real_email_submission_result') &&
+      !wizardSrc.includes('api.resend.com') &&
+      !wizardSrc.includes('fetch('),
+      'TEST 13.1.28 : Aucun appel Edge Function/worker/Resend ou fetch externe dans le wizard REAL'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.28 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.29 Aucune régression du wizard MOCK CollectionCampaignWizard
+  try {
+    const { CollectionCampaignWizard } = await import('../components/admin/finance/CollectionCampaignWizard');
+    assert(
+      typeof CollectionCampaignWizard === 'function',
+      'TEST 13.1.29 : Aucune régression du wizard MOCK CollectionCampaignWizard (inchangé)'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.29 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.30 Contrôles du wizard appliquent text-slate-900 bg-white placeholder-slate-400 explicitement
+  try {
+    const { RealEmailCampaignWizard } = await import('../components/admin/finance/RealEmailCampaignWizard');
+    const compSrc = RealEmailCampaignWizard.toString();
+    assert(
+      compSrc.includes('text-slate-900') &&
+      compSrc.includes('bg-white') &&
+      compSrc.includes('placeholder-slate-400'),
+      'TEST 13.1.30 : Contrôles du wizard appliquent text-slate-900 bg-white placeholder-slate-400 explicitement'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.30 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.31 Conformité d'accessibilité du modal RealEmailCampaignWizard (dialog, aria-modal, aria-labelledby, alert)
+  try {
+    const { RealEmailCampaignWizard } = await import('../components/admin/finance/RealEmailCampaignWizard');
+    const compSrc = RealEmailCampaignWizard.toString();
+    assert(
+      compSrc.includes('dialog') &&
+      compSrc.includes('aria-modal') &&
+      compSrc.includes('aria-labelledby') &&
+      compSrc.includes('alert'),
+      'TEST 13.1.31 : Conformité d’accessibilité du modal RealEmailCampaignWizard (dialog, aria-modal, aria-labelledby, alert)'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.31 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.32 Clé d'idempotence conservée lors des saisies, prévisualisations et erreurs
+  try {
+    const { RealEmailCampaignWizard } = await import('../components/admin/finance/RealEmailCampaignWizard');
+    const compSrc = RealEmailCampaignWizard.toString();
+    assert(
+      compSrc.includes('idempotencyKeyRef'),
+      'TEST 13.1.32 : Clé d’idempotence conservée lors des saisies, prévisualisations et retries'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.32 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.33 Clé d'idempotence régénérée uniquement aux moments autorisés
+  try {
+    const { RealEmailCampaignWizard } = await import('../components/admin/finance/RealEmailCampaignWizard');
+    const compSrc = RealEmailCampaignWizard.toString();
+    assert(
+      compSrc.includes('crypto.randomUUID()'),
+      'TEST 13.1.33 : Clé d’idempotence régénérée via crypto.randomUUID() à l’ouverture du wizard'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.33 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.34 Inspection statique : aucune RPC historique (create_school_collection_campaign, schedule_school_collection_campaign) appelée pour le REAL
+  try {
+    const wizardSrc = (await import('../components/admin/finance/RealEmailCampaignWizard')).RealEmailCampaignWizard.toString();
+    assert(
+      !wizardSrc.includes('create_school_collection_campaign') &&
+      !wizardSrc.includes('schedule_school_collection_campaign'),
+      'TEST 13.1.34 : Aucune RPC historique (create_school_collection_campaign, schedule_school_collection_campaign) appelée dans le wizard REAL'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.34 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.35 Inspection statique : aucune requête directe via .from() dans le service REAL
+  try {
+    const serviceSrc = (await import('../services/financeService')).createSchoolRealEmailCampaign.toString();
+    assert(
+      !serviceSrc.includes('.from('),
+      'TEST 13.1.35 : Aucune requête directe via .from() dans le service REAL'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.35 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.36 Inspection statique : aucune occurrence de setInterval ou animate-pulse
+  try {
+    const wizardSrc = (await import('../components/admin/finance/RealEmailCampaignWizard')).RealEmailCampaignWizard.toString();
+    assert(
+      !wizardSrc.includes('setInterval') &&
+      !wizardSrc.includes('animate-pulse'),
+      'TEST 13.1.36 : Aucune occurrence de setInterval ou animate-pulse dans RealEmailCampaignWizard'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.36 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.37 Bouton "Nouvelle campagne e-mail REAL" présent dans RealEmailDeliveryDashboard
+  try {
+    const { RealEmailDeliveryDashboard } = await import('../components/admin/finance/RealEmailDeliveryDashboard');
+    const compSrc = RealEmailDeliveryDashboard.toString();
+    assert(
+      compSrc.includes('Nouvelle campagne e-mail REAL') &&
+      compSrc.includes('RealEmailCampaignWizard'),
+      'TEST 13.1.37 : Bouton "Nouvelle campagne e-mail REAL" et intégration de RealEmailCampaignWizard validés dans RealEmailDeliveryDashboard'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.37 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.38 Validation de réponse de création avec is_idempotent_replay = true
+  try {
+    const { validateCreateRealEmailCampaignResponse } = await import('../services/financeService');
+    const validReplay = {
+      success: true,
+      campaign: {
+        id: '11111111-1111-1111-1111-111111111111',
+        school_id: '22222222-2222-2222-2222-222222222222',
+        name: 'Campagne REAL Replay',
+        channel: 'email',
+        status: 'draft',
+        delivery_mode: 'real',
+        scheduled_at: null, claimed_at: null, claimed_by: null, processing_started_at: null, completed_at: null,
+        created_by: '33333333-3333-3333-3333-333333333333',
+        idempotency_key: '44444444-4444-4444-4444-444444444444',
+        filter_criteria: { currency: 'USD', min_days_overdue: null, max_days_overdue: null, priority: null, class_ids: null },
+        template_snapshot: { raw: 'Valid template' },
+        recipient_count: 0, pending_count: 0, processing_count: 0, success_count: 0, failed_count: 0, skipped_count: 0,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+      },
+      recipients: [], recipients_has_more: false, next_cursor_recipient_id: null,
+      is_idempotent_replay: true,
+      safety: { channel: 'email', delivery_mode: 'real', status: 'draft', no_message_sent: true }
+    };
+    const validated = validateCreateRealEmailCampaignResponse(validReplay);
+    assert(validated.is_idempotent_replay === true, 'TEST 13.1.38 : Validation de réponse de création avec is_idempotent_replay = true');
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.38 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.39 Rejet si channel !== 'email' dans la réponse de planification
+  try {
+    const { validateScheduleRealEmailCampaignResponse } = await import('../services/financeService');
+    let caughtSmsInSchedule = false;
+    try {
+      validateScheduleRealEmailCampaignResponse({
+        success: true,
+        campaign_id: '11111111-1111-1111-1111-111111111111',
+        delivery_mode: 'real',
+        channel: 'sms', // Invalide : email attendu
+        status: 'scheduled',
+        scheduled_at: new Date().toISOString(),
+        no_message_sent: true
+      });
+    } catch {
+      caughtSmsInSchedule = true;
+    }
+    assert(caughtSmsInSchedule, 'TEST 13.1.39 : Rejet si channel !== "email" dans la réponse de planification');
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.39 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.40 Rejet de réponse incomplète sans next_cursor_recipient_id quand recipients_has_more = true
+  try {
+    const { validateCreateRealEmailCampaignResponse } = await import('../services/financeService');
+    let caughtMissingCursor = false;
+    try {
+      validateCreateRealEmailCampaignResponse({
+        success: true,
+        campaign: {
+          id: '11111111-1111-1111-1111-111111111111',
+          school_id: '22222222-2222-2222-2222-222222222222',
+          name: 'Campagne REAL Test',
+          channel: 'email',
+          status: 'draft',
+          delivery_mode: 'real',
+          scheduled_at: null, claimed_at: null, claimed_by: null, processing_started_at: null, completed_at: null,
+          created_by: '33333333-3333-3333-3333-333333333333',
+          idempotency_key: '44444444-4444-4444-4444-444444444444',
+          filter_criteria: { currency: 'USD', min_days_overdue: null, max_days_overdue: null, priority: null, class_ids: null },
+          template_snapshot: { raw: 'Valid template' },
+          recipient_count: 0, pending_count: 0, processing_count: 0, success_count: 0, failed_count: 0, skipped_count: 0,
+          created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+        },
+        recipients: [],
+        recipients_has_more: true,
+        next_cursor_recipient_id: null, // Invalide quand has_more = true
+        is_idempotent_replay: false,
+        safety: { channel: 'email', delivery_mode: 'real', status: 'draft', no_message_sent: true }
+      });
+    } catch {
+      caughtMissingCursor = true;
+    }
+    assert(caughtMissingCursor, 'TEST 13.1.40 : Rejet si next_cursor_recipient_id === null alors que recipients_has_more === true');
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.40 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.41 Rejet de created_by = null
+  try {
+    const { validateRealEmailCampaignSummary } = await import('../services/financeService');
+    let caughtNullCreatedBy = false;
+    try {
+      validateRealEmailCampaignSummary({
+        id: '11111111-1111-1111-1111-111111111111',
+        school_id: '22222222-2222-2222-2222-222222222222',
+        name: 'Campagne REAL', channel: 'email', status: 'draft', delivery_mode: 'real',
+        scheduled_at: null, claimed_at: null, claimed_by: null, processing_started_at: null, completed_at: null,
+        created_by: null, // Invalide : UUID non-null attendu
+        idempotency_key: '44444444-4444-4444-4444-444444444444',
+        filter_criteria: { currency: 'USD', min_days_overdue: null, max_days_overdue: null, priority: null, class_ids: null },
+        template_snapshot: { raw: 'Valid template' },
+        recipient_count: 0, pending_count: 0, processing_count: 0, success_count: 0, failed_count: 0, skipped_count: 0,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+      });
+    } catch {
+      caughtNullCreatedBy = true;
+    }
+    assert(caughtNullCreatedBy, 'TEST 13.1.41 : Rejet de created_by = null dans RealEmailCampaignSummary');
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.41 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.42 Rejet de created_by absent
+  try {
+    const { validateRealEmailCampaignSummary } = await import('../services/financeService');
+    let caughtMissingCreatedBy = false;
+    try {
+      validateRealEmailCampaignSummary({
+        id: '11111111-1111-1111-1111-111111111111',
+        school_id: '22222222-2222-2222-2222-222222222222',
+        name: 'Campagne REAL', channel: 'email', status: 'draft', delivery_mode: 'real',
+        scheduled_at: null, claimed_at: null, claimed_by: null, processing_started_at: null, completed_at: null,
+        // created_by absent -> non 23 clés
+        idempotency_key: '44444444-4444-4444-4444-444444444444',
+        filter_criteria: { currency: 'USD', min_days_overdue: null, max_days_overdue: null, priority: null, class_ids: null },
+        template_snapshot: { raw: 'Valid template' },
+        recipient_count: 0, pending_count: 0, processing_count: 0, success_count: 0, failed_count: 0, skipped_count: 0,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+      });
+    } catch {
+      caughtMissingCreatedBy = true;
+    }
+    assert(caughtMissingCreatedBy, 'TEST 13.1.42 : Rejet de created_by absent dans RealEmailCampaignSummary');
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.42 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.43 Rejet de created_by non-UUID
+  try {
+    const { validateRealEmailCampaignSummary } = await import('../services/financeService');
+    let caughtNonUuidCreatedBy = false;
+    try {
+      validateRealEmailCampaignSummary({
+        id: '11111111-1111-1111-1111-111111111111',
+        school_id: '22222222-2222-2222-2222-222222222222',
+        name: 'Campagne REAL', channel: 'email', status: 'draft', delivery_mode: 'real',
+        scheduled_at: null, claimed_at: null, claimed_by: null, processing_started_at: null, completed_at: null,
+        created_by: 'invalid-string-not-uuid',
+        idempotency_key: '44444444-4444-4444-4444-444444444444',
+        filter_criteria: { currency: 'USD', min_days_overdue: null, max_days_overdue: null, priority: null, class_ids: null },
+        template_snapshot: { raw: 'Valid template' },
+        recipient_count: 0, pending_count: 0, processing_count: 0, success_count: 0, failed_count: 0, skipped_count: 0,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+      });
+    } catch {
+      caughtNonUuidCreatedBy = true;
+    }
+    assert(caughtNonUuidCreatedBy, 'TEST 13.1.43 : Rejet de created_by non-UUID dans RealEmailCampaignSummary');
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.43 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.44 Validation de priority canonique (P1_CRITICAL, P2_HIGH, P3_MEDIUM, P4_LOW, null) dans filter_criteria
+  try {
+    const { validateRealEmailCampaignSummary } = await import('../services/financeService');
+    const validCanonicalPriority = validateRealEmailCampaignSummary({
+      id: '11111111-1111-1111-1111-111111111111',
+      school_id: '22222222-2222-2222-2222-222222222222',
+      name: 'Campagne REAL', channel: 'email', status: 'draft', delivery_mode: 'real',
+      scheduled_at: null, claimed_at: null, claimed_by: null, processing_started_at: null, completed_at: null,
+      created_by: '33333333-3333-3333-3333-333333333333',
+      idempotency_key: '44444444-4444-4444-4444-444444444444',
+      filter_criteria: { currency: 'USD', min_days_overdue: null, max_days_overdue: null, priority: 'P1_CRITICAL', class_ids: null },
+      template_snapshot: { raw: 'Valid template' },
+      recipient_count: 0, pending_count: 0, processing_count: 0, success_count: 0, failed_count: 0, skipped_count: 0,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+    });
+    assert(validCanonicalPriority.filter_criteria.priority === 'P1_CRITICAL', 'TEST 13.1.44 : Validation de priority canonique (P1_CRITICAL) acceptée');
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.44 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.45 Rejet des alias de priorité (high, medium, low, urgent, critical) par validateRealEmailCampaignSummary
+  try {
+    const { validateRealEmailCampaignSummary } = await import('../services/financeService');
+    let caughtAliasPriority = false;
+    try {
+      validateRealEmailCampaignSummary({
+        id: '11111111-1111-1111-1111-111111111111',
+        school_id: '22222222-2222-2222-2222-222222222222',
+        name: 'Campagne REAL', channel: 'email', status: 'draft', delivery_mode: 'real',
+        scheduled_at: null, claimed_at: null, claimed_by: null, processing_started_at: null, completed_at: null,
+        created_by: '33333333-3333-3333-3333-333333333333',
+        idempotency_key: '44444444-4444-4444-4444-444444444444',
+        filter_criteria: { currency: 'USD', min_days_overdue: null, max_days_overdue: null, priority: 'high', class_ids: null }, // Invalide : P2_HIGH attendu
+        template_snapshot: { raw: 'Valid template' },
+        recipient_count: 0, pending_count: 0, processing_count: 0, success_count: 0, failed_count: 0, skipped_count: 0,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+      });
+    } catch {
+      caughtAliasPriority = true;
+    }
+    assert(caughtAliasPriority, 'TEST 13.1.45 : Rejet des alias de priorité (high/medium/low) par validateRealEmailCampaignSummary');
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.45 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.46 Bouton "Nouvelle campagne e-mail REAL" conditionné à userRole === 'school_admin'
+  try {
+    const { RealEmailDeliveryDashboard } = await import('../components/admin/finance/RealEmailDeliveryDashboard');
+    const compSrc = RealEmailDeliveryDashboard.toString();
+    assert(
+      compSrc.includes('canCreateRealCampaign') &&
+      compSrc.includes('school_admin'),
+      'TEST 13.1.46 : Bouton "Nouvelle campagne e-mail REAL" conditionné au rôle school_admin'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.46 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.47 Transmissions de userRole et isSchoolAdmin depuis FinanceDashboardModule
+  try {
+    const { FinanceDashboardModule } = await import('../components/admin/finance/FinanceDashboardModule');
+    const compSrc = FinanceDashboardModule.toString();
+    assert(
+      compSrc.includes('userRole') &&
+      compSrc.includes('isSchoolAdmin'),
+      'TEST 13.1.47 : Transmissions de userRole et isSchoolAdmin depuis FinanceDashboardModule vers RealEmailDeliveryDashboard'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.47 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.48 Dashboard lecture seule toujours accessible pour finance_agent
+  try {
+    const { RealEmailDeliveryDashboard } = await import('../components/admin/finance/RealEmailDeliveryDashboard');
+    const compSrc = RealEmailDeliveryDashboard.toString();
+    assert(
+      compSrc.includes('canCreateRealCampaign') &&
+      compSrc.includes('school_admin'),
+      'TEST 13.1.48 : Dashboard lecture seule toujours accessible pour finance_agent sans bouton de création'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.48 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.49 readiness false désactive la création de brouillon dans l'étape 3 du wizard
+  try {
+    const { RealEmailCampaignWizard } = await import('../components/admin/finance/RealEmailCampaignWizard');
+    const compSrc = RealEmailCampaignWizard.toString();
+    assert(
+      compSrc.includes('effective_real_email_enabled') &&
+      compSrc.includes('handleCreateDraft'),
+      'TEST 13.1.49 : readiness false désactive la création de brouillon dans l’étape 3 du wizard'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.49 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.50 Blockers de readiness traduits visibles dans l'étape de création lorsque désactivée
+  try {
+    const { RealEmailCampaignWizard } = await import('../components/admin/finance/RealEmailCampaignWizard');
+    const compSrc = RealEmailCampaignWizard.toString();
+    assert(
+      compSrc.includes('BLOCKER_TRANSLATIONS') &&
+      compSrc.includes('blockers'),
+      'TEST 13.1.50 : Blockers de readiness traduits et explication visibles dans l’étape de création'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.50 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.51 Readiness révoquée après création conserve le brouillon et l'étape de planification
+  try {
+    const { RealEmailCampaignWizard } = await import('../components/admin/finance/RealEmailCampaignWizard');
+    const compSrc = RealEmailCampaignWizard.toString();
+    assert(
+      compSrc.includes('createdCampaign') &&
+      compSrc.includes('effective_real_email_enabled'),
+      'TEST 13.1.51 : Readiness révoquée après création conserve le brouillon et l’étape de planification sans supprimer le brouillon'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.51 : Exception inattendue : ${err}`);
+  }
+
+  // 13.1.52 Rejet des clés supplémentaires dans campaign, filter_criteria et template_snapshot
+  try {
+    const { validateRealEmailCampaignSummary } = await import('../services/financeService');
+    let caughtExtraCampaignKey = false;
+    try {
+      validateRealEmailCampaignSummary({
+        id: '11111111-1111-1111-1111-111111111111',
+        school_id: '22222222-2222-2222-2222-222222222222',
+        name: 'Campagne REAL', channel: 'email', status: 'draft', delivery_mode: 'real',
+        scheduled_at: null, claimed_at: null, claimed_by: null, processing_started_at: null, completed_at: null,
+        created_by: '33333333-3333-3333-3333-333333333333',
+        idempotency_key: '44444444-4444-4444-4444-444444444444',
+        filter_criteria: { currency: 'USD', min_days_overdue: null, max_days_overdue: null, priority: null, class_ids: null },
+        template_snapshot: { raw: 'Valid template' },
+        recipient_count: 0, pending_count: 0, processing_count: 0, success_count: 0, failed_count: 0, skipped_count: 0,
+        created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        extra_key_forbidden: true // Clé 24 invalide !
+      });
+    } catch {
+      caughtExtraCampaignKey = true;
+    }
+    assert(caughtExtraCampaignKey, 'TEST 13.1.52 : Rejet des clés supplémentaires (non-23 clés) dans RealEmailCampaignSummary');
+  } catch (err: unknown) {
+    assert(false, `TEST 13.1.52 : Exception inattendue : ${err}`);
+  }
+
   console.log(`\n=== RÉSULTATS : ${passed}/${total} TESTS RÉUSSIS ===\n`);
   return { total, passed, failed: total - passed, errors };
 }

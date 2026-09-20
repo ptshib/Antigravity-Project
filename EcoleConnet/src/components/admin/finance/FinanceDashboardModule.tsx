@@ -34,11 +34,13 @@ const RealEmailDeliveryDashboard = React.lazy(() =>
 
 interface FinanceDashboardModuleProps {
   schoolId: string;
+  userRole?: string;
+  isSchoolAdmin?: boolean;
 }
 
 type FinanceSubTab = 'vue_densemble' | 'creances' | 'factures' | 'catalogue' | 'campagnes' | 'email_delivery';
 
-export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ schoolId }) => {
+export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ schoolId, userRole = 'school_admin', isSchoolAdmin }) => {
   const [activeSubTab, setActiveSubTab] = useState<FinanceSubTab>('vue_densemble');
 
   // USD Financial KPIs
@@ -492,7 +494,7 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
             Chargement de la livraison des e-mails réels...
           </div>
         }>
-          <RealEmailDeliveryDashboard />
+          <RealEmailDeliveryDashboard userRole={userRole} isSchoolAdmin={isSchoolAdmin} />
         </React.Suspense>
       )}
 

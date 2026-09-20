@@ -606,9 +606,11 @@ export interface CampaignPreviewRecipient {
   skip_reason: string | null;
 }
 
+export type CampaignPriority = 'P1_CRITICAL' | 'P2_HIGH' | 'P3_MEDIUM' | 'P4_LOW';
+
 export interface CampaignFilterCriteria {
   currency?: Currency | null;
-  priority?: string | null;
+  priority?: CampaignPriority | null;
   min_days_overdue?: number | null;
   max_days_overdue?: number | null;
   class_ids?: string[] | null;
@@ -622,7 +624,7 @@ export interface PreviewCampaignInput {
   p_channel: CampaignChannel;
   p_template: string;
   p_currency?: Currency | null;
-  p_priority?: string | null;
+  p_priority?: CampaignPriority | string | null;
   p_min_days_overdue?: number | null;
   p_max_days_overdue?: number | null;
   p_class_ids?: string[] | null;
@@ -645,7 +647,7 @@ export interface CreateCampaignInput {
   p_template: string;
   p_idempotency_key: string;
   p_currency?: Currency | null;
-  p_priority?: string | null;
+  p_priority?: CampaignPriority | string | null;
   p_min_days_overdue?: number | null;
   p_max_days_overdue?: number | null;
   p_class_ids?: string[] | null;
@@ -776,7 +778,7 @@ export interface RealEmailQuotaSummary {
   remaining_count: number;
 }
 
-export interface RealEmailCampaignSummary {
+export interface RealEmailCampaignCountersSummary {
   real_total_count: number;
   draft_count: number;
   scheduled_count: number;
@@ -786,6 +788,79 @@ export interface RealEmailCampaignSummary {
   failed_count: number;
   cancelled_count: number;
 }
+
+export interface RealEmailCampaignSummary {
+  id: string;
+  school_id: string;
+  name: string;
+  channel: 'email';
+  status: CampaignStatus;
+  delivery_mode: 'real';
+  scheduled_at: string | null;
+  claimed_at: string | null;
+  claimed_by: string | null;
+  processing_started_at: string | null;
+  completed_at: string | null;
+  created_by: string;
+  idempotency_key: string;
+  filter_criteria: CampaignFilterCriteria;
+  template_snapshot: CampaignTemplateSnapshot;
+  recipient_count: number;
+  pending_count: number;
+  processing_count: number;
+  success_count: number;
+  failed_count: number;
+  skipped_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateRealEmailCampaignRequest {
+  p_name: string;
+  p_template: string;
+  p_idempotency_key: string;
+  p_currency?: Currency | null;
+  p_priority?: CampaignPriority | null;
+  p_min_days_overdue?: number | null;
+  p_max_days_overdue?: number | null;
+  p_class_ids?: string[] | null;
+  p_confirm_real_delivery: true;
+  p_confirmation_text: 'ENVOI EMAIL REEL';
+}
+
+export interface CreateRealEmailCampaignResponse {
+  success: true;
+  campaign: RealEmailCampaignSummary;
+  recipients: CollectionCampaignRecipient[];
+  recipients_has_more: boolean;
+  next_cursor_recipient_id: string | null;
+  is_idempotent_replay: boolean;
+  safety: {
+    channel: 'email';
+    delivery_mode: 'real';
+    status: 'draft';
+    no_message_sent: true;
+  };
+}
+
+export interface ScheduleRealEmailCampaignRequest {
+  p_campaign_id: string;
+  p_scheduled_at: string;
+  p_confirm_real_delivery: true;
+  p_confirmation_text: 'ENVOI EMAIL REEL';
+}
+
+export interface ScheduleRealEmailCampaignResponse {
+  success: true;
+  campaign_id: string;
+  delivery_mode: 'real';
+  channel: 'email';
+  status: 'scheduled';
+  scheduled_at: string;
+  no_message_sent: true;
+}
+
+export type RealEmailCampaignWizardStep = 'parameters' | 'preview' | 'confirmation' | 'scheduling';
 
 export interface RealEmailJobSummary {
   total_count: number;
@@ -805,7 +880,7 @@ export interface RealEmailDeliveryDashboardResponse {
   timezone: string;
   timezone_fallback_applied: boolean;
   quota: RealEmailQuotaSummary;
-  campaigns: RealEmailCampaignSummary;
+  campaigns: RealEmailCampaignCountersSummary;
   jobs: RealEmailJobSummary;
 }
 
