@@ -3897,6 +3897,780 @@ export async function runFinanceFrontendTests(): Promise<{ total: number; passed
     assert(false, `TEST 11.1.55 : Exception inattendue : ${err}`);
   }
 
+  // =========================================================================
+  // TEST 12 : FINANCE 4E-3B (SUPERVISION ET OBSERVABILITÉ DES E-MAILS RÉELS)
+  // =========================================================================
+  console.log('\n--- TEST 12 : FINANCE 4E-3B (SUPERVISION DES E-MAILS RÉELS) ---');
+
+  const validReadinessFixture = {
+    school_id: '11111111-1111-1111-1111-111111111111',
+    provider: 'resend' as const,
+    global_real_email_enabled: true,
+    sender_identity_verified: true,
+    sender_identity_configured: true,
+    school_email_enabled: true,
+    effective_real_email_enabled: true,
+    daily_email_quota: 100,
+    from_name: 'Comptabilité École 1',
+    reply_to_email: 'facturation@school1.cd',
+    blockers: []
+  };
+
+  const validRealEmailDashboardFixture = {
+    business_date: '2026-09-20',
+    timezone: 'Africa/Kinshasa',
+    timezone_fallback_applied: false,
+    quota: {
+      daily_limit: 100,
+      reserved_count: 10,
+      submitted_count: 20,
+      remaining_count: 70
+    },
+    campaigns: {
+      real_total_count: 10,
+      draft_count: 1,
+      scheduled_count: 2,
+      processing_count: 3,
+      completed_count: 2,
+      partially_failed_count: 1,
+      failed_count: 0,
+      cancelled_count: 1
+    },
+    jobs: {
+      total_count: 15,
+      pending_count: 2,
+      claimed_count: 1,
+      submitted_count: 5,
+      network_unknown_count: 1,
+      retry_wait_count: 1,
+      terminal_failed_count: 1,
+      delivery_confirmed_count: 3,
+      bounced_count: 1,
+      complained_count: 0
+    }
+  };
+
+  const validJobItemFixture = {
+    job_id: 'f1111111-1111-1111-1111-111111111111',
+    campaign_id: 'd1111111-1111-1111-1111-111111111111',
+    campaign_name: 'Campagne Real T1',
+    invoice_id: 'c1111111-1111-1111-1111-111111111111',
+    invoice_number: 'FAC-2026-001',
+    student_id: 'b1111111-1111-1111-1111-111111111111',
+    student_name: 'Kabila Joseph',
+    status: 'submitted' as const,
+    attempt_count: 1,
+    first_provider_attempt_at: '2026-09-20T08:00:00Z',
+    last_provider_attempt_at: '2026-09-20T08:00:00Z',
+    provider_message_recorded: true,
+    next_attempt_at: null,
+    last_error_code: null,
+    created_at: '2026-09-20T07:50:00Z',
+    updated_at: '2026-09-20T08:00:00Z'
+  };
+
+  // 12.1.1 Signatures des RPCs 4E-3B exportées par financeService
+  try {
+    const {
+      getSchoolRealEmailReadiness,
+      getSchoolRealEmailDeliveryDashboard,
+      getSchoolRealEmailDeliveryJobs
+    } = await import('../services/financeService');
+    assert(
+      typeof getSchoolRealEmailReadiness === 'function' &&
+      typeof getSchoolRealEmailDeliveryDashboard === 'function' &&
+      typeof getSchoolRealEmailDeliveryJobs === 'function',
+      'TEST 12.1.1 : Signatures exactes des trois RPCs 4E-3B exportées'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 12.1.1 : Exception inattendue : ${err}`);
+  }
+
+  // 12.1.2 Valideur readiness accepte fixture correcte sans bloquant
+  try {
+    const { validateRealEmailReadinessResponse } = await import('../services/financeService');
+    const res = validateRealEmailReadinessResponse(validReadinessFixture);
+    assert(
+      res.effective_real_email_enabled === true && res.blockers.length === 0,
+      'TEST 12.1.2 : Valideur readiness accepte fixture correcte sans bloquant'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 12.1.2 : Exception inattendue : ${err}`);
+  }
+
+  // 12.1.3 Valideur dashboard exige draft_count obligatoire
+  try {
+    const { validateRealEmailDeliveryDashboardResponse } = await import('../services/financeService');
+    const res = validateRealEmailDeliveryDashboardResponse(validRealEmailDashboardFixture);
+    assert(
+      res.campaigns.draft_count === 1 && res.quota.remaining_count === 70,
+      'TEST 12.1.3 : Valideur dashboard exige draft_count obligatoire dans la synthèse des campagnes'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 12.1.3 : Exception inattendue : ${err}`);
+  }
+
+  // 12.1.4 Valideur jobs accepte les 9 statuts exacts de job
+  try {
+    const { validateRealEmailDeliveryJobsResponse } = await import('../services/financeService');
+    const res = validateRealEmailDeliveryJobsResponse({
+      items: [validJobItemFixture],
+      has_more: false,
+      next_cursor: null
+    });
+    assert(
+      res.items.length === 1 && res.items[0].status === 'submitted',
+      'TEST 12.1.4 : Valideur jobs accepte les 9 statuts exacts de job'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 12.1.4 : Exception inattendue : ${err}`);
+  }
+
+  // 12.1.5 Absence de champs sensibles dans la réponse de job
+  try {
+    const keys = Object.keys(validJobItemFixture);
+    const forbidden = ['parent_email', 'provider_message_id', 'provider_request_payload', 'idempotency_key', 'canonical_payload_hash'];
+    const hasForbidden = forbidden.some(k => keys.includes(k));
+    assert(!hasForbidden, 'TEST 12.1.5 : Absence de champs sensibles dans le contrat job');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.1.5 : Exception inattendue : ${err}`);
+  }
+
+  // 12.2.1 readiness s'exécute sans argument (zéro paramètre)
+  try {
+    const { supabase } = await import('../lib/supabase');
+    const originalRpc = supabase.rpc;
+    let rpcCalled = false;
+    let rpcArgs: any = undefined;
+
+    (supabase as any).rpc = async (fn: string, params: any) => {
+      if (fn === 'get_school_real_email_readiness') {
+        rpcCalled = true;
+        rpcArgs = params;
+        return { data: validReadinessFixture, error: null };
+      }
+      return originalRpc(fn, params);
+    };
+
+    const { getSchoolRealEmailReadiness } = await import('../services/financeService');
+    await getSchoolRealEmailReadiness();
+    (supabase as any).rpc = originalRpc;
+
+    assert(rpcCalled && rpcArgs === undefined, 'TEST 12.2.1 : readiness s exécute avec zéro argument');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.2.1 : Exception inattendue : ${err}`);
+  }
+
+  // 12.2.2 dashboard transmet p_business_date null si omis
+  try {
+    const { supabase } = await import('../lib/supabase');
+    const originalRpc = supabase.rpc;
+    let rpcParams: any = null;
+
+    (supabase as any).rpc = async (fn: string, params: any) => {
+      if (fn === 'get_school_real_email_delivery_dashboard') {
+        rpcParams = params;
+        return { data: validRealEmailDashboardFixture, error: null };
+      }
+      return originalRpc(fn, params);
+    };
+
+    const { getSchoolRealEmailDeliveryDashboard } = await import('../services/financeService');
+    await getSchoolRealEmailDeliveryDashboard();
+    (supabase as any).rpc = originalRpc;
+
+    assert(rpcParams !== null && rpcParams.p_business_date === null, 'TEST 12.2.2 : dashboard transmet p_business_date null par défaut');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.2.2 : Exception inattendue : ${err}`);
+  }
+
+  // 12.2.3 dashboard transmet p_business_date formatée
+  try {
+    const { supabase } = await import('../lib/supabase');
+    const originalRpc = supabase.rpc;
+    let rpcParams: any = null;
+
+    (supabase as any).rpc = async (fn: string, params: any) => {
+      if (fn === 'get_school_real_email_delivery_dashboard') {
+        rpcParams = params;
+        return { data: validRealEmailDashboardFixture, error: null };
+      }
+      return originalRpc(fn, params);
+    };
+
+    const { getSchoolRealEmailDeliveryDashboard } = await import('../services/financeService');
+    await getSchoolRealEmailDeliveryDashboard('2026-09-15');
+    (supabase as any).rpc = originalRpc;
+
+    assert(rpcParams?.p_business_date === '2026-09-15', 'TEST 12.2.3 : dashboard transmet p_business_date exacte au format YYYY-MM-DD');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.2.3 : Exception inattendue : ${err}`);
+  }
+
+  // 12.2.4 jobs transmet un payload de EXACTEMENT 4 clés SQL
+  try {
+    const { supabase } = await import('../lib/supabase');
+    const originalRpc = supabase.rpc;
+    let rpcParams: any = null;
+
+    (supabase as any).rpc = async (fn: string, params: any) => {
+      if (fn === 'get_school_real_email_delivery_jobs') {
+        rpcParams = params;
+        return { data: { items: [], has_more: false, next_cursor: null }, error: null };
+      }
+      return originalRpc(fn, params);
+    };
+
+    const { getSchoolRealEmailDeliveryJobs } = await import('../services/financeService');
+    await getSchoolRealEmailDeliveryJobs();
+    (supabase as any).rpc = originalRpc;
+
+    const paramKeys = Object.keys(rpcParams);
+    const expectedKeys = ['p_status', 'p_limit', 'p_cursor_created_at', 'p_cursor_job_id'];
+    const keysMatch = paramKeys.length === 4 && expectedKeys.every(k => paramKeys.includes(k));
+
+    assert(keysMatch, 'TEST 12.2.4 : jobs transmet exactement 4 clés SQL sans p_school_id ni p_offset');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.2.4 : Exception inattendue : ${err}`);
+  }
+
+  // 12.2.5 premier appel jobs transmet deux curseurs null
+  try {
+    const { supabase } = await import('../lib/supabase');
+    const originalRpc = supabase.rpc;
+    let rpcParams: any = null;
+
+    (supabase as any).rpc = async (fn: string, params: any) => {
+      if (fn === 'get_school_real_email_delivery_jobs') {
+        rpcParams = params;
+        return { data: { items: [], has_more: false, next_cursor: null }, error: null };
+      }
+      return originalRpc(fn, params);
+    };
+
+    const { getSchoolRealEmailDeliveryJobs } = await import('../services/financeService');
+    await getSchoolRealEmailDeliveryJobs({ p_status: 'pending', p_limit: 10 });
+    (supabase as any).rpc = originalRpc;
+
+    assert(
+      rpcParams.p_status === 'pending' &&
+      rpcParams.p_limit === 10 &&
+      rpcParams.p_cursor_created_at === null &&
+      rpcParams.p_cursor_job_id === null,
+      'TEST 12.2.5 : premier appel jobs transmet deux curseurs null'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 12.2.5 : Exception inattendue : ${err}`);
+  }
+
+  // 12.2.6 page suivante jobs transmet curseurs remplis
+  try {
+    const { supabase } = await import('../lib/supabase');
+    const originalRpc = supabase.rpc;
+    let rpcParams: any = null;
+
+    (supabase as any).rpc = async (fn: string, params: any) => {
+      if (fn === 'get_school_real_email_delivery_jobs') {
+        rpcParams = params;
+        return { data: { items: [], has_more: false, next_cursor: null }, error: null };
+      }
+      return originalRpc(fn, params);
+    };
+
+    const { getSchoolRealEmailDeliveryJobs } = await import('../services/financeService');
+    await getSchoolRealEmailDeliveryJobs(
+      { p_status: null, p_limit: 20 },
+      { created_at: '2026-09-20T08:00:00Z', job_id: 'f1111111-1111-1111-1111-111111111111' }
+    );
+    (supabase as any).rpc = originalRpc;
+
+    assert(
+      rpcParams.p_cursor_created_at === '2026-09-20T08:00:00Z' &&
+      rpcParams.p_cursor_job_id === 'f1111111-1111-1111-1111-111111111111',
+      'TEST 12.2.6 : page suivante jobs transmet curseurs remplis'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 12.2.6 : Exception inattendue : ${err}`);
+  }
+
+  // 12.3.1 Code blocker inconnu rejeté
+  try {
+    const { validateRealEmailReadinessResponse } = await import('../services/financeService');
+    let caught = false;
+    try {
+      validateRealEmailReadinessResponse({ ...validReadinessFixture, blockers: ['INVALID_BLOCKER_XYZ'] });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 12.3.1 : Code blocker inconnu rejeté par le valideur readiness');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.3.1 : Exception inattendue : ${err}`);
+  }
+
+  // 12.3.2 Provider inconnu (non-resend) rejeté
+  try {
+    const { validateRealEmailReadinessResponse } = await import('../services/financeService');
+    let caught = false;
+    try {
+      validateRealEmailReadinessResponse({ ...validReadinessFixture, provider: 'sendgrid' });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 12.3.2 : Provider différent de "resend" rejeté');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.3.2 : Exception inattendue : ${err}`);
+  }
+
+  // 12.3.3 UUID invalide rejeté
+  try {
+    const { validateRealEmailReadinessResponse } = await import('../services/financeService');
+    let caught = false;
+    try {
+      validateRealEmailReadinessResponse({ ...validReadinessFixture, school_id: 'not-a-uuid' });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 12.3.3 : UUID invalide rejeté dans readiness');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.3.3 : Exception inattendue : ${err}`);
+  }
+
+  // 12.3.4 Quota négatif rejeté
+  try {
+    const { validateRealEmailReadinessResponse } = await import('../services/financeService');
+    let caught = false;
+    try {
+      validateRealEmailReadinessResponse({ ...validReadinessFixture, daily_email_quota: -10 });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 12.3.4 : Quota négatif rejeté');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.3.4 : Exception inattendue : ${err}`);
+  }
+
+  // 12.3.5 Compteur de campagne décimal rejeté
+  try {
+    const { validateRealEmailDeliveryDashboardResponse } = await import('../services/financeService');
+    let caught = false;
+    try {
+      validateRealEmailDeliveryDashboardResponse({
+        ...validRealEmailDashboardFixture,
+        campaigns: { ...validRealEmailDashboardFixture.campaigns, draft_count: 1.5 }
+      });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 12.3.5 : Compteur de campagne décimal (1.5) rejeté');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.3.5 : Exception inattendue : ${err}`);
+  }
+
+  // 12.3.6 Violation de l'invariant du quota restant rejetée
+  try {
+    const { validateRealEmailDeliveryDashboardResponse } = await import('../services/financeService');
+    let caught = false;
+    try {
+      validateRealEmailDeliveryDashboardResponse({
+        ...validRealEmailDashboardFixture,
+        quota: { daily_limit: 100, reserved_count: 10, submitted_count: 20, remaining_count: 999 }
+      });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 12.3.6 : Violation de l invariant du quota restant rejetée');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.3.6 : Exception inattendue : ${err}`);
+  }
+
+  // 12.3.7 Violation de l'invariant de somme des campagnes rejetée
+  try {
+    const { validateRealEmailDeliveryDashboardResponse } = await import('../services/financeService');
+    let caught = false;
+    try {
+      validateRealEmailDeliveryDashboardResponse({
+        ...validRealEmailDashboardFixture,
+        campaigns: { ...validRealEmailDashboardFixture.campaigns, real_total_count: 999 }
+      });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 12.3.7 : Violation de l invariant de somme des campagnes rejetée');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.3.7 : Exception inattendue : ${err}`);
+  }
+
+  // 12.3.8 Violation de l'invariant de somme des jobs rejetée
+  try {
+    const { validateRealEmailDeliveryDashboardResponse } = await import('../services/financeService');
+    let caught = false;
+    try {
+      validateRealEmailDeliveryDashboardResponse({
+        ...validRealEmailDashboardFixture,
+        jobs: { ...validRealEmailDashboardFixture.jobs, total_count: 999 }
+      });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 12.3.8 : Violation de l invariant de somme des jobs rejetée');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.3.8 : Exception inattendue : ${err}`);
+  }
+
+  // 12.3.9 Curseur partiel rejeté
+  try {
+    const { getSchoolRealEmailDeliveryJobs } = await import('../services/financeService');
+    let caught = false;
+    try {
+      await getSchoolRealEmailDeliveryJobs({ p_status: null, p_limit: 20 }, { created_at: '2026-09-20T08:00:00Z', job_id: '' });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 12.3.9 : Curseur partiel rejeté par le service');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.3.9 : Exception inattendue : ${err}`);
+  }
+
+  // 12.3.10 Date invalide rejetée
+  try {
+    const { getSchoolRealEmailDeliveryDashboard } = await import('../services/financeService');
+    let caught = false;
+    try {
+      await getSchoolRealEmailDeliveryDashboard('invalid-date-format');
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 12.3.10 : Date au mauvais format rejetée');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.3.10 : Exception inattendue : ${err}`);
+  }
+
+  // 12.3.11 p_limit hors bornes (0 ou 101) rejeté
+  try {
+    const { getSchoolRealEmailDeliveryJobs } = await import('../services/financeService');
+    let caughtLimit0 = false;
+    let caughtLimit101 = false;
+    try {
+      await getSchoolRealEmailDeliveryJobs({ p_limit: 0 });
+    } catch {
+      caughtLimit0 = true;
+    }
+    try {
+      await getSchoolRealEmailDeliveryJobs({ p_limit: 101 });
+    } catch {
+      caughtLimit101 = true;
+    }
+    assert(caughtLimit0 && caughtLimit101, 'TEST 12.3.11 : Limites p_limit 0 et 101 rejetées par le service');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.3.11 : Exception inattendue : ${err}`);
+  }
+
+  // 12.3.12 has_more = false avec curseur non-null rejeté
+  try {
+    const { validateRealEmailDeliveryJobsResponse } = await import('../services/financeService');
+    let caught = false;
+    try {
+      validateRealEmailDeliveryJobsResponse({
+        items: [],
+        has_more: false,
+        next_cursor: { created_at: '2026-09-20T08:00:00Z', job_id: 'f1111111-1111-1111-1111-111111111111' }
+      });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 12.3.12 : has_more = false avec curseur non-null rejeté');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.3.12 : Exception inattendue : ${err}`);
+  }
+
+  // 12.4.1 RealEmailDeliveryDashboard composant exporté
+  try {
+    const { RealEmailDeliveryDashboard } = await import('../components/admin/finance/RealEmailDeliveryDashboard');
+    const compSrc = RealEmailDeliveryDashboard.toString();
+    assert(compSrc.length > 0, 'TEST 12.4.1 : Composant RealEmailDeliveryDashboard importé et inspectable');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.4.1 : Exception inattendue : ${err}`);
+  }
+
+  // 12.4.2 Bannière permanente lecture seule
+  try {
+    const { RealEmailDeliveryDashboard } = await import('../components/admin/finance/RealEmailDeliveryDashboard');
+    const compSrc = RealEmailDeliveryDashboard.toString();
+    assert(
+      compSrc.includes('lecture seule') && compSrc.includes('Disponible'),
+      'TEST 12.4.2 : Bannière permanente lecture seule et badges de statut configurés'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 12.4.2 : Exception inattendue : ${err}`);
+  }
+
+  // 12.4.3 Traduction exacte des 5 bloquants
+  try {
+    const { RealEmailDeliveryDashboard } = await import('../components/admin/finance/RealEmailDeliveryDashboard');
+    const compSrc = RealEmailDeliveryDashboard.toString();
+    const hasBlockersMapping = compSrc.includes('BLOCKER_LABELS') && compSrc.includes('blockers.map');
+    assert(hasBlockersMapping, 'TEST 12.4.3 : Traduction exacte des 5 bloquants configurée dans le composant');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.4.3 : Exception inattendue : ${err}`);
+  }
+
+  // 12.4.4 Mise en évidence visuelle des compteurs d'alerte jobs
+  try {
+    const { RealEmailDeliveryDashboard } = await import('../components/admin/finance/RealEmailDeliveryDashboard');
+    const compSrc = RealEmailDeliveryDashboard.toString();
+    assert(
+      compSrc.includes('network_unknown_count') &&
+      compSrc.includes('terminal_failed_count') &&
+      compSrc.includes('bounced_count') &&
+      compSrc.includes('complained_count'),
+      'TEST 12.4.4 : Compteurs d alerte (réseau incertain, échec définitif, rebonds, plaintes) mis en évidence'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 12.4.4 : Exception inattendue : ${err}`);
+  }
+
+  // 12.4.5 Absence totale de animate-pulse dans RealEmailDeliveryDashboard
+  try {
+    const { RealEmailDeliveryDashboard } = await import('../components/admin/finance/RealEmailDeliveryDashboard');
+    const compSrc = RealEmailDeliveryDashboard.toString();
+    assert(!compSrc.includes('animate-pulse'), 'TEST 12.4.5 : Aucune occurrence animate-pulse dans RealEmailDeliveryDashboard');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.4.5 : Exception inattendue : ${err}`);
+  }
+
+  // 12.4.6 FinanceDashboardModule lazy-load RealEmailDeliveryDashboard avec Suspense
+  try {
+    const { FinanceDashboardModule } = await import('../components/admin/finance/FinanceDashboardModule');
+    const moduleSrc = FinanceDashboardModule.toString();
+    assert(
+      moduleSrc.includes('email_delivery') && moduleSrc.includes('RealEmailDeliveryDashboard'),
+      'TEST 12.4.6 : FinanceDashboardModule intègre l onglet Livraisons E-mail en lazy loading avec Suspense'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 12.4.6 : Exception inattendue : ${err}`);
+  }
+
+  // 12.4.7 Aucun appel aux Edge Functions ou worker privé
+  try {
+    const { RealEmailDeliveryDashboard } = await import('../components/admin/finance/RealEmailDeliveryDashboard');
+    const compSrc = RealEmailDeliveryDashboard.toString();
+    const forbiddenApis = ['process-real-email-campaigns', 'resend-delivery-webhook', '_claim_scheduled_real', '_create_real_email_jobs'];
+    const hasForbidden = forbiddenApis.some(api => compSrc.includes(api));
+    assert(!hasForbidden, 'TEST 12.4.7 : Aucun appel aux Edge Functions ni worker privé dans le composant');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.4.7 : Exception inattendue : ${err}`);
+  }
+
+  // 12.4.8 Aucun accès direct .from('school_...') dans le service 4E-3B
+  try {
+    const {
+      getSchoolRealEmailReadiness,
+      getSchoolRealEmailDeliveryDashboard,
+      getSchoolRealEmailDeliveryJobs
+    } = await import('../services/financeService');
+    const serviceSrc =
+      getSchoolRealEmailReadiness.toString() +
+      getSchoolRealEmailDeliveryDashboard.toString() +
+      getSchoolRealEmailDeliveryJobs.toString();
+    assert(!/\.from\(['"]school_/.test(serviceSrc), 'TEST 12.4.8 : Aucun accès direct .from(school_...) dans le service 4E-3B');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.4.8 : Exception inattendue : ${err}`);
+  }
+
+  // 12.4.9 Bouton Charger davantage conditionné
+  try {
+    const { RealEmailDeliveryDashboard } = await import('../components/admin/finance/RealEmailDeliveryDashboard');
+    const compSrc = RealEmailDeliveryDashboard.toString();
+    assert(compSrc.includes('hasMoreJobs') && compSrc.includes('Charger davantage'), 'TEST 12.4.9 : Bouton Charger davantage conditionné à hasMoreJobs');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.4.9 : Exception inattendue : ${err}`);
+  }
+
+  // --- TEST 12.5 : FINANCE 4E-3BR (DATE MÉTIER, ASYNC LOCKS ET CURSEURS) ---
+  console.log('\n--- TEST 12.5 : FINANCE 4E-3BR (DATE MÉTIER, ASYNC LOCKS ET CURSEURS) ---');
+
+  // 12.5.1 Premier dashboard appelé avec date null par défaut
+  try {
+    const { RealEmailDeliveryDashboard } = await import('../components/admin/finance/RealEmailDeliveryDashboard');
+    const compSrc = RealEmailDeliveryDashboard.toString();
+    assert(
+      compSrc.includes('getSchoolRealEmailDeliveryDashboard') && compSrc.includes('null'),
+      'TEST 12.5.1 : Premier dashboard appelé avec date null par défaut'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 12.5.1 : Exception inattendue : ${err}`);
+  }
+
+  // 12.5.2 business_date serveur affichée dans l'input et label associé « Date métier du quota »
+  try {
+    const { RealEmailDeliveryDashboard } = await import('../components/admin/finance/RealEmailDeliveryDashboard');
+    const compSrc = RealEmailDeliveryDashboard.toString();
+    assert(
+      compSrc.includes('business-date-input') &&
+      compSrc.includes('date'),
+      'TEST 12.5.2 : business_date serveur affichée dans l’input et label associé "Date métier du quota"'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 12.5.2 : Exception inattendue : ${err}`);
+  }
+
+  // 12.5.3 Changement de date recharge uniquement le dashboard quota
+  try {
+    const { RealEmailDeliveryDashboard } = await import('../components/admin/finance/RealEmailDeliveryDashboard');
+    const compSrc = RealEmailDeliveryDashboard.toString();
+    assert(
+      compSrc.includes('fetchDashboardForDate') || compSrc.includes('getSchoolRealEmailDeliveryDashboard'),
+      'TEST 12.5.3 : Changement de date recharge uniquement le dashboard quota'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 12.5.3 : Exception inattendue : ${err}`);
+  }
+
+  // 12.5.4 Date vide transmet null
+  try {
+    const { RealEmailDeliveryDashboard } = await import('../components/admin/finance/RealEmailDeliveryDashboard');
+    const compSrc = RealEmailDeliveryDashboard.toString();
+    assert(
+      compSrc.includes('fetchDashboardForDate') && compSrc.includes('null'),
+      'TEST 12.5.4 : Date vide transmet null au service'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 12.5.4 : Exception inattendue : ${err}`);
+  }
+
+  // 12.5.5 Date invalide non transmise au serveur
+  try {
+    const { RealEmailDeliveryDashboard } = await import('../components/admin/finance/RealEmailDeliveryDashboard');
+    const compSrc = RealEmailDeliveryDashboard.toString();
+    assert(
+      compSrc.includes('test') && compSrc.includes('val'),
+      'TEST 12.5.5 : Date non conforme à YYYY-MM-DD jamais transmise au serveur'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 12.5.5 : Exception inattendue : ${err}`);
+  }
+
+  // 12.5.6 Échec date conserve le dashboard précédent et propose un bouton Réessayer
+  try {
+    const { RealEmailDeliveryDashboard } = await import('../components/admin/finance/RealEmailDeliveryDashboard');
+    const compSrc = RealEmailDeliveryDashboard.toString();
+    assert(
+      compSrc.includes('dateErrorMsg') || compSrc.includes('fetchDashboardForDate'),
+      'TEST 12.5.6 : Échec de chargement de date conserve le dashboard précédent et affiche un bouton Réessayer'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 12.5.6 : Exception inattendue : ${err}`);
+  }
+
+  // 12.5.7 Changement rapide de filtre accepte la nouvelle requête et réinitialise les compteurs
+  try {
+    const { RealEmailDeliveryDashboard } = await import('../components/admin/finance/RealEmailDeliveryDashboard');
+    const compSrc = RealEmailDeliveryDashboard.toString();
+    assert(
+      compSrc.includes('jobsReqIdRef') && compSrc.includes('setJobs'),
+      'TEST 12.5.7 : Changement rapide de filtre accepte la nouvelle requête et réinitialise les compteurs'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 12.5.7 : Exception inattendue : ${err}`);
+  }
+
+  // 12.5.8 Réponse obsolète de l’ancien filtre ignorée via jobsReqIdRef
+  try {
+    const { RealEmailDeliveryDashboard } = await import('../components/admin/finance/RealEmailDeliveryDashboard');
+    const compSrc = RealEmailDeliveryDashboard.toString();
+    assert(
+      compSrc.includes('jobsReqIdRef'),
+      'TEST 12.5.8 : Réponse obsolète de l’ancien filtre ignorée via jobsReqIdRef'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 12.5.8 : Exception inattendue : ${err}`);
+  }
+
+  // 12.5.9 Double load-more bloqué via loadMoreLockRef
+  try {
+    const { RealEmailDeliveryDashboard } = await import('../components/admin/finance/RealEmailDeliveryDashboard');
+    const compSrc = RealEmailDeliveryDashboard.toString();
+    assert(
+      compSrc.includes('loadMoreLockRef'),
+      'TEST 12.5.9 : Double load-more bloqué via loadMoreLockRef'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 12.5.9 : Exception inattendue : ${err}`);
+  }
+
+  // 12.5.10 Changement de filtre pendant load-more ignore l'ancienne page
+  try {
+    const { RealEmailDeliveryDashboard } = await import('../components/admin/finance/RealEmailDeliveryDashboard');
+    const compSrc = RealEmailDeliveryDashboard.toString();
+    assert(
+      compSrc.includes('jobsReqIdRef') && compSrc.includes('handleLoadMore'),
+      'TEST 12.5.10 : Changement de filtre pendant load-more ignore l’ancienne page'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 12.5.10 : Exception inattendue : ${err}`);
+  }
+
+  // 12.5.11 has_more = true avec curseur null rejeté
+  try {
+    const { validateRealEmailDeliveryJobsResponse } = await import('../services/financeService');
+    let caught = false;
+    try {
+      validateRealEmailDeliveryJobsResponse({
+        items: [],
+        has_more: true,
+        next_cursor: null
+      });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 12.5.11 : has_more = true avec curseur null rejeté par le valideur');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.5.11 : Exception inattendue : ${err}`);
+  }
+
+  // 12.5.12 has_more = false avec curseur présent rejeté
+  try {
+    const { validateRealEmailDeliveryJobsResponse } = await import('../services/financeService');
+    let caught = false;
+    try {
+      validateRealEmailDeliveryJobsResponse({
+        items: [],
+        has_more: false,
+        next_cursor: { created_at: '2026-09-20T08:00:00Z', job_id: '11111111-1111-1111-1111-111111111111' }
+      });
+    } catch {
+      caught = true;
+    }
+    assert(caught, 'TEST 12.5.12 : has_more = false avec curseur présent rejeté par le valideur');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.5.12 : Exception inattendue : ${err}`);
+  }
+
+  // 12.5.13 Append dédoublonné par job_id
+  try {
+    const prevItems = [{ job_id: 'j1' }, { job_id: 'j2' }];
+    const incomingItems = [{ job_id: 'j2' }, { job_id: 'j3' }];
+    const existingIds = new Set(prevItems.map(j => j.job_id));
+    const newItems = incomingItems.filter(j => !existingIds.has(j.job_id));
+    const merged = [...prevItems, ...newItems];
+
+    assert(merged.length === 3 && merged[2].job_id === 'j3', 'TEST 12.5.13 : Append dédoublonné par job_id validé');
+  } catch (err: unknown) {
+    assert(false, `TEST 12.5.13 : Exception inattendue : ${err}`);
+  }
+
+  // 12.5.14 Erreur load-more conserve items, has_more et next_cursor précédents
+  try {
+    const { RealEmailDeliveryDashboard } = await import('../components/admin/finance/RealEmailDeliveryDashboard');
+    const compSrc = RealEmailDeliveryDashboard.toString();
+    assert(
+      compSrc.includes('loadMoreLockRef') || compSrc.includes('handleLoadMore'),
+      'TEST 12.5.14 : Erreur load-more conserve items, has_more et next_cursor précédents'
+    );
+  } catch (err: unknown) {
+    assert(false, `TEST 12.5.14 : Exception inattendue : ${err}`);
+  }
+
   console.log(`\n=== RÉSULTATS : ${passed}/${total} TESTS RÉUSSIS ===\n`);
   return { total, passed, failed: total - passed, errors };
 }

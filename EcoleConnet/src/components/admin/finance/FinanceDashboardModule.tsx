@@ -24,14 +24,19 @@ import {
   FileText,
   Layers,
   BarChart3,
-  Clock
+  Clock,
+  Mail
 } from 'lucide-react';
+
+const RealEmailDeliveryDashboard = React.lazy(() =>
+  import('./RealEmailDeliveryDashboard').then(m => ({ default: m.RealEmailDeliveryDashboard }))
+);
 
 interface FinanceDashboardModuleProps {
   schoolId: string;
 }
 
-type FinanceSubTab = 'vue_densemble' | 'creances' | 'factures' | 'catalogue' | 'campagnes';
+type FinanceSubTab = 'vue_densemble' | 'creances' | 'factures' | 'catalogue' | 'campagnes' | 'email_delivery';
 
 export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ schoolId }) => {
   const [activeSubTab, setActiveSubTab] = useState<FinanceSubTab>('vue_densemble');
@@ -270,6 +275,13 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
             <Clock className="w-3.5 h-3.5" />
             Campagnes (Mock)
           </button>
+          <button
+            onClick={() => setActiveSubTab('email_delivery')}
+            className={`flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${activeSubTab === 'email_delivery' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
+          >
+            <Mail className="w-3.5 h-3.5" />
+            Livraisons E-mail
+          </button>
         </div>
       </div>
 
@@ -472,6 +484,16 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
 
       {activeSubTab === 'campagnes' && (
         <CollectionCampaignsPanel />
+      )}
+
+      {activeSubTab === 'email_delivery' && (
+        <React.Suspense fallback={
+          <div className="bg-white p-12 rounded-2xl border border-slate-200 text-center text-slate-500 font-bold shadow-xs" aria-busy="true">
+            Chargement de la livraison des e-mails réels...
+          </div>
+        }>
+          <RealEmailDeliveryDashboard />
+        </React.Suspense>
       )}
 
       {/* Dossier Financier Modal */}

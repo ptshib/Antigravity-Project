@@ -55,7 +55,13 @@ import type {
   CollectionCampaignListResponse,
   CollectionCampaignDetailResponse,
   ScheduleCampaignResponse,
-  CancelCampaignResponse
+  CancelCampaignResponse,
+  RealEmailReadinessBlocker,
+  RealEmailReadinessResponse,
+  RealEmailDeliveryDashboardResponse,
+  RealEmailJobStatus,
+  RealEmailDeliveryJobsCursor,
+  RealEmailDeliveryJobsResponse
 } from '../types/finance';
 
 /**
@@ -2637,6 +2643,388 @@ export async function cancelCollectionCampaign(
     const { data, error } = await supabase.rpc('cancel_school_collection_campaign', rpcParams);
     if (error) throw mapPostgresError(error);
     return validateCancelCampaignResponse(data);
+  } catch (err: unknown) {
+    if (err instanceof FinanceServiceError) throw err;
+    throw mapPostgresError(err);
+  }
+}
+
+// =============================================================================
+// FINANCE 4E-3B : VALIDATEURS RUNTIME & RPCs D'OBSERVABILITÉ E-MAILS RÉELS
+// =============================================================================
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DATE_YYYY_MM_DD_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
+const VALID_BLOCKERS: Set<RealEmailReadinessBlocker> = new Set([
+  'GLOBAL_KILL_SWITCH_DISABLED',
+  'SENDER_IDENTITY_NOT_VERIFIED',
+  'SENDER_IDENTITY_NOT_CONFIGURED',
+  'SCHOOL_SETTINGS_NOT_CONFIGURED',
+  'SCHOOL_EMAIL_DISABLED'
+]);
+
+const VALID_JOB_STATUSES: Set<RealEmailJobStatus> = new Set([
+  'pending',
+  'claimed',
+  'submitted',
+  'network_unknown',
+  'retry_wait',
+  'terminal_failed',
+  'delivery_confirmed',
+  'bounced',
+  'complained'
+]);
+
+export function validateRealEmailReadinessResponse(data: unknown): RealEmailReadinessResponse {
+  if (typeof data !== 'object' || data === null) {
+    throw new FinanceServiceError('Réponse readiness invalide (non-objet).', '22023');
+  }
+
+  const d = data as Record<string, unknown>;
+
+  if (typeof d.school_id !== 'string' || !UUID_REGEX.test(d.school_id)) {
+    throw new FinanceServiceError('school_id invalide dans readiness.', '22023');
+  }
+
+  if (d.provider !== 'resend') {
+    throw new FinanceServiceError('provider doit être résolument "resend".', '22023');
+  }
+
+  if (typeof d.global_real_email_enabled !== 'boolean') {
+    throw new FinanceServiceError('global_real_email_enabled boolean requis.', '22023');
+  }
+
+  if (typeof d.sender_identity_verified !== 'boolean') {
+    throw new FinanceServiceError('sender_identity_verified boolean requis.', '22023');
+  }
+
+  if (typeof d.sender_identity_configured !== 'boolean') {
+    throw new FinanceServiceError('sender_identity_configured boolean requis.', '22023');
+  }
+
+  if (typeof d.school_email_enabled !== 'boolean') {
+    throw new FinanceServiceError('school_email_enabled boolean requis.', '22023');
+  }
+
+  if (typeof d.effective_real_email_enabled !== 'boolean') {
+    throw new FinanceServiceError('effective_real_email_enabled boolean requis.', '22023');
+  }
+
+  if (
+    typeof d.daily_email_quota !== 'number' ||
+    !Number.isInteger(d.daily_email_quota) ||
+    d.daily_email_quota < 0
+  ) {
+    throw new FinanceServiceError('daily_email_quota doit être un entier >= 0.', '22023');
+  }
+
+  if (d.from_name !== null && typeof d.from_name !== 'string') {
+    throw new FinanceServiceError('from_name doit être string ou null.', '22023');
+  }
+
+  if (d.reply_to_email !== null && typeof d.reply_to_email !== 'string') {
+    throw new FinanceServiceError('reply_to_email doit être string ou null.', '22023');
+  }
+
+  if (!Array.isArray(d.blockers)) {
+    throw new FinanceServiceError('blockers doit être un tableau.', '22023');
+  }
+
+  for (const b of d.blockers) {
+    if (!VALID_BLOCKERS.has(b as RealEmailReadinessBlocker)) {
+      throw new FinanceServiceError(`Code blocker inconnu : ${b}`, '22023');
+    }
+  }
+
+  return d as unknown as RealEmailReadinessResponse;
+}
+
+export function validateRealEmailDeliveryDashboardResponse(data: unknown): RealEmailDeliveryDashboardResponse {
+  if (typeof data !== 'object' || data === null) {
+    throw new FinanceServiceError('Réponse dashboard invalide (non-objet).', '22023');
+  }
+
+  const d = data as Record<string, unknown>;
+
+  if (typeof d.business_date !== 'string' || !DATE_YYYY_MM_DD_REGEX.test(d.business_date)) {
+    throw new FinanceServiceError('business_date invalide (YYYY-MM-DD attendu).', '22023');
+  }
+
+  if (typeof d.timezone !== 'string' || d.timezone.length === 0) {
+    throw new FinanceServiceError('timezone valide requise.', '22023');
+  }
+
+  if (typeof d.timezone_fallback_applied !== 'boolean') {
+    throw new FinanceServiceError('timezone_fallback_applied boolean requis.', '22023');
+  }
+
+  // Quota
+  if (typeof d.quota !== 'object' || d.quota === null) {
+    throw new FinanceServiceError('Section quota manquante ou invalide.', '22023');
+  }
+  const q = d.quota as Record<string, unknown>;
+  const daily_limit = q.daily_limit;
+  const reserved_count = q.reserved_count;
+  const submitted_count = q.submitted_count;
+  const remaining_count = q.remaining_count;
+
+  if (
+    typeof daily_limit !== 'number' || !Number.isInteger(daily_limit) || daily_limit < 0 ||
+    typeof reserved_count !== 'number' || !Number.isInteger(reserved_count) || reserved_count < 0 ||
+    typeof submitted_count !== 'number' || !Number.isInteger(submitted_count) || submitted_count < 0 ||
+    typeof remaining_count !== 'number' || !Number.isInteger(remaining_count) || remaining_count < 0
+  ) {
+    throw new FinanceServiceError('Les compteurs de quota doivent être des entiers >= 0.', '22023');
+  }
+
+  const expectedRemaining = Math.max(daily_limit - reserved_count - submitted_count, 0);
+  if (remaining_count !== expectedRemaining) {
+    throw new FinanceServiceError('Invariant du quota restant violé.', '22023');
+  }
+
+  // Campaigns
+  if (typeof d.campaigns !== 'object' || d.campaigns === null) {
+    throw new FinanceServiceError('Section campaigns manquante ou invalide.', '22023');
+  }
+  const c = d.campaigns as Record<string, unknown>;
+  const real_total_count = c.real_total_count;
+  const draft_count = c.draft_count;
+  const scheduled_count = c.scheduled_count;
+  const processing_count = c.processing_count;
+  const completed_count = c.completed_count;
+  const partially_failed_count = c.partially_failed_count;
+  const failed_count = c.failed_count;
+  const cancelled_count = c.cancelled_count;
+
+  const campCounts = [
+    real_total_count, draft_count, scheduled_count, processing_count,
+    completed_count, partially_failed_count, failed_count, cancelled_count
+  ];
+  for (const cnt of campCounts) {
+    if (typeof cnt !== 'number' || !Number.isInteger(cnt) || cnt < 0) {
+      throw new FinanceServiceError('Tous les compteurs de campagnes doivent être des entiers >= 0.', '22023');
+    }
+  }
+
+  const expectedCampSum = (draft_count as number) + (scheduled_count as number) +
+    (processing_count as number) + (completed_count as number) +
+    (partially_failed_count as number) + (failed_count as number) + (cancelled_count as number);
+
+  if ((real_total_count as number) !== expectedCampSum) {
+    throw new FinanceServiceError('Invariant de somme des campagnes violé.', '22023');
+  }
+
+  // Jobs
+  if (typeof d.jobs !== 'object' || d.jobs === null) {
+    throw new FinanceServiceError('Section jobs manquante ou invalide.', '22023');
+  }
+  const j = d.jobs as Record<string, unknown>;
+  const total_count = j.total_count;
+  const pending_count = j.pending_count;
+  const claimed_count = j.claimed_count;
+  const submitted_job_count = j.submitted_count;
+  const network_unknown_count = j.network_unknown_count;
+  const retry_wait_count = j.retry_wait_count;
+  const terminal_failed_count = j.terminal_failed_count;
+  const delivery_confirmed_count = j.delivery_confirmed_count;
+  const bounced_count = j.bounced_count;
+  const complained_count = j.complained_count;
+
+  const jobCounts = [
+    total_count, pending_count, claimed_count, submitted_job_count,
+    network_unknown_count, retry_wait_count, terminal_failed_count,
+    delivery_confirmed_count, bounced_count, complained_count
+  ];
+  for (const cnt of jobCounts) {
+    if (typeof cnt !== 'number' || !Number.isInteger(cnt) || cnt < 0) {
+      throw new FinanceServiceError('Tous les compteurs de jobs doivent être des entiers >= 0.', '22023');
+    }
+  }
+
+  const expectedJobSum = (pending_count as number) + (claimed_count as number) +
+    (submitted_job_count as number) + (network_unknown_count as number) +
+    (retry_wait_count as number) + (terminal_failed_count as number) +
+    (delivery_confirmed_count as number) + (bounced_count as number) + (complained_count as number);
+
+  if ((total_count as number) !== expectedJobSum) {
+    throw new FinanceServiceError('Invariant de somme des jobs violé.', '22023');
+  }
+
+  return d as unknown as RealEmailDeliveryDashboardResponse;
+}
+
+export function validateRealEmailDeliveryJobsResponse(data: unknown): RealEmailDeliveryJobsResponse {
+  if (typeof data !== 'object' || data === null) {
+    throw new FinanceServiceError('Réponse jobs invalide (non-objet).', '22023');
+  }
+
+  const d = data as Record<string, unknown>;
+
+  if (!Array.isArray(d.items)) {
+    throw new FinanceServiceError('items doit être un tableau.', '22023');
+  }
+
+  if (typeof d.has_more !== 'boolean') {
+    throw new FinanceServiceError('has_more boolean requis.', '22023');
+  }
+
+  if (d.has_more === false && d.next_cursor !== null) {
+    throw new FinanceServiceError('next_cursor doit être null quand has_more = false.', '22023');
+  }
+
+  if (d.has_more === true && (d.next_cursor === null || d.next_cursor === undefined)) {
+    throw new FinanceServiceError('next_cursor doit être présent et complet quand has_more = true.', '22023');
+  }
+
+  if (d.next_cursor !== null) {
+    if (typeof d.next_cursor !== 'object' || d.next_cursor === null) {
+      throw new FinanceServiceError('next_cursor invalide.', '22023');
+    }
+    const nc = d.next_cursor as Record<string, unknown>;
+    if (
+      typeof nc.created_at !== 'string' ||
+      nc.created_at.length === 0 ||
+      isNaN(Date.parse(nc.created_at)) ||
+      typeof nc.job_id !== 'string' ||
+      !UUID_REGEX.test(nc.job_id)
+    ) {
+      throw new FinanceServiceError('next_cursor incomplet ou invalide.', '22023');
+    }
+  }
+
+  for (const rawItem of d.items) {
+    if (typeof rawItem !== 'object' || rawItem === null) {
+      throw new FinanceServiceError('Item job invalide.', '22023');
+    }
+    const item = rawItem as Record<string, unknown>;
+
+    if (typeof item.job_id !== 'string' || !UUID_REGEX.test(item.job_id)) {
+      throw new FinanceServiceError('job_id invalide dans item.', '22023');
+    }
+    if (typeof item.campaign_id !== 'string' || !UUID_REGEX.test(item.campaign_id)) {
+      throw new FinanceServiceError('campaign_id invalide dans item.', '22023');
+    }
+    if (typeof item.campaign_name !== 'string') {
+      throw new FinanceServiceError('campaign_name string requis.', '22023');
+    }
+    if (typeof item.invoice_id !== 'string' || !UUID_REGEX.test(item.invoice_id)) {
+      throw new FinanceServiceError('invoice_id invalide dans item.', '22023');
+    }
+    if (typeof item.invoice_number !== 'string') {
+      throw new FinanceServiceError('invoice_number string requis.', '22023');
+    }
+    if (typeof item.student_id !== 'string' || !UUID_REGEX.test(item.student_id)) {
+      throw new FinanceServiceError('student_id invalide dans item.', '22023');
+    }
+    if (typeof item.student_name !== 'string') {
+      throw new FinanceServiceError('student_name string requis.', '22023');
+    }
+    if (!VALID_JOB_STATUSES.has(item.status as RealEmailJobStatus)) {
+      throw new FinanceServiceError(`Statut job invalide : ${item.status}`, '22023');
+    }
+    if (typeof item.attempt_count !== 'number' || !Number.isInteger(item.attempt_count) || item.attempt_count < 0) {
+      throw new FinanceServiceError('attempt_count doit être un entier >= 0.', '22023');
+    }
+    if (typeof item.provider_message_recorded !== 'boolean') {
+      throw new FinanceServiceError('provider_message_recorded boolean requis.', '22023');
+    }
+    if (typeof item.created_at !== 'string' || typeof item.updated_at !== 'string') {
+      throw new FinanceServiceError('created_at et updated_at doivent être des strings.', '22023');
+    }
+  }
+
+  return d as unknown as RealEmailDeliveryJobsResponse;
+}
+
+export async function getSchoolRealEmailReadiness(): Promise<RealEmailReadinessResponse> {
+  try {
+    const { data, error } = await supabase.rpc('get_school_real_email_readiness');
+    if (error) throw mapPostgresError(error);
+    return validateRealEmailReadinessResponse(data);
+  } catch (err: unknown) {
+    if (err instanceof FinanceServiceError) throw err;
+    throw mapPostgresError(err);
+  }
+}
+
+export async function getSchoolRealEmailDeliveryDashboard(
+  p_business_date?: string | null
+): Promise<RealEmailDeliveryDashboardResponse> {
+  let normalizedDateOrNull: string | null = null;
+  if (p_business_date !== undefined && p_business_date !== null) {
+    if (typeof p_business_date !== 'string' || !DATE_YYYY_MM_DD_REGEX.test(p_business_date)) {
+      throw new FinanceServiceError('Format de date métier invalide (YYYY-MM-DD attendu).', '22023');
+    }
+    normalizedDateOrNull = p_business_date;
+  }
+
+  const rpcParams = {
+    p_business_date: normalizedDateOrNull
+  };
+
+  try {
+    const { data, error } = await supabase.rpc('get_school_real_email_delivery_dashboard', rpcParams);
+    if (error) throw mapPostgresError(error);
+    return validateRealEmailDeliveryDashboardResponse(data);
+  } catch (err: unknown) {
+    if (err instanceof FinanceServiceError) throw err;
+    throw mapPostgresError(err);
+  }
+}
+
+export async function getSchoolRealEmailDeliveryJobs(
+  filters?: {
+    p_status?: RealEmailJobStatus | null;
+    p_limit?: number;
+  },
+  cursor?: RealEmailDeliveryJobsCursor | null
+): Promise<RealEmailDeliveryJobsResponse> {
+  let p_status: string | null = null;
+  if (filters?.p_status !== undefined && filters.p_status !== null) {
+    if (!VALID_JOB_STATUSES.has(filters.p_status)) {
+      throw new FinanceServiceError(`Statut de filtre invalide : ${filters.p_status}`, '22023');
+    }
+    p_status = filters.p_status;
+  }
+
+  let p_limit = 20;
+  if (filters?.p_limit !== undefined) {
+    if (typeof filters.p_limit !== 'number' || !Number.isInteger(filters.p_limit) || filters.p_limit < 1 || filters.p_limit > 100) {
+      throw new FinanceServiceError('Limite p_limit invalide (doit être un entier entre 1 et 100).', '22023');
+    }
+    p_limit = filters.p_limit;
+  }
+
+  let p_cursor_created_at: string | null = null;
+  let p_cursor_job_id: string | null = null;
+
+  if (cursor !== undefined && cursor !== null) {
+    const created_at_valid = typeof cursor.created_at === 'string' && cursor.created_at.length > 0;
+    const job_id_valid = typeof cursor.job_id === 'string' && UUID_REGEX.test(cursor.job_id);
+
+    if ((created_at_valid && !job_id_valid) || (!created_at_valid && job_id_valid)) {
+      throw new FinanceServiceError('Paire de curseurs incomplète (created_at et job_id doivent être fournis ensemble).', '22023');
+    }
+
+    if (created_at_valid && job_id_valid) {
+      p_cursor_created_at = cursor.created_at;
+      p_cursor_job_id = cursor.job_id;
+    }
+  }
+
+  // PAYLOAD EXPLICITE AVEC EXACTEMENT LES QUATRE CLÉS SQL REQUISES
+  const rpcParams = {
+    p_status,
+    p_limit,
+    p_cursor_created_at,
+    p_cursor_job_id
+  };
+
+  try {
+    const { data, error } = await supabase.rpc('get_school_real_email_delivery_jobs', rpcParams);
+    if (error) throw mapPostgresError(error);
+    return validateRealEmailDeliveryJobsResponse(data);
   } catch (err: unknown) {
     if (err instanceof FinanceServiceError) throw err;
     throw mapPostgresError(err);

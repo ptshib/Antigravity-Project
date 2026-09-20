@@ -743,3 +743,109 @@ export interface CancelCampaignResponse {
   status: 'cancelled';
   cancelled_pending_count: number;
 }
+
+// -----------------------------------------------------------------------------
+// FINANCE 4E-3B : Types et interfaces d'observabilité des e-mails réels (Resend)
+// -----------------------------------------------------------------------------
+
+export type RealEmailReadinessBlocker =
+  | 'GLOBAL_KILL_SWITCH_DISABLED'
+  | 'SENDER_IDENTITY_NOT_VERIFIED'
+  | 'SENDER_IDENTITY_NOT_CONFIGURED'
+  | 'SCHOOL_SETTINGS_NOT_CONFIGURED'
+  | 'SCHOOL_EMAIL_DISABLED';
+
+export interface RealEmailReadinessResponse {
+  school_id: string;
+  provider: 'resend';
+  global_real_email_enabled: boolean;
+  sender_identity_verified: boolean;
+  sender_identity_configured: boolean;
+  school_email_enabled: boolean;
+  effective_real_email_enabled: boolean;
+  daily_email_quota: number;
+  from_name: string | null;
+  reply_to_email: string | null;
+  blockers: RealEmailReadinessBlocker[];
+}
+
+export interface RealEmailQuotaSummary {
+  daily_limit: number;
+  reserved_count: number;
+  submitted_count: number;
+  remaining_count: number;
+}
+
+export interface RealEmailCampaignSummary {
+  real_total_count: number;
+  draft_count: number;
+  scheduled_count: number;
+  processing_count: number;
+  completed_count: number;
+  partially_failed_count: number;
+  failed_count: number;
+  cancelled_count: number;
+}
+
+export interface RealEmailJobSummary {
+  total_count: number;
+  pending_count: number;
+  claimed_count: number;
+  submitted_count: number;
+  network_unknown_count: number;
+  retry_wait_count: number;
+  terminal_failed_count: number;
+  delivery_confirmed_count: number;
+  bounced_count: number;
+  complained_count: number;
+}
+
+export interface RealEmailDeliveryDashboardResponse {
+  business_date: string;
+  timezone: string;
+  timezone_fallback_applied: boolean;
+  quota: RealEmailQuotaSummary;
+  campaigns: RealEmailCampaignSummary;
+  jobs: RealEmailJobSummary;
+}
+
+export type RealEmailJobStatus =
+  | 'pending'
+  | 'claimed'
+  | 'submitted'
+  | 'network_unknown'
+  | 'retry_wait'
+  | 'terminal_failed'
+  | 'delivery_confirmed'
+  | 'bounced'
+  | 'complained';
+
+export interface RealEmailDeliveryJob {
+  job_id: string;
+  campaign_id: string;
+  campaign_name: string;
+  invoice_id: string;
+  invoice_number: string;
+  student_id: string;
+  student_name: string;
+  status: RealEmailJobStatus;
+  attempt_count: number;
+  first_provider_attempt_at: string | null;
+  last_provider_attempt_at: string | null;
+  provider_message_recorded: boolean;
+  next_attempt_at: string | null;
+  last_error_code: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RealEmailDeliveryJobsCursor {
+  created_at: string;
+  job_id: string;
+}
+
+export interface RealEmailDeliveryJobsResponse {
+  items: RealEmailDeliveryJob[];
+  has_more: boolean;
+  next_cursor: RealEmailDeliveryJobsCursor | null;
+}
