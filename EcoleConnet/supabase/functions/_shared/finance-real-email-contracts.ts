@@ -15,6 +15,7 @@ export interface RealEmailJobClaim {
   recipient_id: string;
   provider_idempotency_key: string;
   provider_request_payload: Record<string, unknown>;
+  provider_request_json_text: string;
   canonical_payload_hash: string;
   first_provider_attempt_at: string | null;
   attempt_count: number;
@@ -162,7 +163,18 @@ export function validateRealEmailJobClaim(item: unknown): RealEmailJobClaim {
     throw new Error('REJET CONTRACT: provider_idempotency_key invalid UUID');
   }
 
-  const validPayload = validateProviderRequestPayload(obj.provider_request_payload);
+  if (typeof obj.provider_request_json_text !== 'string' || obj.provider_request_json_text.trim() === '') {
+    throw new Error('REJET CONTRACT: provider_request_json_text is required non-empty string');
+  }
+  const jsonText = obj.provider_request_json_text;
+  let rawPayload: unknown;
+  try {
+    rawPayload = JSON.parse(jsonText);
+  } catch {
+    throw new Error('REJET CONTRACT: provider_request_json_text is invalid JSON string');
+  }
+
+  const validPayload = validateProviderRequestPayload(rawPayload);
 
   if (!isValidHash(obj.canonical_payload_hash)) {
     throw new Error('REJET CONTRACT: canonical_payload_hash must be 64-char hex string');
@@ -181,14 +193,15 @@ export function validateRealEmailJobClaim(item: unknown): RealEmailJobClaim {
     recipient_id: obj.recipient_id as string,
     provider_idempotency_key: obj.provider_idempotency_key as string,
     provider_request_payload: validPayload as unknown as Record<string, unknown>,
+    provider_request_json_text: jsonText,
     canonical_payload_hash: (obj.canonical_payload_hash as string).toLowerCase(),
     first_provider_attempt_at: obj.first_provider_attempt_at as string | null,
     attempt_count: obj.attempt_count as number,
   };
 }
 
-export async function computeCanonicalPayloadHash(payload: Record<string, unknown>): Promise<string> {
-  const jsonStr = JSON.stringify(payload);
+export async function computeCanonicalPayloadHash(payload: string | Record<string, unknown>): Promise<string> {
+  const jsonStr = typeof payload === 'string' ? payload : JSON.stringify(payload);
   const encoder = new TextEncoder();
   const data = encoder.encode(jsonStr);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);

@@ -8,6 +8,37 @@ import {
 } from '../_shared/finance-real-email-contracts.ts';
 import { ResendClient, FetchTransport } from '../_shared/resend-client.ts';
 
+export interface SanitizedErrorLog {
+  code?: string;
+  message: string;
+  details?: string;
+  hint?: string;
+}
+
+export function sanitizeString(str: string | undefined | null): string {
+  if (!str) return '';
+  let cleaned = str.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '[REDACTED_EMAIL]');
+  cleaned = cleaned.replace(/(re_[a-zA-Z0-9]{20,}|Bearer\s+[^\s]+|whsec_[a-zA-Z0-9]+)/gi, '[REDACTED_SECRET]');
+  return cleaned;
+}
+
+export function sanitizeError(err: any): SanitizedErrorLog {
+  if (!err) return { message: 'Unknown error' };
+  if (typeof err === 'string') {
+    return { message: sanitizeString(err) };
+  }
+  const code = typeof err.code === 'string' ? sanitizeString(err.code) : undefined;
+  const message = typeof err.message === 'string' ? sanitizeString(err.message) : 'An error occurred';
+  const details = typeof err.details === 'string' ? sanitizeString(err.details) : undefined;
+  const hint = typeof err.hint === 'string' ? sanitizeString(err.hint) : undefined;
+
+  const result: SanitizedErrorLog = { message };
+  if (code) result.code = code;
+  if (details) result.details = details;
+  if (hint) result.hint = hint;
+  return result;
+}
+
 function constantTimeCompare(a: string, b: string): boolean {
   if (a.length !== b.length) {
     let dummy = 0;
@@ -69,6 +100,7 @@ export async function processRealEmailCampaignsHandler(
         network_unknown: 0,
         terminal_failed: 0,
         errors_count: 0,
+        errors: [],
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
@@ -133,6 +165,7 @@ export async function processRealEmailCampaignsHandler(
   let networkUnknownCount = 0;
   let terminalFailedCount = 0;
   let errorsCount = 0;
+  const errors: SanitizedErrorLog[] = [];
 
   try {
     // 1. Claim scheduled campaigns
@@ -146,6 +179,9 @@ export async function processRealEmailCampaignsHandler(
 
     if (campaignsErr) {
       errorsCount++;
+      const sanitized = sanitizeError(campaignsErr);
+      errors.push(sanitized);
+      console.error('[WORKER_RPC_ERROR]', JSON.stringify(sanitized));
       return new Response(
         JSON.stringify({
           campaigns_claimed: 0,
@@ -155,6 +191,7 @@ export async function processRealEmailCampaignsHandler(
           network_unknown: 0,
           terminal_failed: 0,
           errors_count: errorsCount,
+          errors,
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } }
       );
@@ -167,8 +204,11 @@ export async function processRealEmailCampaignsHandler(
       try {
         validatedCampaign = validateCampaignClaim(rawCamp);
         campaignsClaimedCount++;
-      } catch {
+      } catch (valErr: any) {
         errorsCount++;
+        const sanitized = sanitizeError(valErr);
+        errors.push(sanitized);
+        console.error('[WORKER_CLAIM_VALIDATION_ERROR]', JSON.stringify(sanitized));
         continue;
       }
 
@@ -182,6 +222,9 @@ export async function processRealEmailCampaignsHandler(
 
       if (createJobsErr) {
         errorsCount++;
+        const sanitized = sanitizeError(createJobsErr);
+        errors.push(sanitized);
+        console.error('[WORKER_CREATE_JOBS_ERROR]', JSON.stringify(sanitized));
         continue;
       }
 
@@ -199,6 +242,9 @@ export async function processRealEmailCampaignsHandler(
 
       if (claimJobsErr) {
         errorsCount++;
+        const sanitized = sanitizeError(claimJobsErr);
+        errors.push(sanitized);
+        console.error('[WORKER_CLAIM_JOBS_ERROR]', JSON.stringify(sanitized));
         continue;
       }
 
@@ -209,13 +255,16 @@ export async function processRealEmailCampaignsHandler(
         try {
           validatedJob = validateRealEmailJobClaim(rawJob);
           jobsClaimedCount++;
-        } catch {
+        } catch (jobValErr: any) {
           errorsCount++;
+          const sanitized = sanitizeError(jobValErr);
+          errors.push(sanitized);
+          console.error('[WORKER_JOB_VALIDATION_ERROR]', JSON.stringify(sanitized));
           continue;
         }
 
-        // Verify SHA-256 hash
-        const computedHash = await computeCanonicalPayloadHash(validatedJob.provider_request_payload);
+        // Verify SHA-256 hash strictly on PostgreSQL provider_request_json_text string
+        const computedHash = await computeCanonicalPayloadHash(validatedJob.provider_request_json_text);
         if (computedHash.toLowerCase() !== validatedJob.canonical_payload_hash.toLowerCase()) {
           terminalFailedCount++;
           await supabase.rpc('_record_real_email_submission_result', {
@@ -277,8 +326,11 @@ export async function processRealEmailCampaignsHandler(
         });
       }
     }
-  } catch {
+  } catch (uncaught: any) {
     errorsCount++;
+    const sanitized = sanitizeError(uncaught);
+    errors.push(sanitized);
+    console.error('[WORKER_UNCAUGHT_ERROR]', JSON.stringify(sanitized));
   }
 
   return new Response(
@@ -290,6 +342,7 @@ export async function processRealEmailCampaignsHandler(
       network_unknown: networkUnknownCount,
       terminal_failed: terminalFailedCount,
       errors_count: errorsCount,
+      errors,
     }),
     { status: 200, headers: { 'Content-Type': 'application/json' } }
   );

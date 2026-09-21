@@ -258,18 +258,15 @@ Deno.test('B6: SHA-256 hash calculation matches expected hex format', async () =
 });
 
 Deno.test('B7: Real email job claim validated successfully with matching hash', async () => {
-  const payload = {
-    from: 'System <no-reply@test.org>',
-    to: ['parent@domain.org'],
-    subject: 'Facture N100',
-    html: '<p>Solde dû</p>',
-  };
-  const hash = await computeCanonicalPayloadHash(payload);
+  const jsonText = '{"from": "System <no-reply@test.org>", "to": ["parent@domain.org"], "subject": "Facture N100", "html": "<p>Solde dû</p>"}';
+  const payload = JSON.parse(jsonText);
+  const hash = await computeCanonicalPayloadHash(jsonText);
   const job = {
     job_id: 'c0000000-0000-0000-0000-000000000003',
     recipient_id: 'd0000000-0000-0000-0000-000000000004',
     provider_idempotency_key: 'e0000000-0000-0000-0000-000000000005',
     provider_request_payload: payload,
+    provider_request_json_text: jsonText,
     canonical_payload_hash: hash,
     first_provider_attempt_at: null,
     attempt_count: 0,
@@ -277,6 +274,7 @@ Deno.test('B7: Real email job claim validated successfully with matching hash', 
   const res = validateRealEmailJobClaim(job);
   assertEquals(res.job_id, job.job_id);
   assertEquals(res.canonical_payload_hash, hash);
+  assertEquals(res.provider_request_json_text, jsonText);
 });
 
 Deno.test('B8: Real email job claim with invalid UUID rejected', () => {
@@ -290,6 +288,7 @@ Deno.test('B8: Real email job claim with invalid UUID rejected', () => {
       subject: 'sub',
       html: 'html',
     },
+    provider_request_json_text: '{"from": "a@b.com", "to": ["c@d.com"], "subject": "sub", "html": "html"}',
     canonical_payload_hash: 'a'.repeat(64),
     first_provider_attempt_at: null,
     attempt_count: 0,
@@ -462,6 +461,7 @@ Deno.test('D2: Worker HTTP response contains no sensitive fields', async () => {
   const keys = Object.keys(json).sort();
   const expectedKeys = [
     'campaigns_claimed',
+    'errors',
     'errors_count',
     'jobs_claimed',
     'network_unknown',
@@ -471,6 +471,84 @@ Deno.test('D2: Worker HTTP response contains no sensitive fields', async () => {
   ].sort();
 
   assertEquals(keys, expectedKeys);
+});
+
+Deno.test('D3: Scheduled campaign due is successfully claimed and conforms to validateCampaignClaim', async () => {
+  Deno.env.set('FINANCE_EMAIL_WORKER_SECRET', WORKER_SECRET);
+  Deno.env.set('REAL_EMAIL_TRANSPORT_MODE', 'test');
+  Deno.env.set('SUPABASE_URL', 'https://mock.supabase.co');
+  Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'mock-key');
+
+  const validClaim = {
+    campaign_id: '11111111-1111-1111-1111-111111111111',
+    school_id: '22222222-2222-2222-2222-222222222222',
+    channel: 'email',
+    recipient_count: 1,
+    from_name: 'École Test',
+    reply_to_email: 'contact@ecole.org',
+    daily_quota: 100,
+  };
+
+  const mockSupabase = {
+    rpc: (fnName: string) => {
+      if (fnName === '_claim_scheduled_real_email_campaigns') {
+        return Promise.resolve({ data: [validClaim], error: null });
+      }
+      if (fnName === '_create_real_email_jobs_for_campaign') {
+        return Promise.resolve({ data: null, error: null });
+      }
+      if (fnName === '_claim_real_email_jobs') {
+        return Promise.resolve({ data: [], error: null });
+      }
+      return Promise.resolve({ data: null, error: null });
+    },
+  };
+
+  const req = new Request('http://localhost/process-real-email-campaigns', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${WORKER_SECRET}` },
+  });
+
+  const res = await processRealEmailCampaignsHandler(req, undefined, mockSupabase);
+  const json = await res.json();
+  assertEquals(res.status, 200);
+  assertEquals(json.campaigns_claimed, 1);
+  assertEquals(json.errors_count, 0);
+});
+
+Deno.test('D4: RPC error in _claim_scheduled_real_email_campaigns is sanitized and visible in response', async () => {
+  Deno.env.set('FINANCE_EMAIL_WORKER_SECRET', WORKER_SECRET);
+  Deno.env.set('REAL_EMAIL_TRANSPORT_MODE', 'test');
+
+  const mockRpcError = {
+    code: '42P01',
+    message: 'invalid reference to FROM-clause entry for table "c" with email secret@ecole.org',
+    details: 'There is an entry for table "c"',
+    hint: 'Do not reference target table in JOIN ON clause',
+  };
+
+  const mockSupabase = {
+    rpc: (fnName: string) => {
+      if (fnName === '_claim_scheduled_real_email_campaigns') {
+        return Promise.resolve({ data: null, error: mockRpcError });
+      }
+      return Promise.resolve({ data: null, error: null });
+    },
+  };
+
+  const req = new Request('http://localhost/process-real-email-campaigns', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${WORKER_SECRET}` },
+  });
+
+  const res = await processRealEmailCampaignsHandler(req, undefined, mockSupabase);
+  const json = await res.json();
+  assertEquals(res.status, 200);
+  assertEquals(json.campaigns_claimed, 0);
+  assertEquals(json.errors_count, 1);
+  assertEquals(json.errors.length, 1);
+  assertEquals(json.errors[0].code, '42P01');
+  assertEquals(json.errors[0].message.includes('[REDACTED_EMAIL]'), true);
 });
 
 // --- CATEGORY E: WEBHOOK SVIX VERIFICATION & EVENT MAPPINGS (19 TESTS) ---
@@ -903,4 +981,368 @@ Deno.test('E19: Webhook rejects oversized body (>64KB) with 400', async () => {
 
   const res = await resendDeliveryWebhookHandler(req);
   assertEquals(res.status, 400);
+});
+
+// --- CATEGORY F: CANONICAL HASH & RECOVERY DETERMINISM (9 TESTS) ---
+
+Deno.test('F1: SHA-256 hash identical between raw JSON text string and Deno computeCanonicalPayloadHash', async () => {
+  const jsonText = '{"from": "a@b.com", "to": ["c@d.com"], "subject": "Test", "html": "<p>Hi</p>"}';
+  const hash = await computeCanonicalPayloadHash(jsonText);
+  assertEquals(hash.length, 64);
+  assertEquals(/^[0-9a-f]{64}$/.test(hash), true);
+
+  const hashAgain = await computeCanonicalPayloadHash(jsonText);
+  assertEquals(hash, hashAgain);
+});
+
+Deno.test('F2: Nested objects SHA-256 hash determinism', async () => {
+  const nestedText = '{"a": {"b": 1, "c": {"d": "nested_value"}}}';
+  const hash1 = await computeCanonicalPayloadHash(nestedText);
+  const hash2 = await computeCanonicalPayloadHash(nestedText);
+  assertEquals(hash1, hash2);
+});
+
+Deno.test('F3: Array SHA-256 hash determinism', async () => {
+  const arrayText = '{"to": ["email1@test.org", "email2@test.org"], "items": [1, 2, true, null]}';
+  const hash1 = await computeCanonicalPayloadHash(arrayText);
+  const hash2 = await computeCanonicalPayloadHash(arrayText);
+  assertEquals(hash1, hash2);
+});
+
+Deno.test('F4: Null values handling in JSON text hashing', async () => {
+  const nullText = '{"field": null, "sub": {"null_val": null}}';
+  const hash = await computeCanonicalPayloadHash(nullText);
+  assertEquals(hash.length, 64);
+  assertEquals(nullText.includes('null'), true);
+});
+
+Deno.test('F5: Booleans and numbers SHA-256 hash determinism', async () => {
+  const numText = '{"bool_true": true, "bool_false": false, "num_int": 42, "num_float": 10.5}';
+  const hash1 = await computeCanonicalPayloadHash(numText);
+  const hash2 = await computeCanonicalPayloadHash(numText);
+  assertEquals(hash1, hash2);
+});
+
+Deno.test('F6: Unicode characters and escapes SHA-256 hash determinism', async () => {
+  const unicodeText = '{"subject": "ÉCOLECONNECT — 4E-7 ✨ Rappel de paiement", "emoji": "🎯"}';
+  const hash1 = await computeCanonicalPayloadHash(unicodeText);
+  const hash2 = await computeCanonicalPayloadHash(unicodeText);
+  assertEquals(hash1, hash2);
+});
+
+Deno.test('F7: Key order mismatch detected (PostgreSQL length-sorted key order vs JS key order)', async () => {
+  // PostgreSQL jsonb_out sorts keys by length then lexicographically: "to" (2 chars) before "from" (4 chars)
+  const pgText = '{"to": ["c@d.com"], "from": "a@b.com", "html": "<p>h</p>", "subject": "sub"}';
+  const jsText = '{"from": "a@b.com", "to": ["c@d.com"], "subject": "sub", "html": "<p>h</p>"}';
+
+  const hashPg = await computeCanonicalPayloadHash(pgText);
+  const hashJs = await computeCanonicalPayloadHash(jsText);
+
+  // Assert hashes are different because key order in string differs
+  assertEquals(hashPg !== hashJs, true);
+});
+
+Deno.test('F8: Pre-submission hash mismatch causes terminal_failed and records CANONICAL_HASH_MISMATCH', async () => {
+  Deno.env.set('FINANCE_EMAIL_WORKER_SECRET', WORKER_SECRET);
+  Deno.env.set('REAL_EMAIL_TRANSPORT_MODE', 'test');
+  Deno.env.set('SUPABASE_URL', 'https://mock.supabase.co');
+  Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'mock-key');
+
+  let rpcRecordedErrorCode = '';
+  let rpcRecordedStatus = '';
+
+  const jobWithBadHash = {
+    job_id: 'c0000000-0000-0000-0000-000000000003',
+    recipient_id: 'd0000000-0000-0000-0000-000000000004',
+    provider_idempotency_key: 'e0000000-0000-0000-0000-000000000005',
+    provider_request_payload: { from: 'a@b.com', to: ['c@d.com'], subject: 'sub', html: 'html' },
+    provider_request_json_text: '{"from": "a@b.com", "to": ["c@d.com"], "subject": "sub", "html": "html"}',
+    canonical_payload_hash: '0000000000000000000000000000000000000000000000000000000000000000',
+    first_provider_attempt_at: null,
+    attempt_count: 0,
+  };
+
+  const mockSupabase = {
+    rpc: (fnName: string, params: any) => {
+      if (fnName === '_claim_scheduled_real_email_campaigns') {
+        return Promise.resolve({
+          data: [{
+            campaign_id: '11111111-1111-1111-1111-111111111111',
+            school_id: '22222222-2222-2222-2222-222222222222',
+            channel: 'email',
+            recipient_count: 1,
+            from_name: 'Test',
+            reply_to_email: null,
+            daily_quota: 100,
+          }],
+          error: null,
+        });
+      }
+      if (fnName === '_create_real_email_jobs_for_campaign') {
+        return Promise.resolve({ data: null, error: null });
+      }
+      if (fnName === '_claim_real_email_jobs') {
+        return Promise.resolve({ data: [jobWithBadHash], error: null });
+      }
+      if (fnName === '_record_real_email_submission_result') {
+        rpcRecordedErrorCode = params.p_error_code;
+        rpcRecordedStatus = params.p_status;
+        return Promise.resolve({ data: null, error: null });
+      }
+      return Promise.resolve({ data: null, error: null });
+    },
+  };
+
+  const req = new Request('http://localhost/process-real-email-campaigns', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${WORKER_SECRET}` },
+  });
+
+  const res = await processRealEmailCampaignsHandler(req, undefined, mockSupabase);
+  const json = await res.json();
+
+  assertEquals(json.jobs_claimed, 1);
+  assertEquals(json.terminal_failed, 1);
+  assertEquals(json.submitted, 0);
+  assertEquals(rpcRecordedErrorCode, 'CANONICAL_HASH_MISMATCH');
+  assertEquals(rpcRecordedStatus, 'terminal_failed');
+});
+
+Deno.test('F9: Zero network call when hash mismatch is detected in worker', async () => {
+  Deno.env.set('FINANCE_EMAIL_WORKER_SECRET', WORKER_SECRET);
+  Deno.env.set('REAL_EMAIL_TRANSPORT_MODE', 'test');
+
+  let networkCallMade = false;
+  const transport: FetchTransport = async () => {
+    networkCallMade = true;
+    return new Response(JSON.stringify({ id: 'msg_fail' }), { status: 200 });
+  };
+
+  const jobWithBadHash = {
+    job_id: 'c0000000-0000-0000-0000-000000000003',
+    recipient_id: 'd0000000-0000-0000-0000-000000000004',
+    provider_idempotency_key: 'e0000000-0000-0000-0000-000000000005',
+    provider_request_payload: { from: 'a@b.com', to: ['c@d.com'], subject: 'sub', html: 'html' },
+    provider_request_json_text: '{"from": "a@b.com", "to": ["c@d.com"], "subject": "sub", "html": "html"}',
+    canonical_payload_hash: '0000000000000000000000000000000000000000000000000000000000000000',
+    first_provider_attempt_at: null,
+    attempt_count: 0,
+  };
+
+  const mockSupabase = {
+    rpc: (fnName: string) => {
+      if (fnName === '_claim_scheduled_real_email_campaigns') {
+        return Promise.resolve({
+          data: [{
+            campaign_id: '11111111-1111-1111-1111-111111111111',
+            school_id: '22222222-2222-2222-2222-222222222222',
+            channel: 'email',
+            recipient_count: 1,
+            from_name: 'Test',
+            reply_to_email: null,
+            daily_quota: 100,
+          }],
+          error: null,
+        });
+      }
+      if (fnName === '_create_real_email_jobs_for_campaign') {
+        return Promise.resolve({ data: null, error: null });
+      }
+      if (fnName === '_claim_real_email_jobs') {
+        return Promise.resolve({ data: [jobWithBadHash], error: null });
+      }
+      return Promise.resolve({ data: null, error: null });
+    },
+  };
+
+  const req = new Request('http://localhost/process-real-email-campaigns', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${WORKER_SECRET}` },
+  });
+
+  await processRealEmailCampaignsHandler(req, transport, mockSupabase);
+  assertEquals(networkCallMade, false);
+});
+
+Deno.test('F10: Absence of provider_request_json_text causes claim rejection before network call', async () => {
+  Deno.env.set('FINANCE_EMAIL_WORKER_SECRET', WORKER_SECRET);
+  Deno.env.set('REAL_EMAIL_TRANSPORT_MODE', 'test');
+
+  let networkCallMade = false;
+  const transport: FetchTransport = async () => {
+    networkCallMade = true;
+    return new Response(JSON.stringify({ id: 'msg_fail' }), { status: 200 });
+  };
+
+  const jobMissingJsonText = {
+    job_id: 'c0000000-0000-0000-0000-000000000003',
+    recipient_id: 'd0000000-0000-0000-0000-000000000004',
+    provider_idempotency_key: 'e0000000-0000-0000-0000-000000000005',
+    provider_request_payload: { from: 'a@b.com', to: ['c@d.com'], subject: 'sub', html: 'html' },
+    // provider_request_json_text ABSENT
+    canonical_payload_hash: '0000000000000000000000000000000000000000000000000000000000000000',
+    first_provider_attempt_at: null,
+    attempt_count: 0,
+  };
+
+  const mockSupabase = {
+    rpc: (fnName: string) => {
+      if (fnName === '_claim_scheduled_real_email_campaigns') {
+        return Promise.resolve({
+          data: [{
+            campaign_id: '11111111-1111-1111-1111-111111111111',
+            school_id: '22222222-2222-2222-2222-222222222222',
+            channel: 'email',
+            recipient_count: 1,
+            from_name: 'Test',
+            reply_to_email: null,
+            daily_quota: 100,
+          }],
+          error: null,
+        });
+      }
+      if (fnName === '_create_real_email_jobs_for_campaign') {
+        return Promise.resolve({ data: null, error: null });
+      }
+      if (fnName === '_claim_real_email_jobs') {
+        return Promise.resolve({ data: [jobMissingJsonText], error: null });
+      }
+      return Promise.resolve({ data: null, error: null });
+    },
+  };
+
+  const req = new Request('http://localhost/process-real-email-campaigns', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${WORKER_SECRET}` },
+  });
+
+  const res = await processRealEmailCampaignsHandler(req, transport, mockSupabase);
+  const json = await res.json();
+
+  assertEquals(networkCallMade, false);
+  assertEquals(json.errors_count, 1);
+  assertEquals(json.submitted, 0);
+  assertEquals(json.errors[0].message.includes('provider_request_json_text is required non-empty string'), true);
+});
+
+Deno.test('F11: Empty provider_request_json_text string causes claim rejection before network call', async () => {
+  Deno.env.set('FINANCE_EMAIL_WORKER_SECRET', WORKER_SECRET);
+  Deno.env.set('REAL_EMAIL_TRANSPORT_MODE', 'test');
+
+  let networkCallMade = false;
+  const transport: FetchTransport = async () => {
+    networkCallMade = true;
+    return new Response(JSON.stringify({ id: 'msg_fail' }), { status: 200 });
+  };
+
+  const jobEmptyJsonText = {
+    job_id: 'c0000000-0000-0000-0000-000000000003',
+    recipient_id: 'd0000000-0000-0000-0000-000000000004',
+    provider_idempotency_key: 'e0000000-0000-0000-0000-000000000005',
+    provider_request_payload: { from: 'a@b.com', to: ['c@d.com'], subject: 'sub', html: 'html' },
+    provider_request_json_text: '   ', // EMPTY STRING
+    canonical_payload_hash: '0000000000000000000000000000000000000000000000000000000000000000',
+    first_provider_attempt_at: null,
+    attempt_count: 0,
+  };
+
+  const mockSupabase = {
+    rpc: (fnName: string) => {
+      if (fnName === '_claim_scheduled_real_email_campaigns') {
+        return Promise.resolve({
+          data: [{
+            campaign_id: '11111111-1111-1111-1111-111111111111',
+            school_id: '22222222-2222-2222-2222-222222222222',
+            channel: 'email',
+            recipient_count: 1,
+            from_name: 'Test',
+            reply_to_email: null,
+            daily_quota: 100,
+          }],
+          error: null,
+        });
+      }
+      if (fnName === '_create_real_email_jobs_for_campaign') {
+        return Promise.resolve({ data: null, error: null });
+      }
+      if (fnName === '_claim_real_email_jobs') {
+        return Promise.resolve({ data: [jobEmptyJsonText], error: null });
+      }
+      return Promise.resolve({ data: null, error: null });
+    },
+  };
+
+  const req = new Request('http://localhost/process-real-email-campaigns', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${WORKER_SECRET}` },
+  });
+
+  const res = await processRealEmailCampaignsHandler(req, transport, mockSupabase);
+  const json = await res.json();
+
+  assertEquals(networkCallMade, false);
+  assertEquals(json.errors_count, 1);
+  assertEquals(json.submitted, 0);
+  assertEquals(json.errors[0].message.includes('provider_request_json_text is required non-empty string'), true);
+});
+
+Deno.test('F12: Malformed JSON string in provider_request_json_text causes claim rejection before network call', async () => {
+  Deno.env.set('FINANCE_EMAIL_WORKER_SECRET', WORKER_SECRET);
+  Deno.env.set('REAL_EMAIL_TRANSPORT_MODE', 'test');
+
+  let networkCallMade = false;
+  const transport: FetchTransport = async () => {
+    networkCallMade = true;
+    return new Response(JSON.stringify({ id: 'msg_fail' }), { status: 200 });
+  };
+
+  const jobInvalidJson = {
+    job_id: 'c0000000-0000-0000-0000-000000000003',
+    recipient_id: 'd0000000-0000-0000-0000-000000000004',
+    provider_idempotency_key: 'e0000000-0000-0000-0000-000000000005',
+    provider_request_payload: { from: 'a@b.com', to: ['c@d.com'], subject: 'sub', html: 'html' },
+    provider_request_json_text: '{ invalid_json_syntax: true ', // MALFORMED JSON
+    canonical_payload_hash: '0000000000000000000000000000000000000000000000000000000000000000',
+    first_provider_attempt_at: null,
+    attempt_count: 0,
+  };
+
+  const mockSupabase = {
+    rpc: (fnName: string) => {
+      if (fnName === '_claim_scheduled_real_email_campaigns') {
+        return Promise.resolve({
+          data: [{
+            campaign_id: '11111111-1111-1111-1111-111111111111',
+            school_id: '22222222-2222-2222-2222-222222222222',
+            channel: 'email',
+            recipient_count: 1,
+            from_name: 'Test',
+            reply_to_email: null,
+            daily_quota: 100,
+          }],
+          error: null,
+        });
+      }
+      if (fnName === '_create_real_email_jobs_for_campaign') {
+        return Promise.resolve({ data: null, error: null });
+      }
+      if (fnName === '_claim_real_email_jobs') {
+        return Promise.resolve({ data: [jobInvalidJson], error: null });
+      }
+      return Promise.resolve({ data: null, error: null });
+    },
+  };
+
+  const req = new Request('http://localhost/process-real-email-campaigns', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${WORKER_SECRET}` },
+  });
+
+  const res = await processRealEmailCampaignsHandler(req, transport, mockSupabase);
+  const json = await res.json();
+
+  assertEquals(networkCallMade, false);
+  assertEquals(json.errors_count, 1);
+  assertEquals(json.submitted, 0);
+  assertEquals(json.errors[0].message.includes('provider_request_json_text is invalid JSON string'), true);
 });
