@@ -37,12 +37,16 @@ import {
   Unlock,
   CalendarDays,
   Sliders,
-  DollarSign
+  DollarSign,
+  Eye,
+  Edit3
 } from 'lucide-react';
 import { AdminGradesModule } from '../../components/admin/AdminGradesModule';
 import { ClassSubjectCoefficientsModule } from '../../components/admin/ClassSubjectCoefficientsModule';
 import { SchoolOfficialIdentityModule } from '../../components/admin/SchoolOfficialIdentityModule';
 import { FinanceDashboardModule } from '../../components/admin/finance/FinanceDashboardModule';
+import { StudentDossierModal } from '../../components/modals/StudentDossierModal';
+import { TeacherDossierModal } from '../../components/modals/TeacherDossierModal';
 
 interface SubjectRow {
   id: string;
@@ -386,6 +390,13 @@ export const RealSchoolAdminPortal: React.FC = () => {
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importType, setImportType] = useState<'teachers' | 'students' | 'classes'>('teachers');
+
+  // Dossiers Modals State
+  const [showStudentDossierModal, setShowStudentDossierModal] = useState(false);
+  const [selectedStudentForDossier, setSelectedStudentForDossier] = useState<string | null>(null);
+  const [showTeacherDossierModal, setShowTeacherDossierModal] = useState(false);
+  const [selectedTeacherForDossier, setSelectedTeacherForDossier] = useState<string | null>(null);
+  const [dossierInitialMode, setDossierInitialMode] = useState<'view' | 'edit'>('view');
 
   // Form States - Academic Year
   const [yearName, setYearName] = useState('2026–2027');
@@ -3127,6 +3138,31 @@ export const RealSchoolAdminPortal: React.FC = () => {
                           </td>
                           <td className="p-3">
                             <div className="flex flex-wrap items-center gap-1.5">
+                              {/* Voir la Fiche */}
+                              <button
+                                onClick={() => {
+                                  setSelectedTeacherForDossier(t.id);
+                                  setDossierInitialMode('view');
+                                  setShowTeacherDossierModal(true);
+                                }}
+                                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 rounded-lg text-[10px] font-bold cursor-pointer transition-colors inline-flex items-center gap-1"
+                              >
+                                <Eye className="w-3 h-3" />
+                                <span>Voir la fiche</span>
+                              </button>
+
+                              {/* Modifier */}
+                              <button
+                                onClick={() => {
+                                  setSelectedTeacherForDossier(t.id);
+                                  setDossierInitialMode('edit');
+                                  setShowTeacherDossierModal(true);
+                                }}
+                                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-[10px] font-bold cursor-pointer transition-colors inline-flex items-center gap-1"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                <span>Modifier</span>
+                              </button>
                               {/* Invitation Action (STRICTEMENT SI status === 'not_invited') */}
                               {status === 'not_invited' && (
                                 <button
@@ -3606,6 +3642,31 @@ export const RealSchoolAdminPortal: React.FC = () => {
                               )}
                             </td>
                             <td className="p-3 text-right space-x-1.5 whitespace-nowrap">
+                              {/* Voir la Fiche */}
+                              <button
+                                onClick={() => {
+                                  setSelectedStudentForDossier(s.id);
+                                  setDossierInitialMode('view');
+                                  setShowStudentDossierModal(true);
+                                }}
+                                className="px-2.5 py-1 bg-slate-800 hover:bg-amber-500/20 text-amber-300 border border-slate-700 rounded-xl font-bold transition-all cursor-pointer inline-flex items-center gap-1 text-xs"
+                              >
+                                <Eye className="w-3 h-3" />
+                                <span>Voir la fiche</span>
+                              </button>
+
+                              {/* Modifier */}
+                              <button
+                                onClick={() => {
+                                  setSelectedStudentForDossier(s.id);
+                                  setDossierInitialMode('edit');
+                                  setShowStudentDossierModal(true);
+                                }}
+                                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl font-bold transition-all cursor-pointer inline-flex items-center gap-1 text-xs"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                <span>Modifier</span>
+                              </button>
                               <button
                                 onClick={() => openChangeClassModal(s)}
                                 className="px-2.5 py-1 bg-slate-800 hover:bg-indigo-600/30 text-indigo-300 hover:text-indigo-200 border border-slate-700 rounded-xl font-bold transition-all cursor-pointer inline-flex items-center gap-1 text-xs"
@@ -6410,6 +6471,30 @@ export const RealSchoolAdminPortal: React.FC = () => {
           </div>
         </Modal>
       )}
+
+      {/* Student Dossier Modal */}
+      <StudentDossierModal
+        isOpen={showStudentDossierModal}
+        onClose={() => {
+          setShowStudentDossierModal(false);
+          setSelectedStudentForDossier(null);
+        }}
+        studentId={selectedStudentForDossier}
+        initialMode={dossierInitialMode}
+        onStudentUpdated={() => fetchRealData()}
+      />
+
+      {/* Teacher Dossier Modal */}
+      <TeacherDossierModal
+        isOpen={showTeacherDossierModal}
+        onClose={() => {
+          setShowTeacherDossierModal(false);
+          setSelectedTeacherForDossier(null);
+        }}
+        teacherId={selectedTeacherForDossier}
+        initialMode={dossierInitialMode}
+        onTeacherUpdated={() => fetchRealData()}
+      />
 
       {/* Footer */}
       <footer className="p-4 sm:p-6 border-t border-slate-900 text-center text-xs text-slate-500">
