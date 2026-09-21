@@ -54,11 +54,54 @@ function constantTimeCompare(a: string, b: string): boolean {
   return result === 0;
 }
 
+export async function recordWorkerRunSummary(
+  supabase: any,
+  params: {
+    cron_job_name?: string;
+    execution_mode: string;
+    status_code: number;
+    campaigns_claimed: number;
+    jobs_claimed: number;
+    submitted: number;
+    retry_wait: number;
+    network_unknown: number;
+    terminal_failed: number;
+    errors_count: number;
+    error_summary: SanitizedErrorLog[] | null;
+    duration_ms: number;
+  }
+): Promise<void> {
+  if (!supabase) return;
+  try {
+    const { error } = await supabase.rpc('_record_worker_run_summary', {
+      p_cron_job_name: params.cron_job_name || 'process-real-email-campaigns-cron',
+      p_execution_mode: params.execution_mode,
+      p_status_code: params.status_code,
+      p_campaigns_claimed: params.campaigns_claimed,
+      p_jobs_claimed: params.jobs_claimed,
+      p_submitted: params.submitted,
+      p_retry_wait: params.retry_wait,
+      p_network_unknown: params.network_unknown,
+      p_terminal_failed: params.terminal_failed,
+      p_errors_count: params.errors_count,
+      p_error_summary: params.error_summary && params.error_summary.length > 0 ? params.error_summary : null,
+      p_duration_ms: params.duration_ms,
+    });
+    if (error) {
+      console.error('[OBSERVABILITY_RPC_ERROR]', JSON.stringify(sanitizeError(error)));
+    }
+  } catch (err) {
+    console.error('[OBSERVABILITY_WRITE_EXCEPTION]', JSON.stringify(sanitizeError(err)));
+  }
+}
+
 export async function processRealEmailCampaignsHandler(
   req: Request,
   customFetchFn?: FetchTransport,
   customSupabaseClient?: any
 ): Promise<Response> {
+  const startTime = Date.now();
+
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
       status: 405,
@@ -166,6 +209,7 @@ export async function processRealEmailCampaignsHandler(
   let terminalFailedCount = 0;
   let errorsCount = 0;
   const errors: SanitizedErrorLog[] = [];
+  const responseStatusCode = 200;
 
   try {
     // 1. Claim scheduled campaigns
@@ -182,148 +226,135 @@ export async function processRealEmailCampaignsHandler(
       const sanitized = sanitizeError(campaignsErr);
       errors.push(sanitized);
       console.error('[WORKER_RPC_ERROR]', JSON.stringify(sanitized));
-      return new Response(
-        JSON.stringify({
-          campaigns_claimed: 0,
-          jobs_claimed: 0,
-          submitted: 0,
-          retry_wait: 0,
-          network_unknown: 0,
-          terminal_failed: 0,
-          errors_count: errorsCount,
-          errors,
-        }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
+    } else {
+      const campaignsList = Array.isArray(campaignsData) ? campaignsData : [];
 
-    const campaignsList = Array.isArray(campaignsData) ? campaignsData : [];
-
-    for (const rawCamp of campaignsList) {
-      let validatedCampaign;
-      try {
-        validatedCampaign = validateCampaignClaim(rawCamp);
-        campaignsClaimedCount++;
-      } catch (valErr: any) {
-        errorsCount++;
-        const sanitized = sanitizeError(valErr);
-        errors.push(sanitized);
-        console.error('[WORKER_CLAIM_VALIDATION_ERROR]', JSON.stringify(sanitized));
-        continue;
-      }
-
-      // Create outbox jobs for campaign
-      const { error: createJobsErr } = await supabase.rpc(
-        '_create_real_email_jobs_for_campaign',
-        {
-          p_campaign_id: validatedCampaign.campaign_id,
-        }
-      );
-
-      if (createJobsErr) {
-        errorsCount++;
-        const sanitized = sanitizeError(createJobsErr);
-        errors.push(sanitized);
-        console.error('[WORKER_CREATE_JOBS_ERROR]', JSON.stringify(sanitized));
-        continue;
-      }
-
-      // Claim outbox jobs for execution
-      const { data: jobsData, error: claimJobsErr } = await supabase.rpc(
-        '_claim_real_email_jobs',
-        {
-          p_school_id: validatedCampaign.school_id,
-          p_campaign_id: validatedCampaign.campaign_id,
-          p_batch_size: 10,
-          p_lease_duration_seconds: 300,
-          p_worker_id: 'real-email-worker-1',
-        }
-      );
-
-      if (claimJobsErr) {
-        errorsCount++;
-        const sanitized = sanitizeError(claimJobsErr);
-        errors.push(sanitized);
-        console.error('[WORKER_CLAIM_JOBS_ERROR]', JSON.stringify(sanitized));
-        continue;
-      }
-
-      const jobsList = Array.isArray(jobsData) ? jobsData : [];
-
-      for (const rawJob of jobsList) {
-        let validatedJob;
+      for (const rawCamp of campaignsList) {
+        let validatedCampaign;
         try {
-          validatedJob = validateRealEmailJobClaim(rawJob);
-          jobsClaimedCount++;
-        } catch (jobValErr: any) {
+          validatedCampaign = validateCampaignClaim(rawCamp);
+          campaignsClaimedCount++;
+        } catch (valErr: any) {
           errorsCount++;
-          const sanitized = sanitizeError(jobValErr);
+          const sanitized = sanitizeError(valErr);
           errors.push(sanitized);
-          console.error('[WORKER_JOB_VALIDATION_ERROR]', JSON.stringify(sanitized));
+          console.error('[WORKER_CLAIM_VALIDATION_ERROR]', JSON.stringify(sanitized));
           continue;
         }
 
-        // Verify SHA-256 hash strictly on PostgreSQL provider_request_json_text string
-        const computedHash = await computeCanonicalPayloadHash(validatedJob.provider_request_json_text);
-        if (computedHash.toLowerCase() !== validatedJob.canonical_payload_hash.toLowerCase()) {
-          terminalFailedCount++;
-          await supabase.rpc('_record_real_email_submission_result', {
-            p_job_id: validatedJob.job_id,
-            p_status: 'terminal_failed',
-            p_provider_message_id: null,
-            p_error_code: 'CANONICAL_HASH_MISMATCH',
-            p_error_message: 'Payload hash verification failed before submission',
-            p_request_payload: validatedJob.provider_request_payload,
-            p_response_payload: { error: 'Hash mismatch' },
-          });
-          continue;
-        }
-
-        // Execute email sending via Resend client
-        const resendRes = await resendClient.sendEmail(
-          validatedJob.provider_idempotency_key,
-          validatedJob.provider_request_payload
+        // Create outbox jobs for campaign
+        const { error: createJobsErr } = await supabase.rpc(
+          '_create_real_email_jobs_for_campaign',
+          {
+            p_campaign_id: validatedCampaign.campaign_id,
+          }
         );
 
-        let mappedStatus: 'submitted' | 'retry_wait' | 'terminal_failed' | 'network_unknown' = 'terminal_failed';
-
-        if (resendRes.ok && resendRes.providerMessageId) {
-          mappedStatus = 'submitted';
-        } else if (resendRes.status === 409) {
-          const errStr = (resendRes.errorCode || '') + ' ' + (resendRes.errorMessage || '');
-          if (errStr.includes('concurrent_idempotent_requests')) {
-            mappedStatus = 'retry_wait';
-          } else if (errStr.includes('invalid_idempotent_request')) {
-            mappedStatus = 'terminal_failed';
-          } else {
-            mappedStatus = 'terminal_failed';
-          }
-        } else if (resendRes.status === 429) {
-          mappedStatus = 'retry_wait';
-        } else if (resendRes.status >= 500 && resendRes.status <= 599) {
-          mappedStatus = 'retry_wait';
-        } else if (resendRes.status >= 400 && resendRes.status <= 499) {
-          mappedStatus = 'terminal_failed';
-        } else if (resendRes.isAbortError || resendRes.isNetworkError) {
-          mappedStatus = 'network_unknown';
-        } else {
-          mappedStatus = 'network_unknown';
+        if (createJobsErr) {
+          errorsCount++;
+          const sanitized = sanitizeError(createJobsErr);
+          errors.push(sanitized);
+          console.error('[WORKER_CREATE_JOBS_ERROR]', JSON.stringify(sanitized));
+          continue;
         }
 
-        if (mappedStatus === 'submitted') submittedCount++;
-        else if (mappedStatus === 'retry_wait') retryWaitCount++;
-        else if (mappedStatus === 'network_unknown') networkUnknownCount++;
-        else if (mappedStatus === 'terminal_failed') terminalFailedCount++;
+        // Claim outbox jobs for execution
+        const { data: jobsData, error: claimJobsErr } = await supabase.rpc(
+          '_claim_real_email_jobs',
+          {
+            p_school_id: validatedCampaign.school_id,
+            p_campaign_id: validatedCampaign.campaign_id,
+            p_batch_size: 10,
+            p_lease_duration_seconds: 300,
+            p_worker_id: 'real-email-worker-1',
+          }
+        );
 
-        await supabase.rpc('_record_real_email_submission_result', {
-          p_job_id: validatedJob.job_id,
-          p_status: mappedStatus,
-          p_provider_message_id: resendRes.providerMessageId || null,
-          p_error_code: resendRes.errorCode || null,
-          p_error_message: resendRes.errorMessage || null,
-          p_request_payload: validatedJob.provider_request_payload,
-          p_response_payload: resendRes.rawResponseJson || {},
-        });
+        if (claimJobsErr) {
+          errorsCount++;
+          const sanitized = sanitizeError(claimJobsErr);
+          errors.push(sanitized);
+          console.error('[WORKER_CLAIM_JOBS_ERROR]', JSON.stringify(sanitized));
+          continue;
+        }
+
+        const jobsList = Array.isArray(jobsData) ? jobsData : [];
+
+        for (const rawJob of jobsList) {
+          let validatedJob;
+          try {
+            validatedJob = validateRealEmailJobClaim(rawJob);
+            jobsClaimedCount++;
+          } catch (jobValErr: any) {
+            errorsCount++;
+            const sanitized = sanitizeError(jobValErr);
+            errors.push(sanitized);
+            console.error('[WORKER_JOB_VALIDATION_ERROR]', JSON.stringify(sanitized));
+            continue;
+          }
+
+          // Verify SHA-256 hash strictly on PostgreSQL provider_request_json_text string
+          const computedHash = await computeCanonicalPayloadHash(validatedJob.provider_request_json_text);
+          if (computedHash.toLowerCase() !== validatedJob.canonical_payload_hash.toLowerCase()) {
+            terminalFailedCount++;
+            await supabase.rpc('_record_real_email_submission_result', {
+              p_job_id: validatedJob.job_id,
+              p_status: 'terminal_failed',
+              p_provider_message_id: null,
+              p_error_code: 'CANONICAL_HASH_MISMATCH',
+              p_error_message: 'Payload hash verification failed before submission',
+              p_request_payload: validatedJob.provider_request_payload,
+              p_response_payload: { error: 'Hash mismatch' },
+            });
+            continue;
+          }
+
+          // Execute email sending via Resend client
+          const resendRes = await resendClient.sendEmail(
+            validatedJob.provider_idempotency_key,
+            validatedJob.provider_request_payload
+          );
+
+          let mappedStatus: 'submitted' | 'retry_wait' | 'terminal_failed' | 'network_unknown' = 'terminal_failed';
+
+          if (resendRes.ok && resendRes.providerMessageId) {
+            mappedStatus = 'submitted';
+          } else if (resendRes.status === 409) {
+            const errStr = (resendRes.errorCode || '') + ' ' + (resendRes.errorMessage || '');
+            if (errStr.includes('concurrent_idempotent_requests')) {
+              mappedStatus = 'retry_wait';
+            } else if (errStr.includes('invalid_idempotent_request')) {
+              mappedStatus = 'terminal_failed';
+            } else {
+              mappedStatus = 'terminal_failed';
+            }
+          } else if (resendRes.status === 429) {
+            mappedStatus = 'retry_wait';
+          } else if (resendRes.status >= 500 && resendRes.status <= 599) {
+            mappedStatus = 'retry_wait';
+          } else if (resendRes.status >= 400 && resendRes.status <= 499) {
+            mappedStatus = 'terminal_failed';
+          } else if (resendRes.isAbortError || resendRes.isNetworkError) {
+            mappedStatus = 'network_unknown';
+          } else {
+            mappedStatus = 'network_unknown';
+          }
+
+          if (mappedStatus === 'submitted') submittedCount++;
+          else if (mappedStatus === 'retry_wait') retryWaitCount++;
+          else if (mappedStatus === 'network_unknown') networkUnknownCount++;
+          else if (mappedStatus === 'terminal_failed') terminalFailedCount++;
+
+          await supabase.rpc('_record_real_email_submission_result', {
+            p_job_id: validatedJob.job_id,
+            p_status: mappedStatus,
+            p_provider_message_id: resendRes.providerMessageId || null,
+            p_error_code: resendRes.errorCode || null,
+            p_error_message: resendRes.errorMessage || null,
+            p_request_payload: validatedJob.provider_request_payload,
+            p_response_payload: resendRes.rawResponseJson || {},
+          });
+        }
       }
     }
   } catch (uncaught: any) {
@@ -331,6 +362,24 @@ export async function processRealEmailCampaignsHandler(
     const sanitized = sanitizeError(uncaught);
     errors.push(sanitized);
     console.error('[WORKER_UNCAUGHT_ERROR]', JSON.stringify(sanitized));
+  } finally {
+    if (supabase) {
+      const durationMs = Date.now() - startTime;
+      await recordWorkerRunSummary(supabase, {
+        cron_job_name: 'process-real-email-campaigns-cron',
+        execution_mode: mode,
+        status_code: responseStatusCode,
+        campaigns_claimed: campaignsClaimedCount,
+        jobs_claimed: jobsClaimedCount,
+        submitted: submittedCount,
+        retry_wait: retryWaitCount,
+        network_unknown: networkUnknownCount,
+        terminal_failed: terminalFailedCount,
+        errors_count: errorsCount,
+        error_summary: errors,
+        duration_ms: durationMs,
+      });
+    }
   }
 
   return new Response(
@@ -344,7 +393,7 @@ export async function processRealEmailCampaignsHandler(
       errors_count: errorsCount,
       errors,
     }),
-    { status: 200, headers: { 'Content-Type': 'application/json' } }
+    { status: responseStatusCode, headers: { 'Content-Type': 'application/json' } }
   );
 }
 

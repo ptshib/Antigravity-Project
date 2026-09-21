@@ -1346,3 +1346,72 @@ Deno.test('F12: Malformed JSON string in provider_request_json_text causes claim
   assertEquals(json.submitted, 0);
   assertEquals(json.errors[0].message.includes('provider_request_json_text is invalid JSON string'), true);
 });
+
+// --- CATEGORY G: OBSERVABILITY & RUN SUMMARY RECORDING (2 TESTS) ---
+
+Deno.test('G1: Worker invokes _record_worker_run_summary RPC upon completion with metrics', async () => {
+  Deno.env.set('FINANCE_EMAIL_WORKER_SECRET', WORKER_SECRET);
+  Deno.env.set('REAL_EMAIL_TRANSPORT_MODE', 'test');
+  Deno.env.set('SUPABASE_URL', 'https://mock.supabase.co');
+  Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'mock-key');
+
+  let summaryRpcCalled = false;
+  let summaryParams: any = null;
+
+  const mockSupabase = {
+    rpc: (fnName: string, params: any) => {
+      if (fnName === '_claim_scheduled_real_email_campaigns') {
+        return Promise.resolve({ data: [], error: null });
+      }
+      if (fnName === '_record_worker_run_summary') {
+        summaryRpcCalled = true;
+        summaryParams = params;
+        return Promise.resolve({ data: '00000000-0000-0000-0000-000000000001', error: null });
+      }
+      return Promise.resolve({ data: null, error: null });
+    },
+  };
+
+  const req = new Request('http://localhost/process-real-email-campaigns', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${WORKER_SECRET}` },
+  });
+
+  const res = await processRealEmailCampaignsHandler(req, undefined, mockSupabase);
+  assertEquals(res.status, 200);
+  assertEquals(summaryRpcCalled, true);
+  assertEquals(summaryParams.p_cron_job_name, 'process-real-email-campaigns-cron');
+  assertEquals(summaryParams.p_execution_mode, 'test');
+  assertEquals(summaryParams.p_campaigns_claimed, 0);
+});
+
+Deno.test('G2: Observability RPC failure does not transform send success into HTTP error', async () => {
+  Deno.env.set('FINANCE_EMAIL_WORKER_SECRET', WORKER_SECRET);
+  Deno.env.set('REAL_EMAIL_TRANSPORT_MODE', 'test');
+  Deno.env.set('SUPABASE_URL', 'https://mock.supabase.co');
+  Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'mock-key');
+
+  const mockSupabase = {
+    rpc: (fnName: string) => {
+      if (fnName === '_claim_scheduled_real_email_campaigns') {
+        return Promise.resolve({ data: [], error: null });
+      }
+      if (fnName === '_record_worker_run_summary') {
+        // Observability fails intentionally with DB error
+        return Promise.resolve({ data: null, error: { code: '50000', message: 'Observability DB connection failed' } });
+      }
+      return Promise.resolve({ data: null, error: null });
+    },
+  };
+
+  const req = new Request('http://localhost/process-real-email-campaigns', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${WORKER_SECRET}` },
+  });
+
+  const res = await processRealEmailCampaignsHandler(req, undefined, mockSupabase);
+  const json = await res.json();
+  assertEquals(res.status, 200);
+  assertEquals(json.campaigns_claimed, 0);
+  assertEquals(json.errors_count, 0);
+});
