@@ -19,7 +19,6 @@ import {
   Download,
   FileCheck,
   ShieldCheck,
-  CalendarCheck,
   MessageSquare,
   Calendar,
   FileText,
@@ -30,6 +29,7 @@ import {
 import { downloadReportCardPdfBlob, isPublishedPdfMetadataComplete } from '../../services/reportCardPdfService';
 import { buildGetSchoolCalendarParams, extractAndSortCalendarPeriods } from '../../services/calendarService';
 import { ParentFinanceModule } from '../../components/parent/ParentFinanceModule';
+import { ParentAttendanceModule } from '../../components/parent/ParentAttendanceModule';
 
 // Sub-components pour le design modernisé
 import { ParentPortalSidebar } from '../../components/parent/portal/ParentPortalSidebar';
@@ -935,13 +935,11 @@ export const RealParentPortal: React.FC = () => {
               )}
 
               {/* PLACEHOLDER TABS FOR FUTURE RPC INTEGRATION */}
-              {activeTab === 'presences' && (
-                <ParentModulePlaceholder
-                  title="Suivi des Présences & Absences"
-                  description="Le module de consultation en temps réel de l'appel et de la justification des absences sera actif après le déploiement du RPC Présences Parent."
-                  icon={CalendarCheck}
-                  childName={activeChild?.first_name}
-                />
+              {/* TAB 3: PRÉSENCES & ASSIDUITÉ RÉELLES */}
+              {activeTab === 'presences' && selectedChildId && (
+                <div className="animate-fade-in">
+                  <ParentAttendanceModule studentId={selectedChildId} />
+                </div>
               )}
 
               {activeTab === 'devoirs' && (
