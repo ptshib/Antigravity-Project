@@ -3,7 +3,6 @@ import {
   X,
   UserCheck,
   BookOpen,
-  Phone,
   Mail,
   Edit3,
   Save,

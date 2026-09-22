@@ -6481,7 +6481,7 @@ export const RealSchoolAdminPortal: React.FC = () => {
         }}
         studentId={selectedStudentForDossier}
         initialMode={dossierInitialMode}
-        onStudentUpdated={() => fetchRealData()}
+        onStudentUpdated={() => loadSchoolPortalData()}
       />
 
       {/* Teacher Dossier Modal */}
@@ -6493,7 +6493,7 @@ export const RealSchoolAdminPortal: React.FC = () => {
         }}
         teacherId={selectedTeacherForDossier}
         initialMode={dossierInitialMode}
-        onTeacherUpdated={() => fetchRealData()}
+        onTeacherUpdated={() => loadSchoolPortalData()}
       />
 
       {/* Footer */}
