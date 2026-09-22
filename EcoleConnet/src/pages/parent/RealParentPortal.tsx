@@ -30,6 +30,7 @@ import { downloadReportCardPdfBlob, isPublishedPdfMetadataComplete } from '../..
 import { buildGetSchoolCalendarParams, extractAndSortCalendarPeriods } from '../../services/calendarService';
 import { ParentFinanceModule } from '../../components/parent/ParentFinanceModule';
 import { ParentAttendanceModule } from '../../components/parent/ParentAttendanceModule';
+import { ParentHomeworkModule } from '../../components/parent/ParentHomeworkModule';
 
 // Sub-components pour le design modernisé
 import { ParentPortalSidebar } from '../../components/parent/portal/ParentPortalSidebar';
@@ -942,13 +943,11 @@ export const RealParentPortal: React.FC = () => {
                 </div>
               )}
 
-              {activeTab === 'devoirs' && (
-                <ParentModulePlaceholder
-                  title="Devoirs & Cahier de Texte"
-                  description="Retrouvez le calendrier des devoirs à domicile et travaux d'évaluation programmés par les enseignants de la classe."
-                  icon={BookOpen}
-                  childName={activeChild?.first_name}
-                />
+              {/* TAB 5: DEVOIRS & CAHIER DE TEXTE RÉELS */}
+              {activeTab === 'devoirs' && selectedChildId && (
+                <div className="animate-fade-in">
+                  <ParentHomeworkModule studentId={selectedChildId} />
+                </div>
               )}
 
               {activeTab === 'emploi_du_temps' && (
