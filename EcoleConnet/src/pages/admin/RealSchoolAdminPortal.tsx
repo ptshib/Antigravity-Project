@@ -27,6 +27,7 @@ import {
   CalendarCheck,
   RotateCcw,
   FileText,
+  FileCheck,
   XCircle,
   Award,
   Mail,
@@ -48,6 +49,7 @@ import { FinanceDashboardModule } from '../../components/admin/finance/FinanceDa
 import { StudentDossierModal } from '../../components/modals/StudentDossierModal';
 import { TeacherDossierModal } from '../../components/modals/TeacherDossierModal';
 import { SchoolTimetableManagement } from '../../components/admin/SchoolTimetableManagement';
+import { AdminSchoolDocumentsModule } from '../../components/admin/AdminSchoolDocumentsModule';
 
 interface SubjectRow {
   id: string;
@@ -288,6 +290,7 @@ type SchoolAdminTab =
   | 'notes'
   | 'affectations'
   | 'importations'
+  | 'documents'
   | 'parametres';
 
 export const RealSchoolAdminPortal: React.FC = () => {
@@ -2143,6 +2146,7 @@ export const RealSchoolAdminPortal: React.FC = () => {
           { id: 'presences', label: `Présences (${attendanceSessions.length})`, icon: CalendarCheck },
           { id: 'devoirs', label: `Devoirs (${adminHomeworkList.length})`, icon: FileText },
           { id: 'emploi_du_temps', label: 'Emploi du temps', icon: CalendarDays },
+          { id: 'documents', label: 'Documents scolaires', icon: FileCheck },
           { id: 'notes', label: `Notes (${adminAssessmentsCount})`, icon: Award },
           { id: 'affectations', label: `Affectations (${assignments.length})`, icon: Layers },
           { id: 'importations', label: `Importations (${importJobs.length})`, icon: Upload },
@@ -3754,6 +3758,21 @@ export const RealSchoolAdminPortal: React.FC = () => {
               last_name: t.last_name,
               speciality: t.speciality
             }))}
+          />
+        )}
+
+        {/* TAB: DOCUMENTS SCOLAIRES */}
+        {activeTab === 'documents' && (
+          <AdminSchoolDocumentsModule
+            classes={classes.map(c => ({ id: c.id, name: c.name }))}
+            students={students.map(s => ({
+              id: s.id,
+              first_name: s.first_name,
+              last_name: s.last_name,
+              class_id: s.class_id,
+              student_number: s.student_number
+            }))}
+            onShowToast={(msg, type) => showToast(msg, type === 'error' ? 'urgent' : (type as any))}
           />
         )}
 
