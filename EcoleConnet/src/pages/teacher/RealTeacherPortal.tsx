@@ -93,6 +93,7 @@ export const RealTeacherPortal: React.FC = () => {
     id: string;
     class_id: string;
     class_name: string;
+    is_homeroom?: boolean;
     subject_id: string | null;
     subjects: string[];
     subject_name: string;
@@ -229,8 +230,22 @@ export const RealTeacherPortal: React.FC = () => {
       setSchoolTermsList(termsData || []);
       setSchoolPeriodsList(periodsData || []);
 
-      // 4. Filtrer les affectations actives de cet enseignant
-      const myAssignments = (assignData || [])
+      // 4. Filtrer les affectations actives de cet enseignant et identifier les classes dont il est titulaire
+      const myHomeroomClasses = (clsData || []).filter(
+        c => c.is_active !== false && c.homeroom_teacher_id === profile.id
+      );
+
+      const synthesizedHomeroomAssignments: TeacherAssignment[] = myHomeroomClasses.map(c => ({
+        id: `homeroom-${c.id}`,
+        class_id: c.id,
+        subject_id: null,
+        academic_year_id: c.academic_year_id || '',
+        is_active: true,
+        class_name: c.name || 'Classe inconnue',
+        subject_name: 'Titularisation (Appel Général)'
+      }));
+
+      const mySubjectAssignments = (assignData || [])
         .filter(a => tchData && a.teacher_id === tchData.id)
         .map(a => {
           const cls = clsData?.find(c => c.id === a.class_id);
@@ -242,32 +257,50 @@ export const RealTeacherPortal: React.FC = () => {
           };
         });
 
-      setAssignments(myAssignments);
+      setAssignments([...synthesizedHomeroomAssignments, ...mySubjectAssignments]);
 
-      // 5. Regrouper les affectations par classe unique pour l'affichage (Point 4)
+      // 5. Regrouper les affectations (titularisation + matières) par classe unique sans doublon
       const classGroupMap = new Map<string, {
         id: string;
         class_id: string;
         class_name: string;
+        is_homeroom: boolean;
         subject_id: string | null;
         subjects: string[];
         subject_name: string;
       }>();
 
-      myAssignments.forEach(a => {
+      // Enregistrer d'abord les classes dont l'enseignant est titulaire
+      myHomeroomClasses.forEach(c => {
+        classGroupMap.set(c.id, {
+          id: `homeroom-${c.id}`,
+          class_id: c.id,
+          class_name: c.name || 'Classe inconnue',
+          is_homeroom: true,
+          subject_id: null,
+          subjects: [],
+          subject_name: 'Titularisation (Appel Général)'
+        });
+      });
+
+      // Fusionner avec les affectations par matière
+      mySubjectAssignments.forEach(a => {
         if (!classGroupMap.has(a.class_id)) {
           classGroupMap.set(a.class_id, {
             id: a.id,
             class_id: a.class_id,
             class_name: a.class_name,
+            is_homeroom: false,
             subject_id: a.subject_id || null,
             subjects: a.subject_name ? [a.subject_name] : [],
             subject_name: a.subject_name || 'Appel Général'
           });
         } else {
           const existing = classGroupMap.get(a.class_id)!;
-          if (a.subject_name && !existing.subjects.includes(a.subject_name)) {
-            existing.subjects.push(a.subject_name);
+          if (a.subject_name && a.subject_name !== 'Appel Général' && a.subject_name !== 'Titularisation (Appel Général)') {
+            if (!existing.subjects.includes(a.subject_name)) {
+              existing.subjects.push(a.subject_name);
+            }
             existing.subject_name = existing.subjects.join(', ');
           }
         }
@@ -948,7 +981,14 @@ export const RealTeacherPortal: React.FC = () => {
                     {groupedAssignments.map(a => (
                       <div key={a.class_id} className="p-3 bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-between">
                         <div>
-                          <p className="font-extrabold text-white text-xs">{a.class_name}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-extrabold text-white text-xs">{a.class_name}</p>
+                            {a.is_homeroom && (
+                              <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-full font-bold text-[10px]">
+                                Titulaire
+                              </span>
+                            )}
+                          </div>
                           <span className="text-[11px] text-amber-400 font-medium">{a.subject_name}</span>
                         </div>
                         <button
@@ -1027,14 +1067,21 @@ export const RealTeacherPortal: React.FC = () => {
                   return (
                     <div key={a.class_id} className="p-5 bg-slate-900 rounded-3xl border border-slate-800 space-y-3">
                       <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                        <span className="text-base font-extrabold text-white">{a.class_name}</span>
-                        <span className="px-2.5 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-full font-bold text-[10px]">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base font-extrabold text-white">{a.class_name}</span>
+                          {a.is_homeroom && (
+                            <span className="px-2.5 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-full font-bold text-[10px]">
+                              Titulaire
+                            </span>
+                          )}
+                        </div>
+                        <span className="px-2.5 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-full font-bold text-[10px]">
                           Active
                         </span>
                       </div>
 
                       <div className="space-y-1 text-xs text-slate-300">
-                        <p><strong className="text-slate-400">Matière(s) enseignée(s) :</strong> {a.subject_name}</p>
+                        <p><strong className="text-slate-400">Rôle / Matière(s) :</strong> {a.subject_name}</p>
                         <p><strong className="text-slate-400">Élèves inscrits :</strong> {classStudents.length} élèves</p>
                       </div>
 

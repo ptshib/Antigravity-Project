@@ -3,71 +3,56 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { buildCorsHeaders } from '../_shared/cors.ts';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-serve(async (req) => {
-  // 1. Validation de la méthode HTTP (Point 7)
-  if (req.method !== 'POST' && req.method !== 'OPTIONS') {
+export async function inviteSchoolTeacherHandler(req: Request): Promise<Response> {
+  // 1. Initialisation des en-têtes CORS universels
+  const ecoleconnectAppUrl = Deno.env.get('ECOLECONNECT_APP_URL');
+  const { isAllowed, headers: corsHeaders } = buildCorsHeaders(req, ecoleconnectAppUrl);
+
+  // 2. Traitement immédiat des requêtes OPTIONS (Preflight)
+  if (req.method === 'OPTIONS') {
+    if (!isAllowed) {
+      return new Response(
+        JSON.stringify({ error: 'Origine CORS non autorisée.' }),
+        { status: 403, headers: corsHeaders }
+      );
+    }
+    return new Response('ok', { status: 200, headers: corsHeaders });
+  }
+
+  // 3. Rejet immédiat si origine non autorisée (POST ou autre)
+  if (!isAllowed) {
     return new Response(
-      JSON.stringify({ error: 'Méthode HTTP non autorisée. Seules POST et OPTIONS sont acceptées.' }),
-      { status: 405, headers: { 'Content-Type': 'application/json', 'Allow': 'POST, OPTIONS' } }
+      JSON.stringify({ error: 'Origine CORS non autorisée.' }),
+      { status: 403, headers: corsHeaders }
     );
   }
 
-  // 2. Configuration Fail-Closed des variables d'environnement (Point 8)
+  // 4. Validation de la méthode HTTP (uniquement POST après OPTIONS)
+  if (req.method !== 'POST') {
+    return new Response(
+      JSON.stringify({ error: 'Méthode HTTP non autorisée. Seules POST et OPTIONS sont acceptées.' }),
+      { status: 405, headers: { ...corsHeaders, 'Allow': 'POST, OPTIONS' } }
+    );
+  }
+
+  // 5. Configuration Fail-Closed des variables d'environnement
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
-  const ecoleconnectAppUrl = Deno.env.get('ECOLECONNECT_APP_URL');
 
-  if (!supabaseUrl || !supabaseServiceKey || !supabaseAnonKey || !ecoleconnectAppUrl) {
+  if (!supabaseUrl || !supabaseServiceKey || !supabaseAnonKey) {
     console.error('Configuration serveur manquante : Variables d’environnement non définies.');
     return new Response(
       JSON.stringify({ error: 'Erreur de configuration serveur. Le service d’invitation est indisponible.' }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
+      { status: 500, headers: corsHeaders }
     );
   }
 
-  // Validation HTTPS obligatoire hors localhost/127.0.0.1
-  let allowedOrigin: string;
-  try {
-    const parsedAppUrl = new URL(ecoleconnectAppUrl);
-    const isLocal = parsedAppUrl.hostname === 'localhost' || parsedAppUrl.hostname === '127.0.0.1';
-    if (!isLocal && parsedAppUrl.protocol !== 'https:') {
-      throw new Error('L’URL d’application doit impérativement utiliser le protocole HTTPS en dehors de l’environnement local.');
-    }
-    allowedOrigin = parsedAppUrl.origin;
-  } catch (err: any) {
-    console.error('ECOLECONNECT_APP_URL invalide :', err.message);
-    return new Response(
-      JSON.stringify({ error: 'Erreur de configuration de l’URL d’application.' }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    );
-  }
-
-  // 3. Gestion des en-têtes CORS stricts sans localhost:3000
-  const reqOrigin = req.headers.get('Origin');
-  if (reqOrigin && reqOrigin !== allowedOrigin) {
-    return new Response(
-      JSON.stringify({ error: 'Origine CORS non autorisée.' }),
-      { status: 403, headers: { 'Content-Type': 'application/json', 'Vary': 'Origin' } }
-    );
-  }
-
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': allowedOrigin,
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-    'Vary': 'Origin',
-    'Content-Type': 'application/json'
-  };
-
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
-  }
-
-  // 4. Validation du Content-Type
+  // 6. Validation du Content-Type
   const contentType = req.headers.get('Content-Type') || '';
   if (!contentType.includes('application/json')) {
     return new Response(
@@ -76,7 +61,7 @@ serve(async (req) => {
     );
   }
 
-  // 5. Lecture et vérification de la taille UTF-8 réelle du corps (< 10 KB)
+  // 7. Lecture et vérification de la taille UTF-8 réelle du corps (< 10 KB)
   const rawText = await req.text();
   const byteLength = new TextEncoder().encode(rawText).length;
   if (byteLength > 10240) {
@@ -130,7 +115,7 @@ serve(async (req) => {
   }
 
   try {
-    // 6. Vérification du jeton JWT de l'appelant
+    // 8. Vérification du jeton JWT de l'appelant
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
       return new Response(
@@ -154,7 +139,7 @@ serve(async (req) => {
     // Client Admin Privilégié côté serveur
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Vérifier que l'appelant est un School Admin actif
+    // Vérifier que l'appelant est un School Admin ou Super Admin actif
     const { data: callerProfile, error: callerProfileError } = await supabaseClient
       .from('profiles')
       .select('role, is_active, school_id')
@@ -164,9 +149,8 @@ serve(async (req) => {
     if (
       callerProfileError ||
       !callerProfile ||
-      callerProfile.role !== 'school_admin' ||
       !callerProfile.is_active ||
-      !callerProfile.school_id
+      (callerProfile.role !== 'school_admin' && callerProfile.role !== 'super_admin')
     ) {
       return new Response(
         JSON.stringify({ error: 'Accès refusé : Seul un administrateur d’établissement actif peut inviter un enseignant.' }),
@@ -174,21 +158,16 @@ serve(async (req) => {
       );
     }
 
-    // Vérifier l'état de l'école
-    const { data: targetSchool, error: schoolErr } = await supabaseAdmin
-      .from('schools')
-      .select('id, status, name')
-      .eq('id', callerProfile.school_id)
-      .single();
-
-    if (schoolErr || !targetSchool || targetSchool.status !== 'active') {
+    // Si School Admin, s'assurer que l'école est associée
+    const callerSchoolId = callerProfile.school_id;
+    if (callerProfile.role === 'school_admin' && !callerSchoolId) {
       return new Response(
-        JSON.stringify({ error: 'Accès refusé : Votre établissement scolaire est suspendu ou inactif.' }),
+        JSON.stringify({ error: 'Accès refusé : Votre profil administrateur n’est rattaché à aucun établissement.' }),
         { status: 403, headers: corsHeaders }
       );
     }
 
-    // 7. Charger le dossier enseignant (Sélection ciblée)
+    // 9. Charger le dossier enseignant
     const { data: teacherRecord, error: tchErr } = await supabaseAdmin
       .from('teachers')
       .select('id, school_id, profile_id, employee_number, first_name, last_name, email, phone, employment_status, account_status')
@@ -202,9 +181,26 @@ serve(async (req) => {
       );
     }
 
-    if (teacherRecord.school_id !== callerProfile.school_id) {
+    // Contrôle d'isolation multi-école (pour school_admin)
+    if (callerProfile.role === 'school_admin' && teacherRecord.school_id !== callerSchoolId) {
       return new Response(
         JSON.stringify({ error: 'Accès refusé : Cet enseignant n’appartient pas à votre établissement.' }),
+        { status: 403, headers: corsHeaders }
+      );
+    }
+
+    const targetSchoolId = teacherRecord.school_id;
+
+    // Vérifier l'état de l'école
+    const { data: targetSchool, error: schoolErr } = await supabaseAdmin
+      .from('schools')
+      .select('id, status, name')
+      .eq('id', targetSchoolId)
+      .single();
+
+    if (schoolErr || !targetSchool || targetSchool.status !== 'active') {
+      return new Response(
+        JSON.stringify({ error: 'Accès refusé : L’établissement scolaire est suspendu ou inactif.' }),
         { status: 403, headers: corsHeaders }
       );
     }
@@ -220,11 +216,11 @@ serve(async (req) => {
     const cleanFirstName = teacherRecord.first_name.trim();
     const cleanLastName = teacherRecord.last_name.trim();
     const fullName = `${cleanFirstName} ${cleanLastName}`;
-    const redirectUrl = `${allowedOrigin}/auth/set-password`;
+    const targetOrigin = corsHeaders['Access-Control-Allow-Origin'] || 'https://ecolelink.com';
+    const redirectUrl = `${targetOrigin}/auth/set-password`;
 
-    // 8. TRAITEMENT PREMIÈRE INVITATION (`action = 'invite'`) (Point 1)
+    // 10. TRAITEMENT PREMIÈRE INVITATION (`action = 'invite'`)
     if (action === 'invite') {
-      // Vérification stricte de la valeur réelle 'not_invited' (NE JAMAIS assimiler NULL à not_invited) (Point 1)
       if (
         teacherRecord.account_status !== 'not_invited' ||
         teacherRecord.profile_id !== null ||
@@ -236,7 +232,7 @@ serve(async (req) => {
         );
       }
 
-      // 1. Détecter l'existence préalable d'un compte Auth avec cet email
+      // Détecter l'existence préalable d'un compte Auth avec cet email
       let page = 1;
       let emailExists = false;
       while (true) {
@@ -276,7 +272,7 @@ serve(async (req) => {
         );
       }
 
-      // 2. Créer l'invitation Auth par email (UNIQUEMENT dans action === 'invite') (Point 1)
+      // Créer l'invitation Auth par email
       const { data: inviteData, error: inviteErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(
         cleanEmail,
         {
@@ -286,7 +282,7 @@ serve(async (req) => {
             last_name: cleanLastName,
             full_name: fullName,
             role: 'teacher',
-            school_id: callerProfile.school_id,
+            school_id: targetSchoolId,
             teacher_id: teacher_id
           }
         }
@@ -316,7 +312,7 @@ serve(async (req) => {
 
       const newAuthUserId = inviteData.user.id;
 
-      // 3. Exécuter la RPC transactionnelle d'invitation sécurisée (p_teacher_id, p_user_id) (Point 5)
+      // Exécuter la RPC transactionnelle d'invitation sécurisée
       const { data: rpcSuccess, error: rpcErr } = await supabaseClient.rpc('process_teacher_invitation', {
         p_teacher_id: teacher_id,
         p_user_id: newAuthUserId
@@ -379,11 +375,10 @@ serve(async (req) => {
         { status: 200, headers: corsHeaders }
       );
 
-    // 9. TRAITEMENT RENVOYER L'INVITATION (`action = 'reinvite'`) (Point 2 & Point 3)
+    // 11. TRAITEMENT RENVOYER L'INVITATION (`action = 'reinvite'`)
     } else if (action === 'reinvite') {
-      // Audit obligatoire de la tentative de ré-invitation indisponible (Point 3)
       const { error: auditErr } = await supabaseAdmin.from('school_audit_logs').insert({
-        school_id: callerProfile.school_id,
+        school_id: targetSchoolId,
         actor_id: callerUser.id,
         action: 'teacher_reinvite_unavailable',
         details: {
@@ -402,7 +397,6 @@ serve(async (req) => {
         );
       }
 
-      // Réponse 503 Service Unavailable explicite (Point 2) - Ne jamais retourner success
       return new Response(
         JSON.stringify({ error: 'Le renvoi d’invitation est temporairement indisponible jusqu’à la configuration du service sécurisé d’envoi d’emails.' }),
         { status: 503, headers: corsHeaders }
@@ -421,4 +415,8 @@ serve(async (req) => {
       { status: 500, headers: corsHeaders }
     );
   }
-});
+}
+
+if (import.meta.main) {
+  serve(inviteSchoolTeacherHandler);
+}
