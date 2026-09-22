@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRealAuth } from '../../contexts/RealAuthContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { supabase } from '../../lib/supabase';
@@ -309,6 +309,63 @@ export const RealSchoolAdminPortal: React.FC = () => {
       setActiveTab('finance');
     }
   }, [isFinanceAgent, activeTab]);
+
+  // Horizontal Navigation Scroll Refs & Indicators
+  const navRef = useRef<HTMLElement | null>(null);
+  const activeTabRef = useRef<HTMLButtonElement | null>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const updateScrollIndicators = useCallback(() => {
+    const container = navRef.current;
+    if (container) {
+      const { scrollLeft, scrollWidth, clientWidth } = container;
+      setCanScrollLeft(scrollLeft > 4);
+      setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 4);
+    }
+  }, []);
+
+  useEffect(() => {
+    const container = navRef.current;
+    if (container) {
+      updateScrollIndicators();
+      container.addEventListener('scroll', updateScrollIndicators, { passive: true });
+      window.addEventListener('resize', updateScrollIndicators);
+      return () => {
+        container.removeEventListener('scroll', updateScrollIndicators);
+        window.removeEventListener('resize', updateScrollIndicators);
+      };
+    }
+  }, [updateScrollIndicators]);
+
+  // Auto-scroll active tab into visible area
+  useEffect(() => {
+    const container = navRef.current;
+    const activeEl = activeTabRef.current;
+    if (container && activeEl) {
+      const containerRect = container.getBoundingClientRect();
+      const activeRect = activeEl.getBoundingClientRect();
+
+      if (activeRect.left < containerRect.left) {
+        container.scrollTo({
+          left: container.scrollLeft + (activeRect.left - containerRect.left) - 16,
+          behavior: 'smooth'
+        });
+      } else if (activeRect.right > containerRect.right) {
+        container.scrollTo({
+          left: container.scrollLeft + (activeRect.right - containerRect.right) + 16,
+          behavior: 'smooth'
+        });
+      }
+    }
+    updateScrollIndicators();
+  }, [activeTab, updateScrollIndicators]);
+
+  const handleNavWheel = (e: React.WheelEvent<HTMLElement>) => {
+    if (navRef.current && e.deltaY !== 0) {
+      navRef.current.scrollLeft += e.deltaY;
+    }
+  };
 
   const [loading, setLoading] = useState<boolean>(true);
   const [adminAssessmentsCount, setAdminAssessmentsCount] = useState<number>(0);
@@ -2131,47 +2188,67 @@ export const RealSchoolAdminPortal: React.FC = () => {
       </header>
 
       {/* Navigation Tabs */}
-      <nav className="bg-slate-900/80 border-b border-slate-800 px-4 sm:px-6 py-2 overflow-x-auto scrollbar-none flex items-center gap-1 text-xs">
-        {[
-          { id: 'vue_densemble', label: 'Vue d’ensemble', icon: Activity },
-          { id: 'finance', label: 'Finance & Frais', icon: DollarSign },
-          { id: 'annees_scolaires', label: `Années (${academicYears.length})`, icon: Calendar },
-          { id: 'trimestres', label: `Calendrier Scolaire (${schoolTerms.length})`, icon: Clock },
-          { id: 'matieres', label: `Matières (${subjects.length})`, icon: BookMarked },
-          { id: 'coefficients', label: 'Coefficients', icon: Sliders },
-          { id: 'classes', label: `Classes (${classes.length})`, icon: BookOpen },
-          { id: 'enseignants', label: `Enseignants (${teachers.length})`, icon: UserCheck },
-          { id: 'parents', label: `Parents (${parents.length})`, icon: Users },
-          { id: 'eleves', label: `Élèves (${students.length})`, icon: GraduationCap },
-          { id: 'presences', label: `Présences (${attendanceSessions.length})`, icon: CalendarCheck },
-          { id: 'devoirs', label: `Devoirs (${adminHomeworkList.length})`, icon: FileText },
-          { id: 'emploi_du_temps', label: 'Emploi du temps', icon: CalendarDays },
-          { id: 'documents', label: 'Documents scolaires', icon: FileCheck },
-          { id: 'notes', label: `Notes (${adminAssessmentsCount})`, icon: Award },
-          { id: 'affectations', label: `Affectations (${assignments.length})`, icon: Layers },
-          { id: 'importations', label: `Importations (${importJobs.length})`, icon: Upload },
-          { id: 'parametres', label: 'Paramètres', icon: Settings }
-        ]
-          .filter(tab => !isFinanceAgent || tab.id === 'finance')
-          .map(tab => {
-            const IconComp = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as SchoolAdminTab)}
-                className={`px-3.5 py-2 rounded-xl font-bold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
-                  isActive
-                    ? 'bg-amber-500 text-slate-950 font-black shadow-md'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-                }`}
-              >
-                <IconComp className="w-3.5 h-3.5" />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
-      </nav>
+      <div className="relative bg-slate-900/80 border-b border-slate-800">
+        {canScrollLeft && (
+          <div className="absolute left-0 top-0 bottom-0 w-10 bg-gradient-to-r from-slate-900 via-slate-900/80 to-transparent pointer-events-none flex items-center justify-start pl-2 z-10 transition-opacity duration-300">
+            <span className="w-1.5 h-1.5 rounded-full bg-slate-400/60" />
+          </div>
+        )}
+
+        <nav
+          ref={navRef}
+          onWheel={handleNavWheel}
+          className="px-4 sm:px-6 py-2 overflow-x-auto scrollbar-none flex items-center gap-1 text-xs scroll-smooth"
+          aria-label="Navigation principale administrateur"
+        >
+          {[
+            { id: 'vue_densemble', label: 'Vue d’ensemble', icon: Activity },
+            { id: 'finance', label: 'Finance & Frais', icon: DollarSign },
+            { id: 'annees_scolaires', label: `Années (${academicYears.length})`, icon: Calendar },
+            { id: 'trimestres', label: `Calendrier Scolaire (${schoolTerms.length})`, icon: Clock },
+            { id: 'matieres', label: `Matières (${subjects.length})`, icon: BookMarked },
+            { id: 'coefficients', label: 'Coefficients', icon: Sliders },
+            { id: 'classes', label: `Classes (${classes.length})`, icon: BookOpen },
+            { id: 'enseignants', label: `Enseignants (${teachers.length})`, icon: UserCheck },
+            { id: 'parents', label: `Parents (${parents.length})`, icon: Users },
+            { id: 'eleves', label: `Élèves (${students.length})`, icon: GraduationCap },
+            { id: 'presences', label: `Présences (${attendanceSessions.length})`, icon: CalendarCheck },
+            { id: 'devoirs', label: `Devoirs (${adminHomeworkList.length})`, icon: FileText },
+            { id: 'emploi_du_temps', label: 'Emploi du temps', icon: CalendarDays },
+            { id: 'notes', label: `Notes (${adminAssessmentsCount})`, icon: Award },
+            { id: 'affectations', label: `Affectations (${assignments.length})`, icon: Layers },
+            { id: 'importations', label: `Importations (${importJobs.length})`, icon: Upload },
+            { id: 'documents', label: 'Documents scolaires', icon: FileCheck },
+            { id: 'parametres', label: 'Paramètres', icon: Settings }
+          ]
+            .filter(tab => !isFinanceAgent || tab.id === 'finance')
+            .map(tab => {
+              const IconComp = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  ref={isActive ? activeTabRef : null}
+                  onClick={() => setActiveTab(tab.id as SchoolAdminTab)}
+                  className={`px-3.5 py-2 rounded-xl font-bold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap flex-shrink-0 ${
+                    isActive
+                      ? 'bg-amber-500 text-slate-950 font-black shadow-md'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                  }`}
+                >
+                  <IconComp className="w-3.5 h-3.5" />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
+        </nav>
+
+        {canScrollRight && (
+          <div className="absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-slate-900 via-slate-900/80 to-transparent pointer-events-none flex items-center justify-end pr-2 z-10 transition-opacity duration-300">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shadow-sm shadow-amber-500/50" title="Plus d'onglets disponibles" />
+          </div>
+        )}
+      </div>
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-8">
