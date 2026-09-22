@@ -97,6 +97,22 @@ export async function fetchAdminSchoolDocuments(
 }
 
 /**
+ * Convertit un fichier en chaîne base64 pure (sans préfixe data URL).
+ */
+export async function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const base64 = result.includes(',') ? result.split(',')[1] : result;
+      resolve(base64);
+    };
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
  * Téléverse un nouveau document scolaire via l'Edge Function sécurisée admin-school-document-upload.
  * Ne transmet ni user_id ni school_id (résolus côté serveur via JWT).
  */
@@ -130,26 +146,37 @@ export async function uploadSchoolDocument(
     throw new Error('Un élève doit être sélectionné pour la portée "Individuel".');
   }
 
-  const fileNameParts = file.name.split('.');
-  const ext = fileNameParts.length > 1 ? fileNameParts.pop()?.toLowerCase() || 'pdf' : 'pdf';
+  const fileBase64 = await fileToBase64(file);
 
-  const formData = new FormData();
-  formData.append('title', title.trim());
-  if (description) formData.append('description', description.trim());
-  formData.append('category', category);
-  formData.append('target_scope', target_scope);
-  if (class_id) formData.append('class_id', class_id);
-  if (student_id) formData.append('student_id', student_id);
-  formData.append('file_name', file.name);
-  formData.append('file_extension', ext);
-  formData.append('file', file);
+  const payloadData = {
+    title: title.trim(),
+    description: description ? description.trim() : null,
+    category,
+    target_scope,
+    class_id: class_id || null,
+    student_id: student_id || null,
+    file_name: file.name,
+    mime_type: file.type || 'application/pdf',
+    file_base64: fileBase64
+  };
 
   const { data, error } = await supabase.functions.invoke('admin-school-document-upload', {
-    body: formData
+    body: payloadData
   });
 
   if (error) {
-    throw new Error(error.message || 'Échec du téléversement du document.');
+    let detailMsg = error.message;
+    try {
+      if ('context' in error && error.context && typeof (error.context as Response).json === 'function') {
+        const errJson = await (error.context as Response).json();
+        if (errJson && errJson.error) {
+          detailMsg = errJson.error;
+        }
+      }
+    } catch {
+      // Conserver le detailMsg initial en cas d'erreur de lecture du contexte
+    }
+    throw new Error(detailMsg || 'Échec du téléversement du document.');
   }
 
   if (!data || !data.document_id) {

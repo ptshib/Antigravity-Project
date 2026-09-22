@@ -62,7 +62,7 @@ describe('adminDocumentService', () => {
   });
 
   describe('2. uploadSchoolDocument', () => {
-    it('invoque admin-school-document-upload sans envoyer school_id, user_id ni storage_path', async () => {
+    it('invoque admin-school-document-upload avec un payload JSON sécurisé sans envoyer school_id, user_id ni storage_path', async () => {
       mockInvoke.mockResolvedValue({
         data: { document_id: 'doc-xyz', status: 'draft' },
         error: null,
@@ -78,16 +78,21 @@ describe('adminDocumentService', () => {
       });
 
       expect(mockInvoke).toHaveBeenCalledWith('admin-school-document-upload', expect.objectContaining({
-        body: expect.any(FormData),
+        body: expect.objectContaining({
+          title: 'Note de Service',
+          description: 'Description globale',
+          category: 'administrative',
+          target_scope: 'school',
+          file_name: 'document.pdf',
+          mime_type: 'application/pdf',
+          file_base64: expect.any(String),
+        }),
       }));
 
-      const formData: FormData = mockInvoke.mock.calls[0][1].body;
-      expect(formData.get('title')).toBe('Note de Service');
-      expect(formData.get('category')).toBe('administrative');
-      expect(formData.get('target_scope')).toBe('school');
-      expect(formData.has('school_id')).toBe(false);
-      expect(formData.has('user_id')).toBe(false);
-      expect(formData.has('storage_path')).toBe(false);
+      const body = mockInvoke.mock.calls[0][1].body;
+      expect(body).not.toHaveProperty('school_id');
+      expect(body).not.toHaveProperty('user_id');
+      expect(body).not.toHaveProperty('storage_path');
 
       expect(res.success).toBe(true);
       expect(res.status).toBe('draft');
