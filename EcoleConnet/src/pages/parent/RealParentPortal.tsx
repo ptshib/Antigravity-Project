@@ -20,7 +20,6 @@ import {
   FileCheck,
   ShieldCheck,
   MessageSquare,
-  Calendar,
   FileText,
   ChevronRight,
   GraduationCap
@@ -32,6 +31,7 @@ import { ParentFinanceModule } from '../../components/parent/ParentFinanceModule
 import { ParentAttendanceModule } from '../../components/parent/ParentAttendanceModule';
 import { ParentHomeworkModule } from '../../components/parent/ParentHomeworkModule';
 import { ParentTimetableModule } from '../../components/parent/ParentTimetableModule';
+import { ParentCalendarModule } from '../../components/parent/ParentCalendarModule';
 
 // Sub-components pour le design modernisé
 import { ParentPortalSidebar } from '../../components/parent/portal/ParentPortalSidebar';
@@ -967,13 +967,11 @@ export const RealParentPortal: React.FC = () => {
                 />
               )}
 
-              {activeTab === 'calendrier' && (
-                <ParentModulePlaceholder
-                  title="Calendrier Scolaire & Événements"
-                  description="Accédez aux événements marquants de l'établissement, réunions de parents, examens et congés scolaires officiels."
-                  icon={Calendar}
-                  childName={activeChild?.first_name}
-                />
+              {/* TAB 7: CALENDRIER SCOLAIRE RÉEL */}
+              {activeTab === 'calendrier' && selectedChildId && (
+                <div className="animate-fade-in">
+                  <ParentCalendarModule studentId={selectedChildId} />
+                </div>
               )}
 
               {activeTab === 'documents' && (
