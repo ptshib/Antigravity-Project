@@ -47,6 +47,7 @@ import { SchoolOfficialIdentityModule } from '../../components/admin/SchoolOffic
 import { FinanceDashboardModule } from '../../components/admin/finance/FinanceDashboardModule';
 import { StudentDossierModal } from '../../components/modals/StudentDossierModal';
 import { TeacherDossierModal } from '../../components/modals/TeacherDossierModal';
+import { SchoolTimetableManagement } from '../../components/admin/SchoolTimetableManagement';
 
 interface SubjectRow {
   id: string;
@@ -283,6 +284,7 @@ type SchoolAdminTab =
   | 'eleves'
   | 'presences'
   | 'devoirs'
+  | 'emploi_du_temps'
   | 'notes'
   | 'affectations'
   | 'importations'
@@ -2140,6 +2142,7 @@ export const RealSchoolAdminPortal: React.FC = () => {
           { id: 'eleves', label: `Élèves (${students.length})`, icon: GraduationCap },
           { id: 'presences', label: `Présences (${attendanceSessions.length})`, icon: CalendarCheck },
           { id: 'devoirs', label: `Devoirs (${adminHomeworkList.length})`, icon: FileText },
+          { id: 'emploi_du_temps', label: 'Emploi du temps', icon: CalendarDays },
           { id: 'notes', label: `Notes (${adminAssessmentsCount})`, icon: Award },
           { id: 'affectations', label: `Affectations (${assignments.length})`, icon: Layers },
           { id: 'importations', label: `Importations (${importJobs.length})`, icon: Upload },
@@ -3725,6 +3728,33 @@ export const RealSchoolAdminPortal: React.FC = () => {
               </div>
             )}
           </div>
+        )}
+
+        {/* TAB: EMPLOI DU TEMPS */}
+        {activeTab === 'emploi_du_temps' && (
+          <SchoolTimetableManagement
+            schoolId={school?.id || ''}
+            academicYears={academicYears.map(ay => ({
+              id: ay.id,
+              name: ay.name,
+              is_current: ay.is_current
+            }))}
+            classes={classes.map(c => ({
+              id: c.id,
+              name: c.name
+            }))}
+            subjects={subjects.map(s => ({
+              id: s.id,
+              name: s.name,
+              code: s.code
+            }))}
+            teachers={teachers.map(t => ({
+              id: t.id,
+              first_name: t.first_name,
+              last_name: t.last_name,
+              speciality: t.speciality
+            }))}
+          />
         )}
 
         {/* TAB: PRÉSENCES */}

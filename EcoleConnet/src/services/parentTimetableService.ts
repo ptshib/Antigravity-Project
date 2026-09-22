@@ -5,9 +5,11 @@ import { supabase } from '../lib/supabase';
 
 export interface ParentTimetableSlot {
   id: string;
+  slot_type?: 'course' | 'break';
+  label?: string | null;
   day_of_week: number; // 1 = Lundi, ..., 7 = Dimanche
   day_name: string;
-  subject_id: string;
+  subject_id: string | null;
   subject_name: string;
   teacher_id: string | null;
   teacher_name: string;

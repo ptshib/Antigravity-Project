@@ -19,7 +19,8 @@ import {
   MapPin,
   GraduationCap,
   CalendarDays,
-  Sparkles
+  Sparkles,
+  Coffee
 } from 'lucide-react';
 
 interface ParentTimetableModuleProps {
@@ -102,9 +103,26 @@ export const ParentTimetableModule: React.FC<ParentTimetableModuleProps> = ({ st
       map.get(slot.day_of_week)!.slots.push(slot);
     });
 
-    // Sort days 1 -> 7
-    return Array.from(map.values()).sort((a, b) => a.day_of_week - b.day_of_week);
+    // Sort days 1 -> 7 and sort slots by start_time
+    const result = Array.from(map.values()).sort((a, b) => a.day_of_week - b.day_of_week);
+    result.forEach(d => {
+      d.slots.sort((a, b) => a.start_time.localeCompare(b.start_time));
+    });
+
+    return result;
   }, [timetableData, selectedDay]);
+
+  // Breakdown of course vs break slots
+  const slotCounts = useMemo(() => {
+    if (!timetableData?.slots) return { courses: 0, breaks: 0, total: 0 };
+    let courses = 0;
+    let breaks = 0;
+    timetableData.slots.forEach(s => {
+      if (s.slot_type === 'break') breaks++;
+      else courses++;
+    });
+    return { courses, breaks, total: timetableData.slots.length };
+  }, [timetableData]);
 
   // Available days present in data
   const availableDays = useMemo(() => {
@@ -198,7 +216,7 @@ export const ParentTimetableModule: React.FC<ParentTimetableModuleProps> = ({ st
             Emploi du Temps Hebdomadaire — {student_name}
           </h2>
           <p className="text-xs text-slate-500">
-            Horaires officiels de cours et salles de classe de {student_name}.
+            Horaires officiels de cours et pauses de {student_name}.
           </p>
         </div>
       </div>
@@ -213,9 +231,9 @@ export const ParentTimetableModule: React.FC<ParentTimetableModuleProps> = ({ st
           colorScheme="blue"
         />
         <StatCard
-          title="Total des Créneaux de Cours"
-          value={summary.total_slots}
-          subtitle="Séances hebdomadaires"
+          title="Volume Hebdomadaire"
+          value={`${slotCounts.courses} cours${slotCounts.breaks > 0 ? ` • ${slotCounts.breaks} pause(s)` : ''}`}
+          subtitle={`Total : ${slotCounts.total} créneau(x)`}
           icon={<Clock className="w-5 h-5" />}
           colorScheme="emerald"
         />
@@ -286,6 +304,8 @@ export const ParentTimetableModule: React.FC<ParentTimetableModuleProps> = ({ st
         <div className="space-y-6">
           {groupedSlotsByDay.map(dayGroup => {
             const isToday = currentIsoDay === dayGroup.day_of_week;
+            const dayCourseCount = dayGroup.slots.filter(s => s.slot_type !== 'break').length;
+            const dayBreakCount = dayGroup.slots.filter(s => s.slot_type === 'break').length;
 
             return (
               <div
@@ -313,45 +333,68 @@ export const ParentTimetableModule: React.FC<ParentTimetableModuleProps> = ({ st
                     </h3>
                   </div>
                   <span className="text-xs font-bold text-slate-400">
-                    {dayGroup.slots.length} cours
+                    {dayCourseCount} cours{dayBreakCount > 0 ? ` • ${dayBreakCount} pause` : ''}
                   </span>
                 </div>
 
                 {/* Slots List */}
                 <div className="p-4 divide-y divide-slate-100">
-                  {dayGroup.slots.map(slot => (
-                    <div
-                      key={slot.id}
-                      className="py-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 hover:bg-slate-50/80 rounded-2xl px-3 transition-colors"
-                    >
-                      <div className="flex items-start sm:items-center gap-4">
-                        {/* Time Slot Badge */}
-                        <div className="p-3 bg-blue-50 text-blue-800 border border-blue-100 font-extrabold rounded-2xl text-xs text-center shrink-0 min-w-28">
-                          <span className="block text-sm text-blue-900">{slot.start_time}</span>
-                          <span className="block text-[10px] text-blue-500 font-medium">à {slot.end_time}</span>
+                  {dayGroup.slots.map(slot => {
+                    const isBreak = slot.slot_type === 'break';
+
+                    return (
+                      <div
+                        key={slot.id}
+                        className={`py-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-2xl px-3 transition-colors ${
+                          isBreak ? 'bg-purple-50/60 hover:bg-purple-50 border border-purple-100/60' : 'hover:bg-slate-50/80'
+                        }`}
+                      >
+                        <div className="flex items-start sm:items-center gap-4">
+                          {/* Time Slot Badge */}
+                          <div className={`p-3 border font-extrabold rounded-2xl text-xs text-center shrink-0 min-w-28 ${
+                            isBreak
+                              ? 'bg-purple-100 text-purple-900 border-purple-200'
+                              : 'bg-blue-50 text-blue-800 border-blue-100'
+                          }`}>
+                            <span className={`block text-sm ${isBreak ? 'text-purple-950' : 'text-blue-900'}`}>{slot.start_time}</span>
+                            <span className={`block text-[10px] font-medium ${isBreak ? 'text-purple-600' : 'text-blue-500'}`}>à {slot.end_time}</span>
+                          </div>
+
+                          {/* Subject & Teacher Details */}
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-2">
+                              <h4 className={`font-black text-sm ${isBreak ? 'text-purple-950' : 'text-slate-900'}`}>
+                                {isBreak ? (slot.label || slot.subject_name || 'Pause') : slot.subject_name}
+                              </h4>
+                              {isBreak && (
+                                <span className="px-2 py-0.5 bg-purple-200 text-purple-900 font-extrabold text-[10px] rounded-full inline-flex items-center gap-1">
+                                  <Coffee className="w-3 h-3 text-purple-700" />
+                                  Pause / Récréation
+                                </span>
+                              )}
+                            </div>
+
+                            {!isBreak && (
+                              <p className="text-xs text-slate-500 flex items-center gap-1">
+                                <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                <span>{slot.teacher_name}</span>
+                              </p>
+                            )}
+                          </div>
                         </div>
 
-                        {/* Subject & Teacher Details */}
-                        <div className="space-y-0.5">
-                          <h4 className="font-black text-sm text-slate-900">
-                            {slot.subject_name}
-                          </h4>
-                          <p className="text-xs text-slate-500 flex items-center gap-1">
-                            <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            <span>{slot.teacher_name}</span>
-                          </p>
-                        </div>
+                        {/* Room Badge (if specified) */}
+                        {slot.room && slot.room.trim() !== '' && (
+                          <div className="w-full sm:w-auto text-left sm:text-right">
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white text-slate-700 border border-slate-200 rounded-xl text-xs font-bold shadow-2xs">
+                              <MapPin className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                              <span>{slot.room}</span>
+                            </span>
+                          </div>
+                        )}
                       </div>
-
-                      {/* Room Badge */}
-                      <div className="w-full sm:w-auto text-left sm:text-right">
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold">
-                          <MapPin className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                          <span>{slot.room}</span>
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             );
