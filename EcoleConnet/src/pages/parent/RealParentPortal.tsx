@@ -31,6 +31,7 @@ import { buildGetSchoolCalendarParams, extractAndSortCalendarPeriods } from '../
 import { ParentFinanceModule } from '../../components/parent/ParentFinanceModule';
 import { ParentAttendanceModule } from '../../components/parent/ParentAttendanceModule';
 import { ParentHomeworkModule } from '../../components/parent/ParentHomeworkModule';
+import { ParentTimetableModule } from '../../components/parent/ParentTimetableModule';
 
 // Sub-components pour le design modernisé
 import { ParentPortalSidebar } from '../../components/parent/portal/ParentPortalSidebar';
@@ -950,13 +951,11 @@ export const RealParentPortal: React.FC = () => {
                 </div>
               )}
 
-              {activeTab === 'emploi_du_temps' && (
-                <ParentModulePlaceholder
-                  title="Emploi du Temps Scolaire"
-                  description="Consultez l'emploi du temps hebdomadaire complet, les plages horaires de cours, les matières et les professeurs de la classe."
-                  icon={Clock}
-                  childName={activeChild?.first_name}
-                />
+              {/* TAB 6: EMPLOI DU TEMPS RÉEL */}
+              {activeTab === 'emploi_du_temps' && selectedChildId && (
+                <div className="animate-fade-in">
+                  <ParentTimetableModule studentId={selectedChildId} />
+                </div>
               )}
 
               {activeTab === 'messages' && (
