@@ -20,7 +20,6 @@ import {
   FileCheck,
   ShieldCheck,
   MessageSquare,
-  FileText,
   ChevronRight,
   GraduationCap
 } from 'lucide-react';
@@ -32,6 +31,7 @@ import { ParentAttendanceModule } from '../../components/parent/ParentAttendance
 import { ParentHomeworkModule } from '../../components/parent/ParentHomeworkModule';
 import { ParentTimetableModule } from '../../components/parent/ParentTimetableModule';
 import { ParentCalendarModule } from '../../components/parent/ParentCalendarModule';
+import { ParentDocumentsModule } from '../../components/parent/ParentDocumentsModule';
 
 // Sub-components pour le design modernisé
 import { ParentPortalSidebar } from '../../components/parent/portal/ParentPortalSidebar';
@@ -974,13 +974,10 @@ export const RealParentPortal: React.FC = () => {
                 </div>
               )}
 
-              {activeTab === 'documents' && (
-                <ParentModulePlaceholder
-                  title="Documents & Attestations Admin"
-                  description="Téléchargez et conservez les attestations de fréquentation, fiches médicales et règlements administratifs de l'établissement."
-                  icon={FileText}
-                  childName={activeChild?.first_name}
-                />
+              {activeTab === 'documents' && selectedChildId && (
+                <div className="animate-fade-in">
+                  <ParentDocumentsModule studentId={selectedChildId} studentName={activeChild?.first_name} />
+                </div>
               )}
             </>
           )}
