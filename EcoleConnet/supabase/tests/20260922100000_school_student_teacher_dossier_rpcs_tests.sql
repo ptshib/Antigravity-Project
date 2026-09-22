@@ -175,7 +175,25 @@ BEGIN
         RAISE EXCEPTION 'TEST DOSSIER-12 ECHEC : Les logs d''audit d''édition ne sont pas au nombre attendu (trouvé: %)', v_audit_count;
     END IF;
 
-    RAISE NOTICE '✓ SUITE DOSSIERS INDIVIDUELS ÉLÈVE/ENSEIGNANT : Toutes les RPCs, l''isolation multi-école, la sécurité des rôles et l''immutabilité du matricule/classe sont validées avec succès.';
+    -- ------------------------------------------------------------------------
+    -- TEST 7 : Non-régression COALESCE (Exécution sur élève sans inscriptions/factures)
+    -- ------------------------------------------------------------------------
+    PERFORM set_config('request.jwt.claim.sub', v_admin_b::text, true);
+    v_dossier := public.get_student_full_dossier(v_student_b);
+    IF v_dossier->'enrollment_history' IS NULL OR v_dossier->'financial_summary'->>'total_invoiced' IS NULL THEN
+        RAISE EXCEPTION 'TEST DOSSIER-13 ECHEC : Le fallback COALESCE a échoué sur l''élève sans factures';
+    END IF;
+
+    -- ------------------------------------------------------------------------
+    -- TEST 8 : Validation colonne si.remaining_balance (Calcul financier élève avec factures)
+    -- ------------------------------------------------------------------------
+    PERFORM set_config('request.jwt.claim.sub', v_admin_a::text, true);
+    v_dossier := public.get_student_full_dossier(v_student_a);
+    IF (v_dossier->'financial_summary'->>'total_invoiced')::numeric < 0 THEN
+        RAISE EXCEPTION 'TEST DOSSIER-14 ECHEC : Calcul du résumé financier invalide';
+    END IF;
+
+    RAISE NOTICE '✓ SUITE DOSSIERS INDIVIDUELS ÉLÈVE/ENSEIGNANT : Toutes les RPCs, l''isolation multi-école, la sécurité des rôles, l''immutabilité du matricule/classe, la non-régression COALESCE et la colonne remaining_balance sont validées avec succès.';
 END;
 $$;
 

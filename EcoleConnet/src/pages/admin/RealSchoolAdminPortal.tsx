@@ -523,7 +523,6 @@ export const RealSchoolAdminPortal: React.FC = () => {
   const [assignTeacherId, setAssignTeacherId] = useState('');
   const [assignSubjectId, setAssignSubjectId] = useState('');
   const [assignClassId, setAssignClassId] = useState('');
-  const [assignYearId, setAssignYearId] = useState('');
 
   // Import CSV Preview States
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -551,7 +550,6 @@ export const RealSchoolAdminPortal: React.FC = () => {
       if (years && years.length > 0) {
         setTermYearId(years[0].id);
         setClassYearId(years[0].id);
-        setAssignYearId(years[0].id);
       }
 
       // 2. School Terms
@@ -1837,13 +1835,23 @@ export const RealSchoolAdminPortal: React.FC = () => {
   const handleCreateAssignment = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!school?.id || !assignTeacherId || !assignSubjectId || !assignClassId || !assignYearId) {
-      showToast('L’enseignant, la matière, la classe et l’année scolaire sont obligatoires.', 'warning');
+    const activeYear = academicYears.find(y => y.is_current) || academicYears[0];
+    if (!activeYear?.id) {
+      showToast('Aucune année scolaire active. Activez une année scolaire avant de créer une affectation.', 'warning');
       return;
     }
 
-    const targetTeacher = teachers.find(t => t.id === assignTeacherId);
-    const targetSubject = subjects.find(s => s.id === assignSubjectId);
+    const selectedTeacherId = assignTeacherId || teachers[0]?.id;
+    const selectedSubjectId = assignSubjectId || subjects[0]?.id;
+    const selectedClassId = assignClassId || classes[0]?.id;
+
+    if (!school?.id || !selectedTeacherId || !selectedSubjectId || !selectedClassId) {
+      showToast('L’enseignant, la matière et la classe sont obligatoires.', 'warning');
+      return;
+    }
+
+    const targetTeacher = teachers.find(t => t.id === selectedTeacherId);
+    const targetSubject = subjects.find(s => s.id === selectedSubjectId);
 
     if (!targetTeacher || !targetSubject) {
       showToast('Enseignant ou matière introuvable.', 'warning');
@@ -1855,10 +1863,10 @@ export const RealSchoolAdminPortal: React.FC = () => {
         school_id: school.id,
         teacher_id: targetTeacher.id,
         teacher_profile_id: targetTeacher.profile_id ?? null,
-        class_id: assignClassId,
+        class_id: selectedClassId,
         subject_id: targetSubject.id,
         subject_name: targetSubject.name,
-        academic_year_id: assignYearId,
+        academic_year_id: activeYear.id,
         is_active: true
       });
 
@@ -4978,19 +4986,19 @@ export const RealSchoolAdminPortal: React.FC = () => {
         <form onSubmit={handleCreateAssignment} className="space-y-4 text-xs">
           <div>
             <label className="block text-xs font-extrabold text-slate-200 uppercase tracking-wider mb-1.5">Enseignant *</label>
-            <select value={assignTeacherId} onChange={e => setAssignTeacherId(e.target.value)} className="w-full px-3.5 py-2.5 bg-slate-950 border-2 border-slate-600 rounded-xl text-sm font-medium text-white focus:outline-none focus:border-amber-500">
+            <select value={assignTeacherId || (teachers[0]?.id ?? '')} onChange={e => setAssignTeacherId(e.target.value)} className="w-full px-3.5 py-2.5 bg-slate-950 border-2 border-slate-600 rounded-xl text-sm font-medium text-white focus:outline-none focus:border-amber-500">
               {teachers.map(t => <option key={t.id} value={t.id} className="bg-slate-900 text-white">{t.first_name} {t.last_name} ({t.employee_number})</option>)}
             </select>
           </div>
           <div>
             <label className="block text-xs font-extrabold text-slate-200 uppercase tracking-wider mb-1.5">Matière *</label>
-            <select value={assignSubjectId} onChange={e => setAssignSubjectId(e.target.value)} className="w-full px-3.5 py-2.5 bg-slate-950 border-2 border-slate-600 rounded-xl text-sm font-medium text-white focus:outline-none focus:border-amber-500">
+            <select value={assignSubjectId || (subjects[0]?.id ?? '')} onChange={e => setAssignSubjectId(e.target.value)} className="w-full px-3.5 py-2.5 bg-slate-950 border-2 border-slate-600 rounded-xl text-sm font-medium text-white focus:outline-none focus:border-amber-500">
               {subjects.map(s => <option key={s.id} value={s.id} className="bg-slate-900 text-white">{s.name} ({s.code || 'SANS CODE'})</option>)}
             </select>
           </div>
           <div>
             <label className="block text-xs font-extrabold text-slate-200 uppercase tracking-wider mb-1.5">Classe *</label>
-            <select value={assignClassId} onChange={e => setAssignClassId(e.target.value)} className="w-full px-3.5 py-2.5 bg-slate-950 border-2 border-slate-600 rounded-xl text-sm font-medium text-white focus:outline-none focus:border-amber-500">
+            <select value={assignClassId || (classes[0]?.id ?? '')} onChange={e => setAssignClassId(e.target.value)} className="w-full px-3.5 py-2.5 bg-slate-950 border-2 border-slate-600 rounded-xl text-sm font-medium text-white focus:outline-none focus:border-amber-500">
               {classes.map(c => <option key={c.id} value={c.id} className="bg-slate-900 text-white">{c.name}</option>)}
             </select>
           </div>
