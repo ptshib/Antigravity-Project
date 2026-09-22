@@ -3,6 +3,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { buildCorsHeaders } from '../_shared/cors.ts';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
@@ -79,80 +80,64 @@ function classifyAuthInviteError(err: any): { errorCode: InvitationErrorCode; us
   };
 }
 
-serve(async (req) => {
-  // 1. Validation de la méthode HTTP
-  if (req.method !== 'POST' && req.method !== 'OPTIONS') {
+export async function inviteSchoolParentHandler(req: Request): Promise<Response> {
+  // 1. Initialisation des en-têtes CORS universels
+  const ecoleconnectAppUrl = Deno.env.get('ECOLECONNECT_APP_URL');
+  const { isAllowed, headers: corsHeaders } = buildCorsHeaders(req, ecoleconnectAppUrl);
+
+  // 2. Traitement immédiat des requêtes OPTIONS (Preflight)
+  if (req.method === 'OPTIONS') {
+    if (!isAllowed) {
+      return new Response(
+        JSON.stringify({
+          error: 'Origine CORS non autorisée.',
+          error_code: 'unauthorized'
+        }),
+        { status: 403, headers: corsHeaders }
+      );
+    }
+    return new Response('ok', { status: 200, headers: corsHeaders });
+  }
+
+  // 3. Rejet immédiat si origine non autorisée (POST ou autre)
+  if (!isAllowed) {
+    return new Response(
+      JSON.stringify({
+        error: 'Origine CORS non autorisée.',
+        error_code: 'unauthorized'
+      }),
+      { status: 403, headers: corsHeaders }
+    );
+  }
+
+  // 4. Validation de la méthode HTTP (uniquement POST après OPTIONS)
+  if (req.method !== 'POST') {
     return new Response(
       JSON.stringify({
         error: 'Méthode HTTP non autorisée. Seules POST et OPTIONS sont acceptées.',
         error_code: 'unauthorized'
       }),
-      { status: 405, headers: { 'Content-Type': 'application/json', 'Allow': 'POST, OPTIONS' } }
+      { status: 405, headers: { ...corsHeaders, 'Allow': 'POST, OPTIONS' } }
     );
   }
 
-  // 2. Configuration Fail-Closed des variables d'environnement
+  // 5. Configuration Fail-Closed des variables d'environnement
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
-  const ecoleconnectAppUrl = Deno.env.get('ECOLECONNECT_APP_URL');
 
-  if (!supabaseUrl || !supabaseServiceKey || !supabaseAnonKey || !ecoleconnectAppUrl) {
+  if (!supabaseUrl || !supabaseServiceKey || !supabaseAnonKey) {
     console.error('[invite-school-parent] Variables d’environnement manquantes sur le serveur.');
     return new Response(
       JSON.stringify({
         error: 'Erreur de configuration serveur. Le service d’invitation parent est indisponible.',
         error_code: 'internal_error'
       }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
+      { status: 500, headers: corsHeaders }
     );
   }
 
-  // Validation HTTPS obligatoire hors localhost/127.0.0.1
-  let allowedOrigin: string;
-  try {
-    const parsedAppUrl = new URL(ecoleconnectAppUrl);
-    const isLocal = parsedAppUrl.hostname === 'localhost' || parsedAppUrl.hostname === '127.0.0.1';
-    if (!isLocal && parsedAppUrl.protocol !== 'https:') {
-      throw new Error('L’URL d’application doit impérativement utiliser le protocole HTTPS en dehors de l’environnement local.');
-    }
-    allowedOrigin = parsedAppUrl.origin;
-  } catch (err: any) {
-    console.error('[invite-school-parent] ECOLECONNECT_APP_URL invalide :', err.message);
-    return new Response(
-      JSON.stringify({
-        error: 'Erreur de configuration de l’URL d’application.',
-        error_code: 'internal_error'
-      }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    );
-  }
-
-  // 3. Gestion des en-têtes CORS stricts
-  const reqOrigin = req.headers.get('Origin');
-  if (reqOrigin && reqOrigin !== allowedOrigin) {
-    return new Response(
-      JSON.stringify({
-        error: 'Origine CORS non autorisée.',
-        error_code: 'unauthorized'
-      }),
-      { status: 403, headers: { 'Content-Type': 'application/json', 'Vary': 'Origin' } }
-    );
-  }
-
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': allowedOrigin,
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-    'Vary': 'Origin',
-    'Content-Type': 'application/json'
-  };
-
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
-  }
-
-  // 4. Validation du Content-Type
+  // 6. Validation du Content-Type
   const contentType = req.headers.get('Content-Type') || '';
   if (!contentType.includes('application/json')) {
     return new Response(
@@ -164,7 +149,7 @@ serve(async (req) => {
     );
   }
 
-  // 5. Lecture et vérification de la taille UTF-8 réelle du corps (< 10 KB)
+  // 7. Lecture et vérification de la taille UTF-8 réelle du corps (< 10 KB)
   const rawText = await req.text();
   const byteLength = new TextEncoder().encode(rawText).length;
   if (byteLength > 10240) {
@@ -223,7 +208,7 @@ serve(async (req) => {
   }
 
   try {
-    // 6. Vérification du jeton JWT de l'appelant
+    // 8. Vérification du jeton JWT de l'appelant
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
       return new Response(
@@ -306,7 +291,7 @@ serve(async (req) => {
       );
     }
 
-    // 7. TRAITEMENT DU RENVOI D'INVITATION (`action = 'reinvite'`)
+    // 9. TRAITEMENT DU RENVOI D'INVITATION (`action = 'reinvite'`)
     if (action === 'reinvite') {
       const { error: auditErr } = await supabaseAdmin.from('school_audit_logs').insert({
         school_id: targetSchoolId,
@@ -332,7 +317,7 @@ serve(async (req) => {
       );
     }
 
-    // 8. TRAITEMENT DE LA PREMIÈRE INVITATION (`action = 'invite'`)
+    // 10. TRAITEMENT DE LA PREMIÈRE INVITATION (`action = 'invite'`)
     if (!first_name || typeof first_name !== 'string' || first_name.trim().length === 0) {
       return new Response(
         JSON.stringify({
@@ -389,9 +374,10 @@ serve(async (req) => {
     const cleanFirstName = first_name.trim();
     const cleanLastName = last_name.trim();
     const fullName = `${cleanFirstName} ${cleanLastName}`;
-    const redirectUrl = `${allowedOrigin}/auth/set-password`;
+    const targetOrigin = corsHeaders['Access-Control-Allow-Origin'] || 'https://ecolelink.com';
+    const redirectUrl = `${targetOrigin}/auth/set-password`;
 
-    // 9. Vérifier les collisions d'email dans Auth et détecter les comptes orphelins
+    // 11. Vérifier les collisions d'email dans Auth et détecter les comptes orphelins
     let existingAuthUser: any = null;
     let page = 1;
     while (true) {
@@ -456,12 +442,12 @@ serve(async (req) => {
       );
     }
 
-    // 10. Exécution Atomique du workflow d'invitation parent
+    // 12. Exécution Atomique du workflow d'invitation parent
     let createdAuthUserId: string | null = null;
     let invitationToken: string | null = null;
 
     try {
-      // 10.1 Créer l'utilisateur Auth invité par email via Supabase Auth Admin
+      // 12.1 Créer l'utilisateur Auth invité par email via Supabase Auth Admin
       const { data: inviteData, error: inviteErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(
         cleanEmail,
         {
@@ -477,7 +463,6 @@ serve(async (req) => {
       );
 
       if (inviteErr || !inviteData?.user?.id) {
-        // Journalisation serveur stricte sans données sensibles
         console.error('[invite-school-parent] Échec inviteUserByEmail :', {
           code: (inviteErr as any)?.code || 'unknown_auth_error',
           status: (inviteErr as any)?.status || 500,
@@ -496,7 +481,7 @@ serve(async (req) => {
 
       createdAuthUserId = inviteData.user.id;
 
-      // 10.2 Génération du jeton d'invitation serveur et création de school_portal_invitations
+      // 12.2 Génération du jeton d'invitation serveur et création de school_portal_invitations
       invitationToken = crypto.randomUUID();
 
       const canonicalRelationship = typeof relationship === 'string' && (relationship.trim() === 'Mère' || relationship.trim() === 'mother')
@@ -535,7 +520,7 @@ serve(async (req) => {
         throw new Error('Échec de la génération du jeton sécurisé d’invitation.');
       }
 
-      // 10.3 Exécuter la RPC transactionnelle d'association parent via service_role
+      // 12.3 Exécuter la RPC transactionnelle d'association parent via service_role
       const { data: rpcSuccess, error: rpcErr } = await supabaseAdmin.rpc('process_parent_invitation', {
         p_invitation_token: invitationToken,
         p_user_id: createdAuthUserId,
@@ -557,7 +542,7 @@ serve(async (req) => {
         throw new Error(rpcErr?.message || 'Échec de l’association du profil parent dans la base de données.');
       }
 
-      // 10.4 Vérification post-création obligatoire (Garantie de non-orphelinat)
+      // 12.4 Vérification post-création obligatoire (Garantie de non-orphelinat)
       const { data: verifyProfile } = await supabaseAdmin
         .from('profiles')
         .select('id, role, is_active')
@@ -602,7 +587,7 @@ serve(async (req) => {
         throw new Error('Incohérence des données après création du compte parent. Rollback appliqué.');
       }
 
-      // Succès complet et validé (ne jamais exposer de token ou secret)
+      // Succès complet et validé
       return new Response(
         JSON.stringify({
           success: true,
@@ -616,7 +601,6 @@ serve(async (req) => {
         message: atomicErr.message
       });
 
-      // Rollback / Nettoyage de compensation immédiat
       if (invitationToken) {
         try {
           await supabaseAdmin.from('school_portal_invitations').delete().eq('invitation_token', invitationToken);
@@ -656,4 +640,8 @@ serve(async (req) => {
       { status: 500, headers: corsHeaders }
     );
   }
-});
+}
+
+if (import.meta.main) {
+  serve(inviteSchoolParentHandler);
+}
