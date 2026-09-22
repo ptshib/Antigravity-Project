@@ -114,6 +114,9 @@ function isValidCalendarDate(dateStr: string): boolean {
  * Mappe les erreurs PostgreSQL vers des messages métier propres sans fuite d'implémentation (CONTEXT, HINT, contrainte, table).
  */
 function mapPostgresError(error: unknown): Error {
+  if (error instanceof FinanceServiceError) {
+    return error;
+  }
   if (!isObject(error)) {
     return new FinanceServiceError('Une erreur est survenue lors du traitement financier. Veuillez réessayer.');
   }
@@ -122,9 +125,9 @@ function mapPostgresError(error: unknown): Error {
   const msg = getStringProperty(error, 'message') || '';
 
   // 1. Accès non autorisé (SQLSTATE 42501)
-  if (code === '42501' || msg.includes('42501') || msg.includes('non autorisée') || msg.includes('VIOLATION SÉCURITÉ')) {
+  if (code === '42501' || msg.includes('42501') || msg.includes('non autorisée') || msg.includes('VIOLATION SÉCURITÉ') || msg.includes('REJET ACCÈS')) {
     return new FinanceServiceError(
-      'Accès non autorisé : Vous ne disposez pas des privilèges nécessaires pour exécuter cette opération financière.',
+      msg || 'Accès non autorisé : Vous ne disposez pas des privilèges nécessaires pour exécuter cette opération financière.',
       '42501'
     );
   }
@@ -291,23 +294,48 @@ function validateParentStudentFinances(data: unknown): ParentStudentFinancesResu
     throw new FinanceServiceError('Format de réponse invalide pour get_parent_student_finances.');
   }
 
-  const student_id = getStringProperty(data, 'student_id');
-  const student_number = getStringProperty(data, 'student_number');
-  const student_name = getStringProperty(data, 'student_name');
-  const class_name = getStringProperty(data, 'class_name') || '';
-  const total_invoiced = getNumberProperty(data, 'total_invoiced');
-  const total_paid = getNumberProperty(data, 'total_paid');
-  const total_remaining = getNumberProperty(data, 'total_remaining');
-  const currency = getStringProperty(data, 'currency') || 'USD';
+  // Support both nested object format (RPC standard) and flat object format
+  const studentObj = isObject(data['student']) ? data['student'] : null;
+  const student_id = (studentObj ? getStringProperty(studentObj, 'id') : null) || getStringProperty(data, 'student_id');
+  const student_number = (studentObj ? getStringProperty(studentObj, 'student_number') : null) || getStringProperty(data, 'student_number');
+  const student_name = (studentObj ? (getStringProperty(studentObj, 'student_full_name') || getStringProperty(studentObj, 'student_name')) : null) || getStringProperty(data, 'student_name');
+  const class_name = (studentObj ? getStringProperty(studentObj, 'class_name') : null) || getStringProperty(data, 'class_name') || '';
+
+  // Extract totals from summary_by_currency, summary or flat properties
+  const summaryObj = isObject(data['summary_by_currency'])
+    ? data['summary_by_currency']
+    : (isObject(data['summary']) ? data['summary'] : null);
+
+  let currency: Currency = 'USD';
+  let total_invoiced = 0;
+  let total_paid = 0;
+  let total_remaining = 0;
+
+  if (summaryObj) {
+    const currencies = Object.keys(summaryObj);
+    if (currencies.length > 0) {
+      const mainCurrency = currencies[0];
+      const currSummary = summaryObj[mainCurrency];
+      if (isObject(currSummary)) {
+        currency = (getStringProperty(currSummary, 'currency') as Currency) || (mainCurrency as Currency) || 'USD';
+        total_invoiced = getNumberProperty(currSummary, 'total_invoiced') ?? 0;
+        total_paid = getNumberProperty(currSummary, 'total_paid') ?? 0;
+        total_remaining = getNumberProperty(currSummary, 'total_remaining') ?? 0;
+      }
+    }
+  } else {
+    total_invoiced = getNumberProperty(data, 'total_invoiced') ?? 0;
+    total_paid = getNumberProperty(data, 'total_paid') ?? 0;
+    total_remaining = getNumberProperty(data, 'total_remaining') ?? 0;
+    currency = (getStringProperty(data, 'currency') as Currency) || 'USD';
+  }
+
   const rawInvoices = data['invoices'];
 
   if (
     !student_id ||
     !student_number ||
     !student_name ||
-    total_invoiced === null ||
-    total_paid === null ||
-    total_remaining === null ||
     !Array.isArray(rawInvoices)
   ) {
     throw new FinanceServiceError('Champs obligatoires manquants dans la réponse de get_parent_student_finances.');
@@ -315,17 +343,26 @@ function validateParentStudentFinances(data: unknown): ParentStudentFinancesResu
 
   const validatedInvoices = rawInvoices.map((inv: unknown) => {
     if (!isObject(inv)) throw new FinanceServiceError('Élément de facture invalide dans get_parent_student_finances.');
+
+    let itemsSummary = getStringProperty(inv, 'items_summary') || '';
+    if (!itemsSummary && Array.isArray(inv['items'])) {
+      itemsSummary = (inv['items'] as any[])
+        .map((item: any) => (isObject(item) ? getStringProperty(item, 'fee_name') : ''))
+        .filter(Boolean)
+        .join(', ');
+    }
+
     return {
       id: getStringProperty(inv, 'id') || '',
       invoice_number: getStringProperty(inv, 'invoice_number') || '',
       issue_date: getStringProperty(inv, 'issue_date') || '',
       due_date: getStringProperty(inv, 'due_date'),
-      total_amount: getNumberProperty(inv, 'total_amount') || 0,
-      paid_amount: getNumberProperty(inv, 'paid_amount') || 0,
-      remaining_balance: getNumberProperty(inv, 'remaining_balance') || 0,
+      total_amount: getNumberProperty(inv, 'total_amount') ?? 0,
+      paid_amount: getNumberProperty(inv, 'paid_amount') ?? 0,
+      remaining_balance: getNumberProperty(inv, 'remaining_balance') ?? 0,
       status: (getStringProperty(inv, 'status') as InvoiceStatus) || 'draft',
-      currency: (getStringProperty(inv, 'currency') as Currency) || 'USD',
-      items_summary: getStringProperty(inv, 'items_summary') || ''
+      currency: (getStringProperty(inv, 'currency') as Currency) || currency,
+      items_summary: itemsSummary || 'Frais de scolarité'
     };
   });
 
@@ -337,7 +374,7 @@ function validateParentStudentFinances(data: unknown): ParentStudentFinancesResu
     total_invoiced,
     total_paid,
     total_remaining,
-    currency: currency as Currency,
+    currency,
     invoices: validatedInvoices
   };
 }
