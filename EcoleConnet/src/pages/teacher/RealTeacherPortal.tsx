@@ -7,7 +7,7 @@ import { useRealAuth } from '../../contexts/RealAuthContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { Modal } from '../../components/common/Modal';
 import { 
-  Clock, Plus, AlertCircle, FileText, CheckCircle2, Filter, Send,
+  Clock, Plus, AlertCircle,
   School, Users, CalendarCheck, MessageSquare, Phone
 } from 'lucide-react';
 
@@ -20,6 +20,7 @@ import { TeacherPortalSidebar } from '../../components/teacher/portal/TeacherPor
 import { TeacherPortalHeader } from '../../components/teacher/portal/TeacherPortalHeader';
 import { TeacherModulePlaceholder } from '../../components/teacher/portal/TeacherModulePlaceholder';
 import { TeacherTimetableModule } from '../../components/teacher/TeacherTimetableModule';
+import { TeacherHomeworkModule } from '../../components/teacher/TeacherHomeworkModule';
 
 export type TeacherTab = 
   | 'overview' 
@@ -148,9 +149,6 @@ export const RealTeacherPortal: React.FC = () => {
 
   // Homework States
   const [homeworkList, setHomeworkList] = useState<HomeworkRow[]>([]);
-  const [hwClassFilter, setHwClassFilter] = useState<string>('all');
-  const [hwSubjectFilter, setHwSubjectFilter] = useState<string>('all');
-  const [hwStatusFilter, setHwStatusFilter] = useState<string>('all');
 
   // Homework Modals
   const [showCreateHwModal, setShowCreateHwModal] = useState<boolean>(false);
@@ -182,7 +180,6 @@ export const RealTeacherPortal: React.FC = () => {
   const handleSelectClassId = (classId: string) => {
     setSelectedClassId(classId);
     setSelectedFinanceClassId(classId);
-    setHwClassFilter(classId || 'all');
     setSelectedClassForRoster(null);
   };
 
@@ -615,29 +612,7 @@ export const RealTeacherPortal: React.FC = () => {
     }
   };
 
-  const handlePublishHomework = async (hw: HomeworkRow) => {
-    try {
-      const { error } = await supabase.rpc('publish_teacher_homework', { p_homework_id: hw.id });
-      if (error) throw error;
-      showToast('Devoir publié avec succès !', 'success');
-      if (showDetailHwModal) setShowDetailHwModal(false);
-      await loadTeacherPortalData();
-    } catch (err: any) {
-      showToast(err.message || 'Erreur lors de la publication du devoir.', 'warning');
-    }
-  };
 
-  const handleCloseHomework = async (hw: HomeworkRow) => {
-    try {
-      const { error } = await supabase.rpc('close_teacher_homework', { p_homework_id: hw.id });
-      if (error) throw error;
-      showToast('Devoir clôturé avec succès.', 'success');
-      if (showDetailHwModal) setShowDetailHwModal(false);
-      await loadTeacherPortalData();
-    } catch (err: any) {
-      showToast(err.message || 'Erreur lors de la clôture du devoir.', 'warning');
-    }
-  };
 
   const handleCancelHomework = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1199,214 +1174,11 @@ export const RealTeacherPortal: React.FC = () => {
 
           {/* TAB 5: DEVOIRS */}
           {activeTab === 'homework' && (
-            <div className="space-y-6 animate-fade-in">
-              <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-lg font-extrabold text-slate-900">Gestion des Devoirs & Travaux</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Créez, publiez et suivez les devoirs assignés à vos élèves
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    resetHwForm();
-                    if (assignments.length > 0) {
-                      setHwClassId(assignments[0].class_id);
-                      setHwSubjectId(assignments[0].subject_id || '');
-                    }
-                    setShowCreateHwModal(true);
-                  }}
-                  className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-xl shadow-xs transition-colors flex items-center gap-2 cursor-pointer shrink-0"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Nouveau Devoir</span>
-                </button>
-              </div>
-
-              {/* Homework Filters */}
-              <div className="p-4 bg-white rounded-3xl border border-slate-200 shadow-xs flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
-                  <Filter className="w-4 h-4 text-amber-600" />
-                  <span>Filtres :</span>
-                </div>
-
-                {/* Filtre Classe */}
-                <select
-                  value={hwClassFilter}
-                  onChange={e => setHwClassFilter(e.target.value)}
-                  className="px-3 py-1.5 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-xs font-medium focus:outline-none focus:border-amber-500"
-                >
-                  <option value="all">Toutes les classes</option>
-                  {groupedAssignments.map(g => (
-                    <option key={g.class_id} value={g.class_id}>{g.class_name}</option>
-                  ))}
-                </select>
-
-                {/* Filtre Matière */}
-                <select
-                  value={hwSubjectFilter}
-                  onChange={e => setHwSubjectFilter(e.target.value)}
-                  className="px-3 py-1.5 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-xs font-medium focus:outline-none focus:border-amber-500"
-                >
-                  <option value="all">Toutes les matières</option>
-                  {subjectsList.map(s => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-
-                {/* Filtre Statut */}
-                <select
-                  value={hwStatusFilter}
-                  onChange={e => setHwStatusFilter(e.target.value)}
-                  className="px-3 py-1.5 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-xs font-medium focus:outline-none focus:border-amber-500"
-                >
-                  <option value="all">Tous les statuts</option>
-                  <option value="draft">Brouillons</option>
-                  <option value="published">Publiés</option>
-                  <option value="closed">Clôturés</option>
-                  <option value="cancelled">Annulés</option>
-                </select>
-              </div>
-
-              {/* Liste des Devoirs */}
-              {(() => {
-                const filteredList = homeworkList.filter(hw => {
-                  if (hwClassFilter !== 'all' && hw.class_id !== hwClassFilter) return false;
-                  if (hwSubjectFilter !== 'all' && hw.subject_id !== hwSubjectFilter) return false;
-                  if (hwStatusFilter !== 'all' && hw.status !== hwStatusFilter) return false;
-                  return true;
-                });
-
-                if (filteredList.length === 0) {
-                  return (
-                    <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 shadow-xs space-y-3">
-                      <FileText className="w-12 h-12 text-slate-400 mx-auto" />
-                      <p className="text-sm font-bold text-slate-800">Aucun devoir trouvé</p>
-                      <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                        Aucun devoir ne correspond à vos critères de recherche ou vous n'avez pas encore créé de devoir.
-                      </p>
-                    </div>
-                  );
-                }
-
-                return (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                    {filteredList.map(hw => {
-                      const isOverdue = hw.status === 'published' && new Date(hw.due_at) < new Date();
-                      return (
-                        <div
-                          key={hw.id}
-                          className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs space-y-4 hover:border-slate-300 transition-all flex flex-col justify-between"
-                        >
-                          <div className="space-y-3">
-                            {/* Badges Header */}
-                            <div className="flex items-center justify-between gap-2 flex-wrap text-[10px] font-bold">
-                              <div className="flex items-center gap-1.5">
-                                <span className="px-2.5 py-1 bg-amber-50 text-amber-900 border border-amber-200 rounded-lg">
-                                  {hw.class_name}
-                                </span>
-                                <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg border border-slate-200">
-                                  {hw.subject_name}
-                                </span>
-                              </div>
-                              <div>
-                                {hw.status === 'draft' && (
-                                  <span className="px-2.5 py-1 bg-amber-100 text-amber-900 border border-amber-200 rounded-lg">
-                                    Brouillon
-                                  </span>
-                                )}
-                                {hw.status === 'published' && !isOverdue && (
-                                  <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg">
-                                    Publié
-                                  </span>
-                                )}
-                                {hw.status === 'published' && isOverdue && (
-                                  <span className="px-2.5 py-1 bg-rose-100 text-rose-800 border border-rose-200 rounded-lg font-black animate-pulse">
-                                    En retard
-                                  </span>
-                                )}
-                                {hw.status === 'closed' && (
-                                  <span className="px-2.5 py-1 bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-lg">
-                                    Clôturé
-                                  </span>
-                                )}
-                                {hw.status === 'cancelled' && (
-                                  <span className="px-2.5 py-1 bg-slate-100 text-slate-600 border border-slate-200 rounded-lg">
-                                    Annulé
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Title & Instructions preview */}
-                            <div>
-                              <h3 className="text-sm font-extrabold text-slate-900 line-clamp-1">{hw.title}</h3>
-                              <p className="text-xs text-slate-600 line-clamp-2 mt-1 leading-relaxed">
-                                {hw.instructions}
-                              </p>
-                            </div>
-
-                            {/* Metadata */}
-                            <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-2 text-[11px]">
-                              <div>
-                                <span className="text-slate-400 block">Assigné le</span>
-                                <span className="text-slate-700 font-medium">{new Date(hw.assigned_on).toLocaleDateString('fr-FR')}</span>
-                              </div>
-                              <div>
-                                <span className="text-slate-400 block">Échéance</span>
-                                <span className={`font-bold ${isOverdue ? 'text-rose-600' : 'text-amber-700'}`}>
-                                  {new Date(hw.due_at).toLocaleDateString('fr-FR')} à {new Date(hw.due_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                                </span>
-                              </div>
-                              {hw.estimated_minutes && (
-                                <div className="col-span-2 text-slate-500 text-[10px]">
-                                  Durée estimée : <strong className="text-slate-800">{hw.estimated_minutes} min</strong>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Card Actions */}
-                          <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                            <button
-                              onClick={() => {
-                                setSelectedHw(hw);
-                                setShowDetailHwModal(true);
-                              }}
-                              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold cursor-pointer transition-colors"
-                            >
-                              Détails
-                            </button>
-                            <div className="flex items-center gap-1.5">
-                              {hw.status === 'draft' && (
-                                <button
-                                  onClick={() => handlePublishHomework(hw)}
-                                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-extrabold flex items-center gap-1 cursor-pointer transition-colors"
-                                >
-                                  <Send className="w-3.5 h-3.5" />
-                                  <span>Publier</span>
-                                </button>
-                              )}
-                              {hw.status === 'published' && (
-                                <button
-                                  onClick={() => handleCloseHomework(hw)}
-                                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
-                                >
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                  <span>Clôturer</span>
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
-            </div>
+            <TeacherHomeworkModule
+              assignedClasses={groupedAssignments.map(g => ({ id: g.class_id, name: g.class_name }))}
+              assignedSubjects={assignments.map(a => ({ id: a.subject_id || '', name: a.subject_name || 'Matière', class_id: a.class_id }))}
+              showToast={(msg, type) => showToast(msg, type === 'error' ? 'warning' : type)}
+            />
           )}
 
           {/* TAB 6: NOTES ET ÉVALUATIONS */}
