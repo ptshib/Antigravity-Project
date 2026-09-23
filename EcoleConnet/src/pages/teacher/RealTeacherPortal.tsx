@@ -1,17 +1,24 @@
-// Portail Enseignant Réel ÉcoleConnect
+// Portail Enseignant Réel ÉcoleConnect — Design Modernisé (Lot 2G)
 // Fichier : src/pages/teacher/RealTeacherPortal.tsx
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useRealAuth } from '../../contexts/RealAuthContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { Modal } from '../../components/common/Modal';
 import { 
-  BookOpen, Clock, LogOut, Plus, AlertCircle, FileText, CheckCircle2, Filter, Edit3, XCircle, Send
+  Clock, Plus, AlertCircle, FileText, CheckCircle2, Filter, Send,
+  School, Users, CalendarCheck, MessageSquare, Phone
 } from 'lucide-react';
+
 import { TeacherGradesModule } from '../../components/teacher/TeacherGradesModule';
 import { TeacherOfficialSignatureCard } from '../../components/teacher/TeacherOfficialSignatureCard';
 import { TeacherClassFinanceOverview } from '../../components/teacher/TeacherClassFinanceOverview';
+
+// Sub-composants du Design Modernisé
+import { TeacherPortalSidebar } from '../../components/teacher/portal/TeacherPortalSidebar';
+import { TeacherPortalHeader } from '../../components/teacher/portal/TeacherPortalHeader';
+import { TeacherModulePlaceholder } from '../../components/teacher/portal/TeacherModulePlaceholder';
 
 export type TeacherTab = 
   | 'overview' 
@@ -76,11 +83,15 @@ interface TeacherSessionRow {
 }
 
 export const RealTeacherPortal: React.FC = () => {
-  const { user, profile, school, signOutReal } = useRealAuth();
+  const { profile, school, signOutReal } = useRealAuth();
   const { showToast } = useNotifications();
 
+  // Navigation & Mobile Drawer State
   const [activeTab, setActiveTab] = useState<TeacherTab>('overview');
+  const [isOpenMobile, setIsOpenMobile] = useState<boolean>(false);
+  const [selectedClassId, setSelectedClassId] = useState<string>('');
   const [selectedFinanceClassId, setSelectedFinanceClassId] = useState<string>('');
+
   const [loading, setLoading] = useState(true);
   const [accessError, setAccessError] = useState<string | null>(null);
 
@@ -163,19 +174,33 @@ export const RealTeacherPortal: React.FC = () => {
   const [actionReason, setActionReason] = useState<string>('');
   const [submittingAction, setSubmittingAction] = useState<boolean>(false);
 
+  // Race control ref to ignore stale async responses
+  const fetchRequestIdRef = useRef<number>(0);
+
+  // Class Selection Handler with immediate dependent state reset
+  const handleSelectClassId = (classId: string) => {
+    setSelectedClassId(classId);
+    setSelectedFinanceClassId(classId);
+    setHwClassFilter(classId || 'all');
+    setSelectedClassForRoster(null);
+  };
+
   // Load Real Data for Logged-in Teacher
   const loadTeacherPortalData = useCallback(async () => {
     if (!profile?.id || !school?.id) return;
+    const currentRequestId = ++fetchRequestIdRef.current;
     setLoading(true);
     setAccessError(null);
 
     try {
-      // 1. Charger et vérifier le dossier enseignant (Point 4)
+      // 1. Charger et vérifier le dossier enseignant
       const { data: tchData, error: tchErr } = await supabase
         .from('teachers')
         .select('*')
         .eq('profile_id', profile.id)
         .single();
+
+      if (currentRequestId !== fetchRequestIdRef.current) return;
 
       if (tchErr || !tchData) {
         setAccessError("Aucun dossier enseignant n'est associé à votre compte utilisateur.");
@@ -202,6 +227,8 @@ export const RealTeacherPortal: React.FC = () => {
         .eq('school_id', school.id)
         .eq('is_active', true);
 
+      if (currentRequestId !== fetchRequestIdRef.current) return;
+
       // 3. Charger les classes et matières
       const { data: clsData } = await supabase
         .from('classes')
@@ -224,6 +251,8 @@ export const RealTeacherPortal: React.FC = () => {
         .select('*')
         .eq('school_id', school.id)
         .order('position', { ascending: true });
+
+      if (currentRequestId !== fetchRequestIdRef.current) return;
 
       setClassesList(clsData || []);
       setSubjectsList(sbjData || []);
@@ -259,7 +288,7 @@ export const RealTeacherPortal: React.FC = () => {
 
       setAssignments([...synthesizedHomeroomAssignments, ...mySubjectAssignments]);
 
-      // 5. Regrouper les affectations (titularisation + matières) par classe unique sans doublon
+      // 5. Regrouper les affectations par classe unique sans doublon
       const classGroupMap = new Map<string, {
         id: string;
         class_id: string;
@@ -270,7 +299,6 @@ export const RealTeacherPortal: React.FC = () => {
         subject_name: string;
       }>();
 
-      // Enregistrer d'abord les classes dont l'enseignant est titulaire
       myHomeroomClasses.forEach(c => {
         classGroupMap.set(c.id, {
           id: `homeroom-${c.id}`,
@@ -283,7 +311,6 @@ export const RealTeacherPortal: React.FC = () => {
         });
       });
 
-      // Fusionner avec les affectations par matière
       mySubjectAssignments.forEach(a => {
         if (!classGroupMap.has(a.class_id)) {
           classGroupMap.set(a.class_id, {
@@ -309,13 +336,15 @@ export const RealTeacherPortal: React.FC = () => {
       const grouped = Array.from(classGroupMap.values());
       setGroupedAssignments(grouped);
 
-      // 6. Extraire les class_id des classes réellement attribuées et affichées (Point 1)
+      // 6. Extraire les class_id des classes réellement attribuées
       const activeAssignedClassIds = new Set(grouped.map(g => g.class_id));
 
-      // 7. Charger les élèves de ses classes via la RPC sécurisée get_teacher_assigned_students()
+      // 7. Charger les élèves via la RPC sécurisée get_teacher_assigned_students()
       const { data: assignedStudents } = await supabase.rpc('get_teacher_assigned_students');
 
-      // 8. Filtrer exclusivement les élèves dont la classe appartient aux classes réellement affichées (Point 1)
+      if (currentRequestId !== fetchRequestIdRef.current) return;
+
+      // 8. Filtrer les élèves appartenant aux classes affichées
       const studentsInDisplayedClasses = (assignedStudents || []).filter((st: any) =>
         activeAssignedClassIds.has(st.class_id)
       );
@@ -337,18 +366,20 @@ export const RealTeacherPortal: React.FC = () => {
 
       setClassStudentsMap(map);
 
-      // 9. Dédupliquer le nombre total d'élèves uniques appartenant aux classes affichées (Point 1)
+      // 9. Dédupliquer le nombre d'élèves uniques
       const uniqueDisplayedStudentIds = new Set(
         studentsInDisplayedClasses.map((st: any) => st.student_id)
       );
       setTotalUniqueStudentsCount(uniqueDisplayedStudentIds.size);
 
-      // 10. Charger les séances d'appel créées par ou pour cet enseignant
+      // 10. Charger les séances d'appel
       const { data: sessData } = await supabase
         .from('attendance_sessions')
         .select('*')
         .eq('school_id', school.id)
         .order('attendance_date', { ascending: false });
+
+      if (currentRequestId !== fetchRequestIdRef.current) return;
 
       const mappedSessions = (sessData || []).map(s => {
         const cls = clsData?.find(c => c.id === s.class_id);
@@ -362,13 +393,20 @@ export const RealTeacherPortal: React.FC = () => {
 
       setTeacherSessions(mappedSessions);
 
-      // 11. Charger les devoirs réels via la RPC get_teacher_homework()
+      // 11. Charger les devoirs réels via RPC
       const { data: hwData } = await supabase.rpc('get_teacher_homework');
+
+      if (currentRequestId !== fetchRequestIdRef.current) return;
+
       setHomeworkList((hwData || []) as HomeworkRow[]);
     } catch (err: any) {
-      showToast(err.message || 'Erreur lors du chargement de vos données d’enseignant.', 'warning');
+      if (currentRequestId === fetchRequestIdRef.current) {
+        showToast(err.message || 'Erreur lors du chargement de vos données d’enseignant.', 'warning');
+      }
     } finally {
-      setLoading(false);
+      if (currentRequestId === fetchRequestIdRef.current) {
+        setLoading(false);
+      }
     }
   }, [profile?.id, school?.id, showToast]);
 
@@ -398,7 +436,6 @@ export const RealTeacherPortal: React.FC = () => {
       setShowNewSessionModal(false);
       await loadTeacherPortalData();
 
-      // Ouvrir immédiatement la feuille d'appel
       const targetClass = classesList.find(c => c.id === newSessionClassId);
       const targetSubject = subjectsList.find(s => s.id === newSessionSubjectId);
       
@@ -431,7 +468,6 @@ export const RealTeacherPortal: React.FC = () => {
 
     const classStudents = classStudentsMap[session.class_id] || [];
 
-    // Récupérer les présences déjà enregistrées
     const { data: existingRecords } = await supabase
       .from('student_attendance')
       .select('*')
@@ -514,7 +550,7 @@ export const RealTeacherPortal: React.FC = () => {
     }
   };
 
-  // --- HANDLERS DEVOIRS (HOMEWORK) ---
+  // Handlers Devoirs
   const resetHwForm = () => {
     setHwClassId('');
     setHwSubjectId('');
@@ -716,17 +752,17 @@ export const RealTeacherPortal: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white space-y-4">
+      <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center p-6 space-y-4">
         <div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
-        <p className="text-xs font-bold text-slate-400">Chargement de votre espace enseignant...</p>
+        <p className="text-xs font-bold text-slate-300">Chargement sécurisé de votre Espace Enseignant...</p>
       </div>
     );
   }
 
   if (accessError) {
     return (
-      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center space-y-4">
-        <div className="p-6 bg-slate-900 border border-slate-800 rounded-3xl max-w-md space-y-3">
+      <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center p-6 text-center space-y-4">
+        <div className="p-6 bg-slate-950 border border-slate-800 rounded-3xl max-w-md space-y-3 shadow-xl">
           <div className="w-12 h-12 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex items-center justify-center mx-auto text-rose-400">
             <AlertCircle className="w-6 h-6" />
           </div>
@@ -745,1002 +781,958 @@ export const RealTeacherPortal: React.FC = () => {
     );
   }
 
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-amber-500 selection:text-slate-950">
-      {/* Top Navbar */}
-      <header className="sticky top-0 z-30 bg-slate-900/90 border-b border-slate-800 backdrop-blur-xl">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-500 to-indigo-600 flex items-center justify-center text-slate-950 font-black shadow-lg">
-              <BookOpen className="w-5 h-5 text-slate-950" />
-            </div>
-            <div>
-              <span className="text-base font-black text-white tracking-tight">
-                École<span className="text-amber-400">Connect</span>
-              </span>
-              <span className="ml-2 text-[10px] uppercase tracking-wider font-extrabold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                Espace Enseignant
-              </span>
-            </div>
-          </div>
+  const teacherFullName = `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() || 'Enseignant';
 
-          <div className="flex items-center gap-4">
-            <div className="hidden md:flex flex-col items-end text-xs">
-              <span className="font-extrabold text-white">{profile?.first_name} {profile?.last_name}</span>
-              <span className="text-[11px] text-slate-400">{school?.name}</span>
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col lg:flex-row font-sans selection:bg-amber-500 selection:text-slate-950">
+      {/* Sidebar Navigation */}
+      <TeacherPortalSidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        isOpenMobile={isOpenMobile}
+        onCloseMobile={() => setIsOpenMobile(false)}
+        teacherName={teacherFullName}
+        schoolName={school?.name}
+        specialty={teacherRecord?.specialty}
+        assignedClassesCount={groupedAssignments.length}
+        homeworkCount={homeworkList.length}
+        gradesCount={gradesCount}
+        onSignOut={signOutReal}
+      />
+
+      {/* Main Container */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-screen bg-slate-50">
+        {/* Top Header */}
+        <TeacherPortalHeader
+          schoolName={school?.name}
+          teacherName={teacherFullName}
+          employeeNumber={teacherRecord?.employee_number}
+          specialty={teacherRecord?.specialty}
+          employmentStatus={teacherRecord?.employment_status}
+          groupedClasses={groupedAssignments}
+          selectedClassId={selectedClassId}
+          onSelectClass={handleSelectClassId}
+          onOpenMobileMenu={() => setIsOpenMobile(true)}
+          onSignOut={signOutReal}
+        />
+
+        {/* Main Content Area */}
+        <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-6">
+          {/* Welcome Banner Ribbon */}
+          <div className="p-6 bg-gradient-to-r from-slate-900 via-slate-900 to-amber-950 rounded-3xl border border-slate-800 text-white flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm">
+            <div>
+              <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-extrabold uppercase">
+                  Compte Actif
+                </span>
+                {teacherRecord?.employee_number && (
+                  <span className="text-xs text-slate-400 font-mono">
+                    Matricule : {teacherRecord.employee_number}
+                  </span>
+                )}
+              </div>
+              <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+                Bienvenue, {teacherFullName}
+              </h1>
+              <p className="text-xs text-slate-300 mt-1">
+                Enseignant(e) à <strong className="text-white">{school?.name}</strong>
+                {teacherRecord?.specialty && (
+                  <> • Spécialité : <strong className="text-amber-400">{teacherRecord.specialty}</strong></>
+                )}
+              </p>
             </div>
+
             <button
-              onClick={() => signOutReal()}
-              className="p-2 rounded-xl bg-slate-800 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 border border-slate-700 transition-colors cursor-pointer"
-              title="Déconnexion"
+              type="button"
+              onClick={() => {
+                if (assignments.length > 0) {
+                  setNewSessionClassId(assignments[0].class_id);
+                  setNewSessionSubjectId(assignments[0].subject_id || '');
+                }
+                setShowNewSessionModal(true);
+              }}
+              className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-500/20 flex items-center gap-2 cursor-pointer transition-all hover:scale-105 shrink-0"
             >
-              <LogOut className="w-4 h-4" />
+              <CalendarCheck className="w-4 h-4" />
+              <span>Faire l'Appel de Présence</span>
             </button>
           </div>
-        </div>
 
-        {/* Navigation Tabs Bar */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center gap-1 overflow-x-auto no-scrollbar py-2 border-t border-slate-800/60 text-xs font-bold">
-          <button
-            onClick={() => setActiveTab('overview')}
-            className={`px-3.5 py-1.5 rounded-xl cursor-pointer transition-colors whitespace-nowrap ${
-              activeTab === 'overview' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Vue d'ensemble
-          </button>
-          <button
-            onClick={() => setActiveTab('classes')}
-            className={`px-3.5 py-1.5 rounded-xl cursor-pointer transition-colors whitespace-nowrap ${
-              activeTab === 'classes' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Mes Classes ({groupedAssignments.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('presences')}
-            className={`px-3.5 py-1.5 rounded-xl cursor-pointer transition-colors whitespace-nowrap ${
-              activeTab === 'presences' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Présences
-          </button>
-          <button
-            onClick={() => setActiveTab('schedule')}
-            className={`px-3.5 py-1.5 rounded-xl cursor-pointer transition-colors whitespace-nowrap ${
-              activeTab === 'schedule' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Emploi du temps <span className="text-[9px] font-normal opacity-70">(Prochainement)</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('homework')}
-            className={`px-3.5 py-1.5 rounded-xl cursor-pointer transition-colors whitespace-nowrap ${
-              activeTab === 'homework' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Devoirs ({homeworkList.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('grades')}
-            className={`px-3.5 py-1.5 rounded-xl cursor-pointer transition-colors whitespace-nowrap ${
-              activeTab === 'grades' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Notes {gradesCount > 0 ? `(${gradesCount})` : ''}
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('finance');
-              if (!selectedFinanceClassId && groupedAssignments.length > 0) {
-                setSelectedFinanceClassId(groupedAssignments[0].class_id);
-              }
-            }}
-            className={`px-3.5 py-1.5 rounded-xl cursor-pointer transition-colors whitespace-nowrap ${
-              activeTab === 'finance' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Statut Financier Classe
-          </button>
-          <button
-            onClick={() => setActiveTab('messages')}
-            className={`px-3.5 py-1.5 rounded-xl cursor-pointer transition-colors whitespace-nowrap ${
-              activeTab === 'messages' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Messages <span className="text-[9px] font-normal opacity-70">(Prochainement)</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('profile')}
-            className={`px-3.5 py-1.5 rounded-xl cursor-pointer transition-colors whitespace-nowrap ${
-              activeTab === 'profile' ? 'bg-amber-500 text-slate-950 font-black' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Mon Profil
-          </button>
-        </div>
-      </header>
-
-      {/* Main Content Area */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full space-y-6">
-        {/* Banner Welcome */}
-        <div className="p-6 bg-gradient-to-r from-slate-900 via-slate-900 to-indigo-950 rounded-3xl border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-extrabold uppercase">
-                Compte Actif
-              </span>
-              <span className="text-xs text-slate-400 font-mono">Matricule : {teacherRecord?.employee_number || 'N/A'}</span>
-            </div>
-            <h1 className="text-xl sm:text-2xl font-black text-white">
-              Bienvenue, {profile?.first_name} {profile?.last_name}
-            </h1>
-            <p className="text-xs text-slate-400 mt-1">
-              Enseignant(e) à <strong className="text-slate-200">{school?.name}</strong> • Spécialité : <strong className="text-amber-400">{teacherRecord?.specialty || 'Générale'}</strong>
-            </p>
-          </div>
-
-          <button
-            onClick={() => {
-              if (assignments.length > 0) {
-                setNewSessionClassId(assignments[0].class_id);
-                setNewSessionSubjectId(assignments[0].subject_id || '');
-              }
-              setShowNewSessionModal(true);
-            }}
-            className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-500/20 flex items-center gap-2 cursor-pointer transition-all hover:scale-105"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Faire l'Appel de Présence</span>
-          </button>
-        </div>
-
-        {/* TAB FINANCE */}
-        {activeTab === 'finance' && (
-          <div className="space-y-6">
-            <div className="p-4 bg-slate-900 border border-slate-800 rounded-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div>
-                <span className="text-[10px] font-extrabold text-amber-400 uppercase tracking-wider block">
-                  Sélection de la classe
-                </span>
-                <h3 className="text-sm font-bold text-white">Consulter le statut d'une classe attribuée</h3>
-              </div>
-
-              <select
-                value={selectedFinanceClassId}
-                onChange={(e) => setSelectedFinanceClassId(e.target.value)}
-                className="w-full sm:w-64 bg-slate-950 border border-slate-700 text-white text-xs font-bold px-3 py-2 rounded-xl"
-              >
-                <option value="">-- Choisir une classe --</option>
-                {groupedAssignments.map((g) => (
-                  <option key={g.class_id} value={g.class_id}>
-                    {g.class_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {selectedFinanceClassId ? (
-              <TeacherClassFinanceOverview classId={selectedFinanceClassId} />
-            ) : (
-              <div className="p-8 bg-slate-900 border border-slate-800 rounded-3xl text-center text-xs text-slate-400">
-                Veuillez sélectionner une classe ci-dessus pour afficher la synthèse de régularité.
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* TAB 1: OVERVIEW */}
-        {activeTab === 'overview' && (
-          <div className="space-y-6">
-            {/* KPI Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="p-4 bg-slate-900 rounded-2xl border border-slate-800 space-y-1">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Classes Attribuées</span>
-                <p className="text-2xl font-black text-white">{groupedAssignments.length}</p>
-                <span className="text-[10px] text-emerald-400 font-bold">Classes uniques</span>
-              </div>
-              <div className="p-4 bg-slate-900 rounded-2xl border border-slate-800 space-y-1">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Séances d'Appel</span>
-                <p className="text-2xl font-black text-amber-400">{teacherSessions.length}</p>
-                <span className="text-[10px] text-slate-400 font-medium">Créées par vous</span>
-              </div>
-              <div className="p-4 bg-slate-900 rounded-2xl border border-slate-800 space-y-1">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Brouillons à Finaliser</span>
-                <p className="text-2xl font-black text-rose-400">
-                  {teacherSessions.filter(s => s.status === 'draft').length}
-                </p>
-                <span className="text-[10px] text-slate-400 font-medium">En attente de clôture</span>
-              </div>
-              <div className="p-4 bg-slate-900 rounded-2xl border border-slate-800 space-y-1">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Élèves Enseignés</span>
-                <p className="text-2xl font-black text-indigo-400">
-                  {totalUniqueStudentsCount}
-                </p>
-                <span className="text-[10px] text-indigo-400 font-bold">Élèves uniques inscrits</span>
-              </div>
-            </div>
-
-            {/* Recent Sessions & Assignments split */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* My Assigned Classes */}
-              <div className="p-5 bg-slate-900 rounded-3xl border border-slate-800 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-extrabold text-white text-sm">Vos Classes & Matières</h3>
-                  <button onClick={() => setActiveTab('classes')} className="text-xs text-amber-400 hover:underline font-bold">
-                    Voir tout ➔
-                  </button>
+          {/* TAB: FINANCE */}
+          {activeTab === 'finance' && (
+            <div className="space-y-6 animate-fade-in">
+              <div className="p-5 bg-white border border-slate-200 rounded-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xs">
+                <div>
+                  <span className="text-[10px] font-extrabold text-amber-700 uppercase tracking-wider block">
+                    Sélection de la classe
+                  </span>
+                  <h3 className="text-sm font-bold text-slate-900">Consulter le statut financier d'une classe attribuée</h3>
                 </div>
 
-                {groupedAssignments.length === 0 ? (
-                  <div className="p-6 text-center text-xs text-slate-400 bg-slate-950 rounded-2xl border border-slate-800">
-                    Aucune classe ne vous a été affectée pour le moment. Veuillez contacter votre administration.
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {groupedAssignments.map(a => (
-                      <div key={a.class_id} className="p-3 bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-between">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <p className="font-extrabold text-white text-xs">{a.class_name}</p>
-                            {a.is_homeroom && (
-                              <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-full font-bold text-[10px]">
-                                Titulaire
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-[11px] text-amber-400 font-medium">{a.subject_name}</span>
-                        </div>
-                        <button
-                          onClick={() => {
-                            const cls = classesList.find(c => c.id === a.class_id);
-                            setSelectedClassForRoster(cls);
-                            setShowClassStudentsModal(true);
-                          }}
-                          className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold rounded-xl cursor-pointer"
-                        >
-                          Élèves ({classStudentsMap[a.class_id]?.length || 0})
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <select
+                  value={selectedFinanceClassId}
+                  onChange={(e) => setSelectedFinanceClassId(e.target.value)}
+                  className="w-full sm:w-64 bg-slate-50 border border-slate-200 text-slate-800 text-xs font-bold px-3 py-2 rounded-xl focus:outline-none focus:border-amber-500"
+                >
+                  <option value="">-- Choisir une classe --</option>
+                  {groupedAssignments.map((g) => (
+                    <option key={g.class_id} value={g.class_id}>
+                      {g.class_name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              {/* Recent Sessions */}
-              <div className="p-5 bg-slate-900 rounded-3xl border border-slate-800 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-extrabold text-white text-sm">Dernières Séances d'Appel</h3>
-                  <button onClick={() => setActiveTab('presences')} className="text-xs text-amber-400 hover:underline font-bold">
-                    Toutes les séances ➔
-                  </button>
+              {selectedFinanceClassId ? (
+                <TeacherClassFinanceOverview classId={selectedFinanceClassId} />
+              ) : (
+                <div className="p-8 bg-white border border-slate-200 rounded-3xl text-center text-xs text-slate-500 shadow-xs">
+                  Veuillez sélectionner une classe ci-dessus pour afficher la synthèse de régularité financière.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 1: OVERVIEW */}
+          {activeTab === 'overview' && (
+            <div className="space-y-6 animate-fade-in">
+              {/* KPI Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="p-5 bg-white rounded-3xl border border-slate-200 shadow-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Classes Attribuées</span>
+                    <School className="w-5 h-5 text-amber-600" />
+                  </div>
+                  <p className="text-2xl font-black text-slate-900">{groupedAssignments.length}</p>
+                  <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-full inline-block">
+                    Classes uniques
+                  </span>
                 </div>
 
-                {teacherSessions.length === 0 ? (
-                  <div className="p-6 text-center text-xs text-slate-400 bg-slate-950 rounded-2xl border border-slate-800">
-                    Vous n'avez pas encore créé de séance d'appel.
+                <div className="p-5 bg-white rounded-3xl border border-slate-200 shadow-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Séances d'Appel</span>
+                    <CalendarCheck className="w-5 h-5 text-blue-600" />
                   </div>
-                ) : (
-                  <div className="space-y-2">
-                    {teacherSessions.slice(0, 4).map(s => (
-                      <div key={s.id} className="p-3 bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-between text-xs">
-                        <div>
-                          <p className="font-bold text-white">{s.class_name} • <span className="text-slate-400">{s.subject_name}</span></p>
-                          <span className="text-[10px] font-mono text-slate-500">{new Date(s.attendance_date).toLocaleDateString('fr-FR')}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className={`px-2.5 py-0.5 rounded-full font-extrabold text-[10px] ${
-                            s.status === 'completed' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
-                          }`}>
-                            {s.status === 'completed' ? 'Finalisée' : 'Brouillon'}
-                          </span>
-                          <button
-                            onClick={() => openAttendanceSheet(s)}
-                            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-bold text-[11px] cursor-pointer"
-                          >
-                            {s.status === 'completed' ? 'Consulter' : 'Faire l\'appel'}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                  <p className="text-2xl font-black text-blue-900">{teacherSessions.length}</p>
+                  <span className="text-[10px] text-slate-500 font-medium">Créées sur la plateforme</span>
+                </div>
+
+                <div className="p-5 bg-white rounded-3xl border border-slate-200 shadow-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Brouillons d'Appel</span>
+                    <Clock className="w-5 h-5 text-amber-500" />
                   </div>
-                )}
+                  <p className="text-2xl font-black text-amber-600">
+                    {teacherSessions.filter(s => s.status === 'draft').length}
+                  </p>
+                  <span className="text-[10px] text-slate-500 font-medium">En attente de clôture</span>
+                </div>
+
+                <div className="p-5 bg-white rounded-3xl border border-slate-200 shadow-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Élèves Enseignés</span>
+                    <Users className="w-5 h-5 text-indigo-600" />
+                  </div>
+                  <p className="text-2xl font-black text-indigo-900">
+                    {totalUniqueStudentsCount}
+                  </p>
+                  <span className="text-[10px] text-indigo-700 font-bold bg-indigo-50 px-2 py-0.5 rounded-full inline-block">
+                    Élèves uniques inscrits
+                  </span>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
 
-        {/* TAB 2: MES CLASSES */}
-        {activeTab === 'classes' && (
-          <div className="space-y-4">
-            <h2 className="text-lg font-extrabold text-white">Vos Classes & Affectations Réelles</h2>
+              {/* Recent Sessions & Assignments Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* My Assigned Classes */}
+                <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-xs space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                      <School className="w-4 h-4 text-amber-600" />
+                      <span>Vos Classes & Matières Affectées</span>
+                    </h3>
+                    <button onClick={() => setActiveTab('classes')} className="text-xs text-amber-700 hover:underline font-bold">
+                      Voir tout ➔
+                    </button>
+                  </div>
 
-            {groupedAssignments.length === 0 ? (
-              <div className="p-8 text-center bg-slate-900 rounded-3xl border border-slate-800 text-slate-400 text-xs">
-                Aucune affectation active pour le moment.
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {groupedAssignments.map(a => {
-                  const classStudents = classStudentsMap[a.class_id] || [];
-
-                  return (
-                    <div key={a.class_id} className="p-5 bg-slate-900 rounded-3xl border border-slate-800 space-y-3">
-                      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                        <div className="flex items-center gap-2">
-                          <span className="text-base font-extrabold text-white">{a.class_name}</span>
-                          {a.is_homeroom && (
-                            <span className="px-2.5 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-full font-bold text-[10px]">
-                              Titulaire
-                            </span>
-                          )}
-                        </div>
-                        <span className="px-2.5 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-full font-bold text-[10px]">
-                          Active
-                        </span>
-                      </div>
-
-                      <div className="space-y-1 text-xs text-slate-300">
-                        <p><strong className="text-slate-400">Rôle / Matière(s) :</strong> {a.subject_name}</p>
-                        <p><strong className="text-slate-400">Élèves inscrits :</strong> {classStudents.length} élèves</p>
-                      </div>
-
-                      <div className="pt-2 flex gap-2">
-                        <button
-                          onClick={() => {
-                            const cls = classesList.find(c => c.id === a.class_id);
-                            setSelectedClassForRoster(cls);
-                            setShowClassStudentsModal(true);
-                          }}
-                          className="flex-1 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold text-xs cursor-pointer text-center"
-                        >
-                          Voir les élèves
-                        </button>
-                        <button
-                          onClick={() => {
-                            setNewSessionClassId(a.class_id);
-                            setNewSessionSubjectId(a.subject_id || '');
-                            setShowNewSessionModal(true);
-                          }}
-                          className="px-3 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-xl text-xs cursor-pointer"
-                        >
-                          Faire l'appel
-                        </button>
-                      </div>
+                  {groupedAssignments.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-slate-500 bg-slate-50 rounded-2xl border border-slate-200">
+                      Aucune classe ne vous a été affectée pour le moment. Veuillez contacter votre administration.
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* TAB 3: PRÉSENCES */}
-        {activeTab === 'presences' && (
-          <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-extrabold text-white">Gestion des Présences & Appel de Classe</h2>
-                <p className="text-xs text-slate-400">Saisie des appels pour vos classes affectées.</p>
-              </div>
-
-              <button
-                onClick={() => {
-                  if (assignments.length > 0) {
-                    setNewSessionClassId(assignments[0].class_id);
-                    setNewSessionSubjectId(assignments[0].subject_id || '');
-                  }
-                  setShowNewSessionModal(true);
-                }}
-                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-xl cursor-pointer flex items-center gap-2"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Nouvelle Séance d'Appel</span>
-              </button>
-            </div>
-
-            {/* Sessions Table */}
-            {teacherSessions.length === 0 ? (
-              <div className="p-8 text-center bg-slate-900 rounded-3xl border border-slate-800 text-slate-400 text-xs">
-                Aucune séance d'appel enregistrée pour l'instant.
-              </div>
-            ) : (
-              <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs text-slate-300">
-                    <thead className="bg-slate-950 text-slate-400 font-bold uppercase text-[10px] tracking-wider border-b border-slate-800">
-                      <tr>
-                        <th className="p-4">Date Appel</th>
-                        <th className="p-4">Classe</th>
-                        <th className="p-4">Matière</th>
-                        <th className="p-4">Statut</th>
-                        <th className="p-4 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800">
-                      {teacherSessions.map(s => (
-                        <tr key={s.id} className="hover:bg-slate-800/40">
-                          <td className="p-4 font-mono text-white font-bold">{new Date(s.attendance_date).toLocaleDateString('fr-FR')}</td>
-                          <td className="p-4 font-extrabold text-white">{s.class_name}</td>
-                          <td className="p-4 text-amber-400 font-medium">{s.subject_name}</td>
-                          <td className="p-4">
-                            <span className={`px-2.5 py-0.5 rounded-full font-extrabold text-[10px] ${
-                              s.status === 'completed' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                            }`}>
-                              {s.status === 'completed' ? 'Finalisée (Verrouillée)' : 'Brouillon'}
-                            </span>
-                          </td>
-                          <td className="p-4 text-right">
-                            <button
-                              onClick={() => openAttendanceSheet(s)}
-                              className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-bold cursor-pointer"
-                            >
-                              {s.status === 'completed' ? 'Consulter' : 'Remplir / Modifer'}
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* TAB: DEVOIRS */}
-        {activeTab === 'homework' && (
-          <div className="space-y-6">
-            {/* Header Devoirs */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl">
-              <div>
-                <h2 className="text-xl font-extrabold text-white flex items-center gap-2">
-                  <BookOpen className="w-6 h-6 text-amber-400" />
-                  <span>Gestion des Devoirs Scolaires</span>
-                </h2>
-                <p className="text-xs text-slate-400 mt-1">
-                  Créez, publiez, suivez et gérez les devoirs pour vos classes attribuées.
-                </p>
-              </div>
-              <button
-                onClick={() => {
-                  resetHwForm();
-                  if (groupedAssignments.length > 0) {
-                    setHwClassId(groupedAssignments[0].class_id);
-                    const firstClassAssg = assignments.filter(a => a.class_id === groupedAssignments[0].class_id && a.subject_id);
-                    if (firstClassAssg.length > 0 && firstClassAssg[0].subject_id) {
-                      setHwSubjectId(firstClassAssg[0].subject_id);
-                    }
-                  }
-                  setShowCreateHwModal(true);
-                }}
-                className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-2xl flex items-center gap-2 shadow-lg cursor-pointer transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Nouveau Devoir</span>
-              </button>
-            </div>
-
-            {/* Filtres Bar */}
-            <div className="flex flex-wrap items-center gap-3 bg-slate-900/60 p-4 rounded-2xl border border-slate-800 text-xs">
-              <div className="flex items-center gap-1.5 text-slate-400 font-bold mr-2">
-                <Filter className="w-4 h-4 text-amber-400" />
-                <span>Filtres :</span>
-              </div>
-
-              {/* Filtre Classe */}
-              <select
-                value={hwClassFilter}
-                onChange={e => setHwClassFilter(e.target.value)}
-                className="px-3 py-2 bg-slate-800 text-white rounded-xl border border-slate-700 text-xs font-medium focus:outline-none focus:border-amber-500"
-              >
-                <option value="all">Toutes les classes ({groupedAssignments.length})</option>
-                {groupedAssignments.map(g => (
-                  <option key={g.class_id} value={g.class_id}>{g.class_name}</option>
-                ))}
-              </select>
-
-              {/* Filtre Matière */}
-              <select
-                value={hwSubjectFilter}
-                onChange={e => setHwSubjectFilter(e.target.value)}
-                className="px-3 py-2 bg-slate-800 text-white rounded-xl border border-slate-700 text-xs font-medium focus:outline-none focus:border-amber-500"
-              >
-                <option value="all">Toutes les matières</option>
-                {subjectsList.map(s => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-
-              {/* Filtre Statut */}
-              <select
-                value={hwStatusFilter}
-                onChange={e => setHwStatusFilter(e.target.value)}
-                className="px-3 py-2 bg-slate-800 text-white rounded-xl border border-slate-700 text-xs font-medium focus:outline-none focus:border-amber-500"
-              >
-                <option value="all">Tous les statuts</option>
-                <option value="draft">Brouillons</option>
-                <option value="published">Publiés</option>
-                <option value="closed">Clôturés</option>
-                <option value="cancelled">Annulés</option>
-              </select>
-            </div>
-
-            {/* Liste des Devoirs */}
-            {(() => {
-              const filteredList = homeworkList.filter(hw => {
-                if (hwClassFilter !== 'all' && hw.class_id !== hwClassFilter) return false;
-                if (hwSubjectFilter !== 'all' && hw.subject_id !== hwSubjectFilter) return false;
-                if (hwStatusFilter !== 'all' && hw.status !== hwStatusFilter) return false;
-                return true;
-              });
-
-              if (filteredList.length === 0) {
-                return (
-                  <div className="p-12 text-center bg-slate-900 rounded-3xl border border-slate-800 space-y-3">
-                    <FileText className="w-12 h-12 text-slate-600 mx-auto" />
-                    <p className="text-sm font-bold text-slate-300">Aucun devoir trouvé</p>
-                    <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                      Aucun devoir ne correspond à vos critères de recherche ou vous n'avez pas encore créé de devoir.
-                    </p>
-                  </div>
-                );
-              }
-
-              return (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {filteredList.map(hw => {
-                    const isOverdue = hw.status === 'published' && new Date(hw.due_at) < new Date();
-                    return (
-                      <div
-                        key={hw.id}
-                        className="bg-slate-900 p-5 rounded-3xl border border-slate-800 space-y-4 hover:border-slate-700 transition-all flex flex-col justify-between"
-                      >
-                        <div className="space-y-3">
-                          {/* Badges Header */}
-                          <div className="flex items-center justify-between gap-2 flex-wrap text-[10px] font-bold">
-                            <div className="flex items-center gap-1.5">
-                              <span className="px-2.5 py-1 bg-amber-500/10 text-amber-300 border border-amber-500/30 rounded-lg">
-                                {hw.class_name}
-                              </span>
-                              <span className="px-2.5 py-1 bg-slate-800 text-slate-300 rounded-lg">
-                                {hw.subject_name}
-                              </span>
-                            </div>
-                            <div>
-                              {hw.status === 'draft' && (
-                                <span className="px-2.5 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-lg">
-                                  Brouillon
-                                </span>
-                              )}
-                              {hw.status === 'published' && !isOverdue && (
-                                <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-lg">
-                                  Publié
-                                </span>
-                              )}
-                              {hw.status === 'published' && isOverdue && (
-                                <span className="px-2.5 py-1 bg-rose-500/20 text-rose-300 border border-rose-500/40 rounded-lg font-black animate-pulse">
-                                  En retard
-                                </span>
-                              )}
-                              {hw.status === 'closed' && (
-                                <span className="px-2.5 py-1 bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 rounded-lg">
-                                  Clôturé
-                                </span>
-                              )}
-                              {hw.status === 'cancelled' && (
-                                <span className="px-2.5 py-1 bg-slate-800 text-slate-400 border border-slate-700 rounded-lg">
-                                  Annulé
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Title & Instructions preview */}
+                  ) : (
+                    <div className="space-y-2 max-h-80 overflow-y-auto">
+                      {groupedAssignments.map(a => (
+                        <div key={a.class_id} className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between">
                           <div>
-                            <h3 className="text-sm font-extrabold text-white line-clamp-1">{hw.title}</h3>
-                            <p className="text-xs text-slate-400 line-clamp-2 mt-1 leading-relaxed">
-                              {hw.instructions}
-                            </p>
-                          </div>
-
-                          {/* Metadata */}
-                          <div className="pt-2 border-t border-slate-800/80 grid grid-cols-2 gap-2 text-[11px]">
-                            <div>
-                              <span className="text-slate-500 block">Assigné le</span>
-                              <span className="text-slate-300 font-medium">{new Date(hw.assigned_on).toLocaleDateString('fr-FR')}</span>
+                            <div className="flex items-center gap-2">
+                              <p className="font-extrabold text-slate-900 text-xs">{a.class_name}</p>
+                              {a.is_homeroom && (
+                                <span className="px-2 py-0.5 bg-amber-100 text-amber-900 border border-amber-200 rounded-full font-bold text-[10px]">
+                                  Titulaire
+                                </span>
+                              )}
                             </div>
-                            <div>
-                              <span className="text-slate-500 block">Échéance</span>
-                              <span className={`font-bold ${isOverdue ? 'text-rose-400' : 'text-amber-400'}`}>
-                                {new Date(hw.due_at).toLocaleDateString('fr-FR')} à {new Date(hw.due_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                              </span>
-                            </div>
-                            {hw.estimated_minutes && (
-                              <div className="col-span-2 text-slate-400 text-[10px]">
-                                Durée estimée : <strong className="text-slate-200">{hw.estimated_minutes} min</strong>
-                              </div>
-                            )}
+                            <span className="text-[11px] text-amber-800 font-medium block mt-0.5">{a.subject_name}</span>
                           </div>
-                        </div>
-
-                        {/* Card Actions */}
-                        <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
                           <button
                             onClick={() => {
-                              setSelectedHw(hw);
-                              setShowDetailHwModal(true);
+                              const cls = classesList.find(c => c.id === a.class_id);
+                              setSelectedClassForRoster(cls);
+                              setShowClassStudentsModal(true);
                             }}
-                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors"
+                            className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-800 border border-slate-200 text-[11px] font-bold rounded-xl cursor-pointer transition-colors shadow-2xs"
                           >
-                            Détails
+                            Élèves ({classStudentsMap[a.class_id]?.length || 0})
                           </button>
-                          <div className="flex items-center gap-1.5">
-                            {hw.status === 'draft' && (
-                              <button
-                                onClick={() => handlePublishHomework(hw)}
-                                className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl text-xs font-black flex items-center gap-1 cursor-pointer transition-colors"
-                              >
-                                <Send className="w-3.5 h-3.5" />
-                                <span>Publier</span>
-                              </button>
-                            )}
-                            {hw.status === 'published' && (
-                              <button
-                                onClick={() => handleCloseHomework(hw)}
-                                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
-                              >
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>Clôturer</span>
-                              </button>
-                            )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Recent Sessions */}
+                <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-xs space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                      <CalendarCheck className="w-4 h-4 text-blue-600" />
+                      <span>Dernières Séances d'Appel</span>
+                    </h3>
+                    <button onClick={() => setActiveTab('presences')} className="text-xs text-amber-700 hover:underline font-bold">
+                      Toutes les séances ➔
+                    </button>
+                  </div>
+
+                  {teacherSessions.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-slate-500 bg-slate-50 rounded-2xl border border-slate-200">
+                      Vous n'avez pas encore créé de séance d'appel.
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-80 overflow-y-auto">
+                      {teacherSessions.slice(0, 5).map(s => (
+                        <div key={s.id} className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between text-xs">
+                          <div>
+                            <p className="font-bold text-slate-900">{s.class_name} • <span className="text-slate-600">{s.subject_name}</span></p>
+                            <span className="text-[10px] font-mono text-slate-500">{new Date(s.attendance_date).toLocaleDateString('fr-FR')}</span>
                           </div>
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2.5 py-0.5 rounded-full font-extrabold text-[10px] ${
+                              s.status === 'completed' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 'bg-amber-100 text-amber-900 border border-amber-200'
+                            }`}>
+                              {s.status === 'completed' ? 'Finalisée' : 'Brouillon'}
+                            </span>
+                            <button
+                              onClick={() => openAttendanceSheet(s)}
+                              className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-bold text-[11px] cursor-pointer"
+                            >
+                              {s.status === 'completed' ? 'Consulter' : 'Faire l\'appel'}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2: MES CLASSES */}
+          {activeTab === 'classes' && (
+            <div className="space-y-4 animate-fade-in">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-extrabold text-slate-900">Vos Classes & Affectations Réelles</h2>
+                <span className="text-xs text-slate-500 font-medium">
+                  Total : {groupedAssignments.length} classe(s)
+                </span>
+              </div>
+
+              {groupedAssignments.length === 0 ? (
+                <div className="p-8 text-center bg-white rounded-3xl border border-slate-200 text-slate-500 text-xs shadow-xs">
+                  Aucune affectation active pour le moment.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {groupedAssignments.map(a => {
+                    const classStudents = classStudentsMap[a.class_id] || [];
+
+                    return (
+                      <div key={a.class_id} className="p-6 bg-white rounded-3xl border border-slate-200 shadow-xs space-y-4 flex flex-col justify-between">
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                            <div className="flex items-center gap-2">
+                              <span className="text-base font-extrabold text-slate-900">{a.class_name}</span>
+                              {a.is_homeroom && (
+                                <span className="px-2.5 py-0.5 bg-amber-100 text-amber-900 border border-amber-200 rounded-full font-bold text-[10px]">
+                                  Titulaire
+                                </span>
+                              )}
+                            </div>
+                            <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-full font-bold text-[10px]">
+                              Active
+                            </span>
+                          </div>
+
+                          <div className="space-y-1.5 text-xs text-slate-600">
+                            <p><strong className="text-slate-800">Rôle / Matière(s) :</strong> {a.subject_name}</p>
+                            <p><strong className="text-slate-800">Élèves inscrits :</strong> {classStudents.length} élèves</p>
+                          </div>
+                        </div>
+
+                        <div className="pt-2 flex gap-2 border-t border-slate-100">
+                          <button
+                            onClick={() => {
+                              const cls = classesList.find(c => c.id === a.class_id);
+                              setSelectedClassForRoster(cls);
+                              setShowClassStudentsModal(true);
+                            }}
+                            className="flex-1 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-bold text-xs cursor-pointer text-center transition-colors"
+                          >
+                            Liste des élèves
+                          </button>
+                          <button
+                            onClick={() => {
+                              setNewSessionClassId(a.class_id);
+                              setNewSessionSubjectId(a.subject_id || '');
+                              setShowNewSessionModal(true);
+                            }}
+                            className="px-3 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl font-bold text-xs cursor-pointer transition-colors"
+                          >
+                            Faire l'appel
+                          </button>
                         </div>
                       </div>
                     );
                   })}
                 </div>
-              );
-            })()}
-          </div>
-        )}
-
-        {/* TAB: GRADES */}
-        {activeTab === 'grades' && (
-          <TeacherGradesModule
-            assignments={assignments}
-            classesList={classesList}
-            subjectsList={subjectsList}
-            schoolTerms={schoolTermsList}
-            schoolPeriods={schoolPeriodsList}
-            teacherRecord={teacherRecord}
-            onStatsChange={count => setGradesCount(count)}
-          />
-        )}
-
-        {/* FUTURE TABS: PROCHAINEMENT */}
-        {(activeTab === 'schedule' || activeTab === 'messages') && (
-          <div className="p-12 text-center bg-slate-900 rounded-3xl border border-slate-800 space-y-4">
-            <div className="w-16 h-16 bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-3xl flex items-center justify-center mx-auto">
-              <Clock className="w-8 h-8" />
+              )}
             </div>
-            <div className="max-w-md mx-auto space-y-2">
-              <h2 className="text-xl font-extrabold text-white">Module Enseignant — Prochainement</h2>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Ce module professionnel est en cours de déploiement sécurisé. Aucune donnée fictive n'est affichée dans votre portail de production.
-              </p>
-            </div>
-          </div>
-        )}
+          )}
 
-        {/* TAB: PROFILE */}
-        {activeTab === 'profile' && (
-          <div className="max-w-2xl mx-auto space-y-6">
-            <div className="p-6 bg-slate-900 rounded-3xl border border-slate-800 space-y-6">
-              <h2 className="text-lg font-extrabold text-white border-b border-slate-800 pb-3">Profil Enseignant Professionnel</h2>
+          {/* TAB 3: PRÉSENCES */}
+          {activeTab === 'presences' && (
+            <div className="space-y-6 animate-fade-in">
+              <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-extrabold text-slate-900">Registre des Présences & Séances d'Appel</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Gérez et validez l'assiduité de vos élèves pour chaque cours
+                  </p>
+                </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                <div>
-                  <span className="text-slate-400 font-bold block mb-1">Prénom & Nom :</span>
-                  <p className="font-extrabold text-white text-sm">{profile?.first_name} {profile?.last_name}</p>
-                </div>
-                <div>
-                  <span className="text-slate-400 font-bold block mb-1">Matricule Employé :</span>
-                  <p className="font-mono text-amber-400 font-bold text-sm">{teacherRecord?.employee_number || 'N/A'}</p>
-                </div>
-                <div>
-                  <span className="text-slate-400 font-bold block mb-1">Email Professionnel :</span>
-                  <p className="font-mono text-slate-200">{user?.email || teacherRecord?.email}</p>
-                </div>
-                <div>
-                  <span className="text-slate-400 font-bold block mb-1">Spécialité :</span>
-                  <p className="font-bold text-slate-200">{teacherRecord?.specialty || 'Générale'}</p>
-                </div>
-                <div>
-                  <span className="text-slate-400 font-bold block mb-1">Établissement Scolaire :</span>
-                  <p className="font-bold text-slate-200">{school?.name}</p>
-                </div>
-                <div>
-                  <span className="text-slate-400 font-bold block mb-1">Statut d'Emploi :</span>
-                  <span className="px-2.5 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-full font-extrabold uppercase text-[10px]">
-                    {teacherRecord?.employment_status || 'Actif'}
-                  </span>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (assignments.length > 0) {
+                      setNewSessionClassId(assignments[0].class_id);
+                      setNewSessionSubjectId(assignments[0].subject_id || '');
+                    }
+                    setShowNewSessionModal(true);
+                  }}
+                  className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-xl shadow-xs transition-colors flex items-center gap-2 cursor-pointer shrink-0"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Nouvelle Séance d'Appel</span>
+                </button>
               </div>
 
-              {/* Form Phone update */}
-              <form onSubmit={handleUpdatePhone} className="pt-4 border-t border-slate-800 space-y-3">
-                <label className="block text-xs font-extrabold text-slate-200 uppercase tracking-wider">
-                  Numéro de Téléphone Personnel (Modifiable)
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="tel"
-                    value={teacherPhone}
-                    onChange={e => setTeacherPhone(e.target.value)}
-                    placeholder="+243..."
-                    className="flex-1 px-3.5 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white"
-                  />
-                  <button
-                    type="submit"
-                    disabled={updatingPhone}
-                    className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black rounded-xl text-xs cursor-pointer"
-                  >
-                    {updatingPhone ? 'Mise à jour...' : 'Sauvegarder'}
-                  </button>
+              {/* Sessions Table / List */}
+              <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
+                <div className="p-5 border-b border-slate-100 font-extrabold text-slate-900 text-sm">
+                  Historique des séances d'appel
                 </div>
-              </form>
+
+                {teacherSessions.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-slate-500">
+                    Aucune séance d'appel enregistrée. Cliquez sur "Nouvelle Séance d'Appel" pour commencer.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-100 overflow-x-auto">
+                    {teacherSessions.map(s => (
+                      <div key={s.id} className="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 hover:bg-slate-50/80 transition-colors">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-extrabold text-slate-900 text-xs sm:text-sm">{s.class_name}</span>
+                            <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200">
+                              {s.subject_name}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 font-mono">
+                            Date : {new Date(s.attendance_date).toLocaleDateString('fr-FR')} • Créé le {new Date(s.started_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
+                          <span className={`px-2.5 py-1 rounded-full font-bold text-[10px] ${
+                            s.status === 'completed'
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                              : 'bg-amber-100 text-amber-900 border border-amber-200'
+                          }`}>
+                            {s.status === 'completed' ? 'Finalisée' : 'Brouillon'}
+                          </span>
+
+                          <button
+                            onClick={() => openAttendanceSheet(s)}
+                            className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs cursor-pointer transition-colors"
+                          >
+                            {s.status === 'completed' ? 'Consulter la feuille' : 'Faire l\'appel'}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
+          )}
 
-            {/* Signature Officielle */}
-            <TeacherOfficialSignatureCard
-              teacherRecord={teacherRecord}
-              onSignatureUpdated={(url) => {
-                setTeacherRecord((prev: any) => prev ? { ...prev, signature_url: url } : prev);
-              }}
+          {/* TAB 4: EMPLOI DU TEMPS (PROCHAINEMENT) */}
+          {activeTab === 'schedule' && (
+            <TeacherModulePlaceholder
+              title="Emploi du Temps Officiel"
+              description="Consultez la grille horaire officielle de vos cours et vos salles attribuées dès publication par la direction de votre établissement."
+              icon={Clock}
             />
-          </div>
-        )}
-      </main>
+          )}
 
-      {/* MODAL 1: Créer une séance d'appel */}
+          {/* TAB 5: DEVOIRS */}
+          {activeTab === 'homework' && (
+            <div className="space-y-6 animate-fade-in">
+              <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-extrabold text-slate-900">Gestion des Devoirs & Travaux</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Créez, publiez et suivez les devoirs assignés à vos élèves
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetHwForm();
+                    if (assignments.length > 0) {
+                      setHwClassId(assignments[0].class_id);
+                      setHwSubjectId(assignments[0].subject_id || '');
+                    }
+                    setShowCreateHwModal(true);
+                  }}
+                  className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-xl shadow-xs transition-colors flex items-center gap-2 cursor-pointer shrink-0"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Nouveau Devoir</span>
+                </button>
+              </div>
+
+              {/* Homework Filters */}
+              <div className="p-4 bg-white rounded-3xl border border-slate-200 shadow-xs flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                  <Filter className="w-4 h-4 text-amber-600" />
+                  <span>Filtres :</span>
+                </div>
+
+                {/* Filtre Classe */}
+                <select
+                  value={hwClassFilter}
+                  onChange={e => setHwClassFilter(e.target.value)}
+                  className="px-3 py-1.5 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-xs font-medium focus:outline-none focus:border-amber-500"
+                >
+                  <option value="all">Toutes les classes</option>
+                  {groupedAssignments.map(g => (
+                    <option key={g.class_id} value={g.class_id}>{g.class_name}</option>
+                  ))}
+                </select>
+
+                {/* Filtre Matière */}
+                <select
+                  value={hwSubjectFilter}
+                  onChange={e => setHwSubjectFilter(e.target.value)}
+                  className="px-3 py-1.5 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-xs font-medium focus:outline-none focus:border-amber-500"
+                >
+                  <option value="all">Toutes les matières</option>
+                  {subjectsList.map(s => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+
+                {/* Filtre Statut */}
+                <select
+                  value={hwStatusFilter}
+                  onChange={e => setHwStatusFilter(e.target.value)}
+                  className="px-3 py-1.5 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-xs font-medium focus:outline-none focus:border-amber-500"
+                >
+                  <option value="all">Tous les statuts</option>
+                  <option value="draft">Brouillons</option>
+                  <option value="published">Publiés</option>
+                  <option value="closed">Clôturés</option>
+                  <option value="cancelled">Annulés</option>
+                </select>
+              </div>
+
+              {/* Liste des Devoirs */}
+              {(() => {
+                const filteredList = homeworkList.filter(hw => {
+                  if (hwClassFilter !== 'all' && hw.class_id !== hwClassFilter) return false;
+                  if (hwSubjectFilter !== 'all' && hw.subject_id !== hwSubjectFilter) return false;
+                  if (hwStatusFilter !== 'all' && hw.status !== hwStatusFilter) return false;
+                  return true;
+                });
+
+                if (filteredList.length === 0) {
+                  return (
+                    <div className="p-12 text-center bg-white rounded-3xl border border-slate-200 shadow-xs space-y-3">
+                      <FileText className="w-12 h-12 text-slate-400 mx-auto" />
+                      <p className="text-sm font-bold text-slate-800">Aucun devoir trouvé</p>
+                      <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                        Aucun devoir ne correspond à vos critères de recherche ou vous n'avez pas encore créé de devoir.
+                      </p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                    {filteredList.map(hw => {
+                      const isOverdue = hw.status === 'published' && new Date(hw.due_at) < new Date();
+                      return (
+                        <div
+                          key={hw.id}
+                          className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs space-y-4 hover:border-slate-300 transition-all flex flex-col justify-between"
+                        >
+                          <div className="space-y-3">
+                            {/* Badges Header */}
+                            <div className="flex items-center justify-between gap-2 flex-wrap text-[10px] font-bold">
+                              <div className="flex items-center gap-1.5">
+                                <span className="px-2.5 py-1 bg-amber-50 text-amber-900 border border-amber-200 rounded-lg">
+                                  {hw.class_name}
+                                </span>
+                                <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg border border-slate-200">
+                                  {hw.subject_name}
+                                </span>
+                              </div>
+                              <div>
+                                {hw.status === 'draft' && (
+                                  <span className="px-2.5 py-1 bg-amber-100 text-amber-900 border border-amber-200 rounded-lg">
+                                    Brouillon
+                                  </span>
+                                )}
+                                {hw.status === 'published' && !isOverdue && (
+                                  <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg">
+                                    Publié
+                                  </span>
+                                )}
+                                {hw.status === 'published' && isOverdue && (
+                                  <span className="px-2.5 py-1 bg-rose-100 text-rose-800 border border-rose-200 rounded-lg font-black animate-pulse">
+                                    En retard
+                                  </span>
+                                )}
+                                {hw.status === 'closed' && (
+                                  <span className="px-2.5 py-1 bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-lg">
+                                    Clôturé
+                                  </span>
+                                )}
+                                {hw.status === 'cancelled' && (
+                                  <span className="px-2.5 py-1 bg-slate-100 text-slate-600 border border-slate-200 rounded-lg">
+                                    Annulé
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Title & Instructions preview */}
+                            <div>
+                              <h3 className="text-sm font-extrabold text-slate-900 line-clamp-1">{hw.title}</h3>
+                              <p className="text-xs text-slate-600 line-clamp-2 mt-1 leading-relaxed">
+                                {hw.instructions}
+                              </p>
+                            </div>
+
+                            {/* Metadata */}
+                            <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-2 text-[11px]">
+                              <div>
+                                <span className="text-slate-400 block">Assigné le</span>
+                                <span className="text-slate-700 font-medium">{new Date(hw.assigned_on).toLocaleDateString('fr-FR')}</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block">Échéance</span>
+                                <span className={`font-bold ${isOverdue ? 'text-rose-600' : 'text-amber-700'}`}>
+                                  {new Date(hw.due_at).toLocaleDateString('fr-FR')} à {new Date(hw.due_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
+                              {hw.estimated_minutes && (
+                                <div className="col-span-2 text-slate-500 text-[10px]">
+                                  Durée estimée : <strong className="text-slate-800">{hw.estimated_minutes} min</strong>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Card Actions */}
+                          <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                            <button
+                              onClick={() => {
+                                setSelectedHw(hw);
+                                setShowDetailHwModal(true);
+                              }}
+                              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold cursor-pointer transition-colors"
+                            >
+                              Détails
+                            </button>
+                            <div className="flex items-center gap-1.5">
+                              {hw.status === 'draft' && (
+                                <button
+                                  onClick={() => handlePublishHomework(hw)}
+                                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-extrabold flex items-center gap-1 cursor-pointer transition-colors"
+                                >
+                                  <Send className="w-3.5 h-3.5" />
+                                  <span>Publier</span>
+                                </button>
+                              )}
+                              {hw.status === 'published' && (
+                                <button
+                                  onClick={() => handleCloseHomework(hw)}
+                                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>Clôturer</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* TAB 6: NOTES ET ÉVALUATIONS */}
+          {activeTab === 'grades' && (
+            <TeacherGradesModule
+              assignments={assignments}
+              classesList={classesList}
+              subjectsList={subjectsList}
+              schoolTerms={schoolTermsList}
+              schoolPeriods={schoolPeriodsList}
+              teacherRecord={teacherRecord}
+              onStatsChange={count => setGradesCount(count)}
+            />
+          )}
+
+          {/* TAB 7: MESSAGES (PROCHAINEMENT) */}
+          {activeTab === 'messages' && (
+            <TeacherModulePlaceholder
+              title="Messagerie Enseignants — Parents & Direction"
+              description="Communiquez en toute sécurité avec les responsables légaux de vos élèves et la direction de l'établissement dès l'activation du module."
+              icon={MessageSquare}
+            />
+          )}
+
+          {/* TAB 8: MON PROFIL */}
+          {activeTab === 'profile' && (
+            <div className="max-w-2xl mx-auto space-y-6 animate-fade-in">
+              <div className="p-6 bg-white rounded-3xl border border-slate-200 shadow-xs space-y-6">
+                <h2 className="text-lg font-extrabold text-slate-900 border-b border-slate-100 pb-3">Profil Enseignant Professionnel</h2>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                  <div>
+                    <span className="text-slate-500 font-bold block mb-1">Prénom & Nom :</span>
+                    <p className="font-extrabold text-slate-900 text-sm">{teacherFullName}</p>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 font-bold block mb-1">Matricule Employé :</span>
+                    <p className="font-mono text-amber-700 font-bold text-sm">{teacherRecord?.employee_number || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 font-bold block mb-1">Statut du Compte :</span>
+                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-[10px] inline-block">
+                      Actif ({teacherRecord?.employment_status || 'Titulaire'})
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-500 font-bold block mb-1">Spécialité :</span>
+                    <p className="font-bold text-slate-800">{teacherRecord?.specialty || 'Non renseignée'}</p>
+                  </div>
+                </div>
+
+                {/* Formulaire de mise à jour Téléphone */}
+                <form onSubmit={handleUpdatePhone} className="pt-4 border-t border-slate-100 space-y-3">
+                  <label className="block text-xs font-bold text-slate-800">
+                    Téléphone de contact direct :
+                  </label>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                      <input
+                        type="text"
+                        value={teacherPhone}
+                        onChange={e => setTeacherPhone(e.target.value)}
+                        placeholder="+243..."
+                        className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-medium focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={updatingPhone}
+                      className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      {updatingPhone ? 'Mise à jour...' : 'Enregistrer'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Carte Signature Officielle */}
+              <TeacherOfficialSignatureCard
+                teacherRecord={teacherRecord}
+              />
+            </div>
+          )}
+        </main>
+      </div>
+
+      {/* MODAL NOUVELLE SÉANCE D'APPEL */}
       {showNewSessionModal && (
         <Modal
           isOpen={showNewSessionModal}
           onClose={() => setShowNewSessionModal(false)}
-          title="Créer une Séance d'Appel de Présence"
-          darkMode={true}
+          title="Créer une Nouvelle Séance d'Appel"
         >
-          <form onSubmit={handleCreateSession} className="space-y-4 text-xs">
+          <form onSubmit={handleCreateSession} className="space-y-4">
             <div>
-              <label className="block text-xs font-extrabold text-slate-200 uppercase tracking-wider mb-1.5">
-                Sélectionner la Classe *
-              </label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Classe : *</label>
               <select
-                required
                 value={newSessionClassId}
-                onChange={e => {
-                  setNewSessionClassId(e.target.value);
-                  const firstAssign = assignments.find(a => a.class_id === e.target.value);
-                  if (firstAssign) setNewSessionSubjectId(firstAssign.subject_id || '');
-                }}
-                className="w-full px-3.5 py-2.5 bg-slate-950 border-2 border-slate-600 rounded-xl text-sm font-medium text-white focus:outline-none focus:border-amber-500 cursor-pointer"
+                onChange={e => setNewSessionClassId(e.target.value)}
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-bold focus:outline-none focus:border-amber-500"
+                required
               >
-                <option value="">-- Choisissez une classe attribuée --</option>
+                <option value="">-- Sélectionner une classe --</option>
                 {groupedAssignments.map(g => (
-                  <option key={g.class_id} value={g.class_id} className="bg-slate-900 text-white">
-                    {g.class_name}
-                  </option>
+                  <option key={g.class_id} value={g.class_id}>{g.class_name}</option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="block text-xs font-extrabold text-slate-200 uppercase tracking-wider mb-1.5">
-                Date de l'Appel *
-              </label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Matière / Type d'appel :</label>
+              <select
+                value={newSessionSubjectId}
+                onChange={e => setNewSessionSubjectId(e.target.value)}
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-medium focus:outline-none focus:border-amber-500"
+              >
+                <option value="">Appel Général (Titularisation)</option>
+                {subjectsList.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Date de la séance : *</label>
               <input
                 type="date"
-                required
                 value={newSessionDate}
                 onChange={e => setNewSessionDate(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-950 border-2 border-slate-600 rounded-xl text-sm font-medium text-white focus:outline-none focus:border-amber-500"
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-medium focus:outline-none focus:border-amber-500"
+                required
               />
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+            <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setShowNewSessionModal(false)}
-                className="px-4 py-2 text-xs font-bold text-slate-300"
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl"
               >
                 Annuler
               </button>
               <button
                 type="submit"
-                disabled={creatingSession || !newSessionClassId}
-                className="px-5 py-2 text-xs font-extrabold bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-slate-950 rounded-xl cursor-pointer"
+                disabled={creatingSession}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black rounded-xl disabled:opacity-50"
               >
-                {creatingSession ? 'Création...' : 'Créer et Faire l\'Appel'}
+                {creatingSession ? 'Création...' : 'Commencer l\'appel'}
               </button>
             </div>
           </form>
         </Modal>
       )}
 
-      {/* MODAL 2: Saisie Interactive de l'Appel */}
-      {selectedSession && showTakeAttendanceModal && (
+      {/* MODAL FEUILLE D'APPEL COMPLÈTE */}
+      {showTakeAttendanceModal && selectedSession && (
         <Modal
           isOpen={showTakeAttendanceModal}
           onClose={() => setShowTakeAttendanceModal(false)}
-          title={`Appel de Présence — ${selectedSession.class_name} (${new Date(selectedSession.attendance_date).toLocaleDateString('fr-FR')})`}
-          darkMode={true}
+          title={`Feuille d'Appel — ${selectedSession.class_name} (${selectedSession.subject_name})`}
+          maxWidth="4xl"
         >
-          <div className="space-y-4 text-xs">
-            <div className="p-3 bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-between">
-              <div>
-                <span className="font-extrabold text-white">Élèves : {sheetRecords.length}</span>
-                <p className="text-[11px] text-slate-400">Statut séance : <strong className="text-amber-400">{selectedSession.status}</strong></p>
-              </div>
-              {selectedSession.status !== 'completed' && (
-                <button
-                  type="button"
-                  onClick={() => setSheetRecords(prev => prev.map(item => ({ ...item, status: 'present' })))}
-                  className="px-3.5 py-1.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-xl font-extrabold text-xs cursor-pointer"
-                >
-                  ✓ Tout marquer Présents
-                </button>
-              )}
+          <div className="space-y-4">
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 font-medium flex items-center justify-between">
+              <span>Date : <strong>{new Date(selectedSession.attendance_date).toLocaleDateString('fr-FR')}</strong></span>
+              <span>Statut actuel : <strong>{selectedSession.status === 'completed' ? 'Finalisée' : 'Brouillon'}</strong></span>
             </div>
 
-            {sheetRecords.length === 0 ? (
-              <div className="p-6 text-center bg-slate-950 rounded-xl text-slate-400">
-                Aucun élève inscrit dans cette classe.
-              </div>
-            ) : (
-              <div className="max-h-96 overflow-y-auto space-y-2 pr-1">
-                {sheetRecords.map((item, idx) => (
-                  <div key={item.student.id} className="p-3 bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <span className="font-mono text-amber-400 font-bold">#{idx + 1} </span>
-                        <span className="font-extrabold text-white text-xs">{item.student.first_name} {item.student.last_name}</span>
-                        <p className="text-[10px] text-slate-400 font-mono">{item.student.student_number}</p>
-                      </div>
-
-                      {selectedSession.status === 'completed' ? (
-                        <span className={`px-2.5 py-1 rounded-xl font-extrabold text-xs uppercase ${
-                          item.status === 'present' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'
-                        }`}>
-                          {item.status}
-                        </span>
-                      ) : (
-                        <div className="flex items-center gap-1">
-                          {(['present', 'absent', 'late', 'excused'] as const).map(st => (
-                            <button
-                              key={st}
-                              type="button"
-                              onClick={() => setSheetRecords(prev => prev.map(r => r.student.id === item.student.id ? { ...r, status: st } : r))}
-                              className={`px-2 py-1 rounded-lg font-bold text-[10px] capitalize cursor-pointer ${
-                                item.status === st ? 'bg-amber-500 text-slate-950 font-black' : 'bg-slate-900 text-slate-400 border border-slate-800'
-                              }`}
-                            >
-                              {st}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+            <div className="divide-y divide-slate-100 max-h-[60vh] overflow-y-auto pr-1">
+              {sheetRecords.map((rec, idx) => (
+                <div key={rec.student.id} className="py-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div>
+                    <p className="font-bold text-slate-900 text-xs">
+                      {rec.student.first_name} {rec.student.last_name}
+                    </p>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      N° {rec.student.student_number || 'N/A'}
+                    </span>
                   </div>
-                ))}
-              </div>
-            )}
 
-            <div className="flex justify-between items-center pt-3 border-t border-slate-800">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const updated = [...sheetRecords];
+                        updated[idx].status = 'present';
+                        setSheetRecords(updated);
+                      }}
+                      className={`px-2.5 py-1 text-[11px] font-bold rounded-lg cursor-pointer transition-colors ${
+                        rec.status === 'present' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      Présent
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const updated = [...sheetRecords];
+                        updated[idx].status = 'absent';
+                        setSheetRecords(updated);
+                      }}
+                      className={`px-2.5 py-1 text-[11px] font-bold rounded-lg cursor-pointer transition-colors ${
+                        rec.status === 'absent' ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      Absent
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const updated = [...sheetRecords];
+                        updated[idx].status = 'late';
+                        setSheetRecords(updated);
+                      }}
+                      className={`px-2.5 py-1 text-[11px] font-bold rounded-lg cursor-pointer transition-colors ${
+                        rec.status === 'late' ? 'bg-amber-500 text-slate-950 font-black' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      En retard
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const updated = [...sheetRecords];
+                        updated[idx].status = 'excused';
+                        setSheetRecords(updated);
+                      }}
+                      className={`px-2.5 py-1 text-[11px] font-bold rounded-lg cursor-pointer transition-colors ${
+                        rec.status === 'excused' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      Excusé
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
               <button
                 type="button"
                 onClick={() => setShowTakeAttendanceModal(false)}
-                className="px-4 py-2 text-xs font-bold text-slate-300"
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl"
               >
                 Fermer
               </button>
-
-              {selectedSession.status !== 'completed' && (
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    disabled={savingAttendance}
-                    onClick={() => handleSaveAttendanceSheet(false)}
-                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold text-xs cursor-pointer"
-                  >
-                    Enregistrer Brouillon
-                  </button>
-                  <button
-                    type="button"
-                    disabled={savingAttendance}
-                    onClick={() => handleSaveAttendanceSheet(true)}
-                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs cursor-pointer shadow-md"
-                  >
-                    Finaliser l'Appel
-                  </button>
-                </div>
-              )}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={savingAttendance}
+                  onClick={() => handleSaveAttendanceSheet(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl disabled:opacity-50"
+                >
+                  {savingAttendance ? 'Enregistrement...' : 'Enregistrer Brouillon'}
+                </button>
+                <button
+                  type="button"
+                  disabled={savingAttendance}
+                  onClick={() => handleSaveAttendanceSheet(true)}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold rounded-xl disabled:opacity-50"
+                >
+                  {savingAttendance ? 'Clôture...' : 'Finaliser la séance'}
+                </button>
+              </div>
             </div>
           </div>
         </Modal>
       )}
 
-      {/* MODAL 3: Voir la liste restreinte des élèves d'une classe */}
-      {selectedClassForRoster && showClassStudentsModal && (
+      {/* MODAL ROSTER ÉLÈVES DE CLASSE */}
+      {showClassStudentsModal && selectedClassForRoster && (
         <Modal
           isOpen={showClassStudentsModal}
           onClose={() => setShowClassStudentsModal(false)}
-          title={`Registre Classe — ${selectedClassForRoster.name}`}
-          darkMode={true}
+          title={`Élèves inscrits — ${selectedClassForRoster.name}`}
+          maxWidth="2xl"
         >
-          <div className="space-y-3 text-xs">
-            <p className="text-slate-400">
-              Liste des élèves activement inscrits dans la classe <strong>{selectedClassForRoster.name}</strong>.
-            </p>
+          <div className="space-y-4">
+            {(() => {
+              const students = classStudentsMap[selectedClassForRoster.id] || [];
+              if (students.length === 0) {
+                return (
+                  <p className="text-xs text-slate-500 text-center py-6">
+                    Aucun élève inscrit trouvé pour cette classe.
+                  </p>
+                );
+              }
 
-            {!(classStudentsMap[selectedClassForRoster.id]?.length) ? (
-              <div className="p-6 text-center bg-slate-950 rounded-2xl text-slate-400">
-                Aucun élève inscrit dans cette classe.
-              </div>
-            ) : (
-              <div className="max-h-80 overflow-y-auto space-y-1.5">
-                {classStudentsMap[selectedClassForRoster.id].map((st, idx) => (
-                  <div key={st.id} className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between">
-                    <div>
-                      <span className="font-mono text-amber-400 font-bold mr-2">#{idx + 1}</span>
-                      <span className="font-extrabold text-white">{st.first_name} {st.last_name}</span>
+              return (
+                <div className="divide-y divide-slate-100 max-h-[60vh] overflow-y-auto">
+                  {students.map((st, i) => (
+                    <div key={st.id} className="py-2.5 flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-6 text-center font-mono text-slate-400 text-[10px]">{i + 1}.</span>
+                        <span className="font-bold text-slate-900">{st.first_name} {st.last_name}</span>
+                      </div>
+                      <span className="font-mono text-slate-500 text-[11px]">N° {st.student_number || 'N/A'}</span>
                     </div>
-                    <span className="font-mono text-slate-400 text-[10px]">{st.student_number}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div className="flex justify-end pt-2 border-t border-slate-800">
-              <button
-                type="button"
-                onClick={() => setShowClassStudentsModal(false)}
-                className="px-4 py-2 bg-slate-800 text-white rounded-xl font-bold cursor-pointer"
-              >
-                Fermer
-              </button>
-            </div>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         </Modal>
       )}
 
-      {/* MODAL: CRÉER UN DEVOIR */}
+      {/* MODALS DEVOIRS */}
+      {/* 1. CRÉATION DEVOIR */}
       {showCreateHwModal && (
         <Modal
           isOpen={showCreateHwModal}
           onClose={() => setShowCreateHwModal(false)}
-          title="Nouveau Devoir Scolaire"
+          title="Créer un Nouveau Devoir"
+          maxWidth="2xl"
         >
-          <form onSubmit={handleCreateHomework} className="space-y-4 text-xs">
-            {/* Classe & Matière */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <form onSubmit={handleCreateHomework} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block font-bold text-slate-300 mb-1">Classe Attribuée *</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Classe : *</label>
                 <select
                   value={hwClassId}
-                  onChange={e => {
-                    setHwClassId(e.target.value);
-                    const classAssg = assignments.filter(a => a.class_id === e.target.value && a.subject_id);
-                    if (classAssg.length > 0 && classAssg[0].subject_id) {
-                      setHwSubjectId(classAssg[0].subject_id);
-                    } else {
-                      setHwSubjectId('');
-                    }
-                  }}
+                  onChange={e => setHwClassId(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-bold focus:outline-none focus:border-amber-500"
                   required
-                  className="w-full px-3 py-2 bg-slate-950 text-white rounded-xl border border-slate-800 text-xs font-medium focus:outline-none focus:border-amber-500"
                 >
-                  <option value="">Sélectionner une classe...</option>
+                  <option value="">-- Sélectionner une classe --</option>
                   {groupedAssignments.map(g => (
                     <option key={g.class_id} value={g.class_id}>{g.class_name}</option>
                   ))}
@@ -1748,410 +1740,254 @@ export const RealTeacherPortal: React.FC = () => {
               </div>
 
               <div>
-                <label className="block font-bold text-slate-300 mb-1">Matière Attribuée *</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Matière : *</label>
                 <select
                   value={hwSubjectId}
                   onChange={e => setHwSubjectId(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-medium focus:outline-none focus:border-amber-500"
                   required
-                  className="w-full px-3 py-2 bg-slate-950 text-white rounded-xl border border-slate-800 text-xs font-medium focus:outline-none focus:border-amber-500"
                 >
-                  <option value="">Sélectionner une matière...</option>
-                  {assignments
-                    .filter(a => a.class_id === hwClassId && a.subject_id)
-                    .map(a => {
-                      const sbj = subjectsList.find(s => s.id === a.subject_id);
-                      return (
-                        <option key={a.subject_id} value={a.subject_id!}>
-                          {sbj ? sbj.name : 'Matière'}
-                        </option>
-                      );
-                    })}
+                  <option value="">-- Sélectionner une matière --</option>
+                  {subjectsList.map(s => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
                 </select>
               </div>
             </div>
 
-            {/* Titre */}
             <div>
-              <label className="block font-bold text-slate-300 mb-1">Titre du Devoir *</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Titre du devoir : *</label>
               <input
                 type="text"
                 value={hwTitle}
                 onChange={e => setHwTitle(e.target.value)}
-                placeholder="Ex: Exercices 1 à 5 - Chapitre 3"
+                placeholder="Ex: Exercices de Mathématiques Chapitre 3"
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-medium focus:outline-none focus:border-amber-500"
                 required
-                className="w-full px-3 py-2 bg-slate-950 text-white rounded-xl border border-slate-800 text-xs focus:outline-none focus:border-amber-500"
               />
             </div>
 
-            {/* Consignes */}
             <div>
-              <label className="block font-bold text-slate-300 mb-1">Consignes et Instructions *</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Consignes et instructions : *</label>
               <textarea
                 value={hwInstructions}
                 onChange={e => setHwInstructions(e.target.value)}
                 rows={4}
-                placeholder="Détaillez clairement le travail à effectuer par l'élève..."
+                placeholder="Détaillez le travail à effectuer..."
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-medium focus:outline-none focus:border-amber-500"
                 required
-                className="w-full px-3 py-2 bg-slate-950 text-white rounded-xl border border-slate-800 text-xs focus:outline-none focus:border-amber-500 resize-y"
               />
             </div>
 
-            {/* Dates & Durée */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label className="block font-bold text-slate-300 mb-1">Date d'Assignation *</label>
-                <input
-                  type="date"
-                  value={hwAssignedOn}
-                  onChange={e => setHwAssignedOn(e.target.value)}
-                  required
-                  className="w-full px-3 py-2 bg-slate-950 text-white rounded-xl border border-slate-800 text-xs focus:outline-none focus:border-amber-500"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-300 mb-1">Durée Estimée (min)</label>
-                <input
-                  type="number"
-                  min={1}
-                  value={hwEstimatedMinutes}
-                  onChange={e => setHwEstimatedMinutes(e.target.value)}
-                  placeholder="Ex: 45"
-                  className="w-full px-3 py-2 bg-slate-950 text-white rounded-xl border border-slate-800 text-xs focus:outline-none focus:border-amber-500"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="block font-bold text-slate-300 mb-1">Date d'Échéance *</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Date d'échéance : *</label>
                 <input
                   type="date"
                   value={homeworkDueDate}
                   onChange={e => setHomeworkDueDate(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-medium focus:outline-none focus:border-amber-500"
                   required
-                  className="w-full px-3 py-2 bg-slate-950 text-white rounded-xl border border-slate-800 text-xs focus:outline-none focus:border-amber-500"
                 />
               </div>
-
               <div>
-                <label className="block font-bold text-slate-300 mb-1">Heure d'Échéance *</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Heure d'échéance : *</label>
                 <input
                   type="time"
                   value={homeworkDueTime}
                   onChange={e => setHomeworkDueTime(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-medium focus:outline-none focus:border-amber-500"
                   required
-                  className="w-full px-3 py-2 bg-slate-950 text-white rounded-xl border border-slate-800 text-xs focus:outline-none focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Durée estimée (min) :</label>
+                <input
+                  type="number"
+                  value={hwEstimatedMinutes}
+                  onChange={e => setHwEstimatedMinutes(e.target.value)}
+                  placeholder="30"
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-medium focus:outline-none focus:border-amber-500"
                 />
               </div>
             </div>
 
-            {/* Option Publication Immédiate */}
-            <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between">
-              <div>
-                <span className="font-bold text-white block">Publier immédiatement</span>
-                <span className="text-[11px] text-slate-400">Rendre le devoir immédiatement visible aux élèves et parents.</span>
-              </div>
+            <div className="flex items-center gap-2 pt-2">
               <input
                 type="checkbox"
+                id="hwPublishNow"
                 checked={hwPublishNow}
                 onChange={e => setHwPublishNow(e.target.checked)}
-                className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 bg-slate-900 border-slate-700 cursor-pointer"
+                className="w-4 h-4 text-amber-500 rounded focus:ring-amber-500"
               />
+              <label htmlFor="hwPublishNow" className="text-xs font-bold text-slate-800 cursor-pointer">
+                Publier immédiatement pour les parents et élèves
+              </label>
             </div>
 
-            {/* Action Buttons */}
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+            <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setShowCreateHwModal(false)}
-                className="px-4 py-2 bg-slate-800 text-slate-300 hover:text-white rounded-xl font-bold cursor-pointer"
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl"
               >
                 Annuler
               </button>
               <button
                 type="submit"
                 disabled={submittingHw}
-                onClick={() => setHwPublishNow(false)}
-                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold cursor-pointer transition-colors"
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black rounded-xl disabled:opacity-50"
               >
-                {submittingHw ? 'Enregistrement...' : 'Enregistrer Brouillon'}
-              </button>
-              <button
-                type="submit"
-                disabled={submittingHw}
-                onClick={() => setHwPublishNow(true)}
-                className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl cursor-pointer transition-colors"
-              >
-                {submittingHw ? 'Publication...' : 'Publier Immédiatement'}
+                {submittingHw ? 'Enregistrement...' : hwPublishNow ? 'Publier le devoir' : 'Enregistrer en brouillon'}
               </button>
             </div>
           </form>
         </Modal>
       )}
 
-      {/* MODAL: DETAILS DEVOIR */}
+      {/* 2. DÉTAILS DEVOIR */}
       {showDetailHwModal && selectedHw && (
         <Modal
           isOpen={showDetailHwModal}
           onClose={() => setShowDetailHwModal(false)}
           title={`Devoir : ${selectedHw.title}`}
+          maxWidth="2xl"
         >
-          <div className="space-y-5 text-xs">
-            {/* Header info */}
-            <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="px-2.5 py-1 bg-amber-500/10 text-amber-300 border border-amber-500/30 rounded-lg font-bold">
-                    {selectedHw.class_name}
-                  </span>
-                  <span className="px-2.5 py-1 bg-slate-800 text-slate-300 rounded-lg font-bold">
-                    {selectedHw.subject_name}
-                  </span>
-                </div>
-                <div>
-                  {selectedHw.status === 'draft' && (
-                    <span className="px-2.5 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-lg font-bold">
-                      Brouillon
-                    </span>
-                  )}
-                  {selectedHw.status === 'published' && new Date(selectedHw.due_at) >= new Date() && (
-                    <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-lg font-bold">
-                      Publié
-                    </span>
-                  )}
-                  {selectedHw.status === 'published' && new Date(selectedHw.due_at) < new Date() && (
-                    <span className="px-2.5 py-1 bg-rose-500/20 text-rose-300 border border-rose-500/40 rounded-lg font-black animate-pulse">
-                      En retard
-                    </span>
-                  )}
-                  {selectedHw.status === 'closed' && (
-                    <span className="px-2.5 py-1 bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 rounded-lg font-bold">
-                      Clôturé
-                    </span>
-                  )}
-                  {selectedHw.status === 'cancelled' && (
-                    <span className="px-2.5 py-1 bg-slate-800 text-slate-400 border border-slate-700 rounded-lg font-bold">
-                      Annulé
-                    </span>
-                  )}
-                </div>
+          <div className="space-y-4 text-xs">
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <span className="font-bold text-slate-900">{selectedHw.class_name}</span> • <span className="text-amber-800 font-bold">{selectedHw.subject_name}</span>
               </div>
-
-              <div className="grid grid-cols-2 gap-2 text-slate-400 pt-2 border-t border-slate-800/60">
-                <div>Assigné le : <strong className="text-white">{new Date(selectedHw.assigned_on).toLocaleDateString('fr-FR')}</strong></div>
-                <div>Échéance : <strong className="text-amber-400">{new Date(selectedHw.due_at).toLocaleDateString('fr-FR')} à {new Date(selectedHw.due_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</strong></div>
-                {selectedHw.estimated_minutes && <div>Durée estimée : <strong className="text-white">{selectedHw.estimated_minutes} min</strong></div>}
-              </div>
+              <span className="px-2.5 py-0.5 rounded-full font-bold text-[10px] bg-amber-100 text-amber-900 border border-amber-200">
+                Statut : {selectedHw.status}
+              </span>
             </div>
 
-            {/* Consignes */}
-            <div className="space-y-1.5">
-              <span className="font-bold text-slate-300">Consignes & Instructions :</span>
-              <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 text-slate-300 whitespace-pre-wrap leading-relaxed">
+            <div>
+              <span className="text-slate-500 font-bold block mb-1">Instructions :</span>
+              <p className="p-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-800 whitespace-pre-wrap leading-relaxed">
                 {selectedHw.instructions}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+              <div>
+                <span className="text-slate-500 block">Date d'assignation :</span>
+                <span className="font-bold text-slate-900">{new Date(selectedHw.assigned_on).toLocaleDateString('fr-FR')}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 block">Échéance :</span>
+                <span className="font-bold text-amber-800">
+                  {new Date(selectedHw.due_at).toLocaleDateString('fr-FR')} à {new Date(selectedHw.due_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                </span>
               </div>
             </div>
 
-            {/* Actions Bar */}
-            <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-800 flex-wrap">
+            <div className="pt-3 border-t border-slate-100 flex justify-between items-center gap-2">
               <button
                 type="button"
                 onClick={() => setShowDetailHwModal(false)}
-                className="px-4 py-2 bg-slate-800 text-slate-300 hover:text-white rounded-xl font-bold cursor-pointer"
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl"
               >
                 Fermer
               </button>
 
-              <div className="flex items-center gap-2 flex-wrap">
-                {selectedHw.status === 'draft' && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowDetailHwModal(false);
-                        openEditHwModal(selectedHw);
-                      }}
-                      className="px-3.5 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                      <span>Modifier</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handlePublishHomework(selectedHw)}
-                      className="px-3.5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-black flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      <span>Publier</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedHw(selectedHw);
-                        setActionReason('');
-                        setShowCancelHwModal(true);
-                      }}
-                      className="px-3.5 py-2 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 rounded-xl font-bold flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <XCircle className="w-3.5 h-3.5" />
-                      <span>Annuler</span>
-                    </button>
-                  </>
-                )}
-
-                {selectedHw.status === 'published' && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowDetailHwModal(false);
-                        openEditHwModal(selectedHw);
-                      }}
-                      className="px-3.5 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                      <span>Modifier (avec motif)</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleCloseHomework(selectedHw)}
-                      className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>Clôturer</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedHw(selectedHw);
-                        setActionReason('');
-                        setShowCancelHwModal(true);
-                      }}
-                      className="px-3.5 py-2 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 rounded-xl font-bold flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <XCircle className="w-3.5 h-3.5" />
-                      <span>Annuler (avec motif)</span>
-                    </button>
-                  </>
-                )}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => openEditHwModal(selectedHw)}
+                  className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold"
+                >
+                  Modifier
+                </button>
               </div>
             </div>
           </div>
         </Modal>
       )}
 
-      {/* MODAL: MODIFIER UN DEVOIR */}
+      {/* 3. MODIFIER DEVOIR */}
       {showEditHwModal && selectedHw && (
         <Modal
           isOpen={showEditHwModal}
           onClose={() => setShowEditHwModal(false)}
-          title={`Modifier Devoir : ${selectedHw.title}`}
+          title={`Modifier le Devoir — ${selectedHw.title}`}
+          maxWidth="2xl"
         >
-          <form onSubmit={handleUpdateHomework} className="space-y-4 text-xs">
-            {selectedHw.status === 'published' && (
-              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300 text-xs flex items-center gap-2">
-                <AlertCircle className="w-5 h-5 flex-shrink-0" />
-                <span>Ce devoir est déjà publié. Toute modification sera tracée et exige un motif explicite d'audit.</span>
-              </div>
-            )}
-
+          <form onSubmit={handleUpdateHomework} className="space-y-4">
             <div>
-              <label className="block font-bold text-slate-300 mb-1">Titre du Devoir *</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Titre du devoir : *</label>
               <input
                 type="text"
                 value={hwTitle}
                 onChange={e => setHwTitle(e.target.value)}
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-medium focus:outline-none focus:border-amber-500"
                 required
-                className="w-full px-3 py-2 bg-slate-950 text-white rounded-xl border border-slate-800 text-xs focus:outline-none focus:border-amber-500"
               />
             </div>
 
             <div>
-              <label className="block font-bold text-slate-300 mb-1">Consignes et Instructions *</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Consignes et instructions : *</label>
               <textarea
                 value={hwInstructions}
                 onChange={e => setHwInstructions(e.target.value)}
                 rows={4}
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-medium focus:outline-none focus:border-amber-500"
                 required
-                className="w-full px-3 py-2 bg-slate-950 text-white rounded-xl border border-slate-800 text-xs focus:outline-none focus:border-amber-500 resize-y"
               />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block font-bold text-slate-300 mb-1">Date d'Assignation *</label>
-                <input
-                  type="date"
-                  value={hwAssignedOn}
-                  onChange={e => setHwAssignedOn(e.target.value)}
-                  required
-                  className="w-full px-3 py-2 bg-slate-950 text-white rounded-xl border border-slate-800 text-xs focus:outline-none focus:border-amber-500"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-300 mb-1">Durée Estimée (min)</label>
-                <input
-                  type="number"
-                  min={1}
-                  value={hwEstimatedMinutes}
-                  onChange={e => setHwEstimatedMinutes(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 text-white rounded-xl border border-slate-800 text-xs focus:outline-none focus:border-amber-500"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="block font-bold text-slate-300 mb-1">Date d'Échéance *</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Date d'échéance : *</label>
                 <input
                   type="date"
                   value={homeworkDueDate}
                   onChange={e => setHomeworkDueDate(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-medium focus:outline-none focus:border-amber-500"
                   required
-                  className="w-full px-3 py-2 bg-slate-950 text-white rounded-xl border border-slate-800 text-xs focus:outline-none focus:border-amber-500"
                 />
               </div>
-
               <div>
-                <label className="block font-bold text-slate-300 mb-1">Heure d'Échéance *</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Heure d'échéance : *</label>
                 <input
                   type="time"
                   value={homeworkDueTime}
                   onChange={e => setHomeworkDueTime(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-medium focus:outline-none focus:border-amber-500"
                   required
-                  className="w-full px-3 py-2 bg-slate-950 text-white rounded-xl border border-slate-800 text-xs focus:outline-none focus:border-amber-500"
                 />
               </div>
             </div>
 
             {selectedHw.status === 'published' && (
               <div>
-                <label className="block font-bold text-amber-400 mb-1">Motif explicite de la modification *</label>
-                <textarea
+                <label className="block text-xs font-bold text-amber-800 mb-1">
+                  Motif de la modification (Devoir déjà publié) : *
+                </label>
+                <input
+                  type="text"
                   value={actionReason}
                   onChange={e => setActionReason(e.target.value)}
-                  rows={2}
-                  placeholder="Ex: Correction de la date d'échéance et précision sur l'exercice 3."
+                  placeholder="Ex: Rectification des consignes sur l'exercice 2"
+                  className="w-full p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-slate-900 font-medium focus:outline-none"
                   required
-                  className="w-full px-3 py-2 bg-slate-950 text-white rounded-xl border border-amber-500/40 text-xs focus:outline-none focus:border-amber-500"
                 />
               </div>
             )}
 
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+            <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setShowEditHwModal(false)}
-                className="px-4 py-2 bg-slate-800 text-slate-300 hover:text-white rounded-xl font-bold cursor-pointer"
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl"
               >
                 Annuler
               </button>
               <button
                 type="submit"
                 disabled={submittingAction}
-                className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl cursor-pointer transition-colors"
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black rounded-xl disabled:opacity-50"
               >
                 {submittingAction ? 'Enregistrement...' : 'Enregistrer les modifications'}
               </button>
@@ -2160,55 +1996,49 @@ export const RealTeacherPortal: React.FC = () => {
         </Modal>
       )}
 
-      {/* MODAL: ANNULER UN DEVOIR */}
+      {/* 4. ANNULER DEVOIR */}
       {showCancelHwModal && selectedHw && (
         <Modal
           isOpen={showCancelHwModal}
           onClose={() => setShowCancelHwModal(false)}
-          title={`Annuler Devoir : ${selectedHw.title}`}
+          title={`Annuler le Devoir — ${selectedHw.title}`}
         >
-          <form onSubmit={handleCancelHomework} className="space-y-4 text-xs">
-            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs flex items-center gap-2">
-              <AlertCircle className="w-5 h-5 flex-shrink-0" />
-              <span>L'annulation d'un devoir est irréversible. Les élèves ne seront plus invités à soumettre ce travail.</span>
-            </div>
+          <form onSubmit={handleCancelHomework} className="space-y-4">
+            <p className="text-xs text-slate-600">
+              Êtes-vous sûr de vouloir annuler ce devoir ? Un motif explicite est requis.
+            </p>
 
             <div>
-              <label className="block font-bold text-slate-300 mb-1">Motif explicite d'annulation *</label>
-              <textarea
+              <label className="block text-xs font-bold text-slate-700 mb-1">Motif d'annulation : *</label>
+              <input
+                type="text"
                 value={actionReason}
                 onChange={e => setActionReason(e.target.value)}
-                rows={3}
-                placeholder="Ex: Devoir annulé suite à l'avancement du programme ou report au trimestre suivant..."
+                placeholder="Ex: Report au cours suivant..."
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 font-medium"
                 required
-                className="w-full px-3 py-2 bg-slate-950 text-white rounded-xl border border-slate-800 text-xs focus:outline-none focus:border-rose-500"
               />
             </div>
 
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+            <div className="pt-3 border-t border-slate-100 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setShowCancelHwModal(false)}
-                className="px-4 py-2 bg-slate-800 text-slate-300 hover:text-white rounded-xl font-bold cursor-pointer"
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl"
               >
-                Retour
+                Fermer
               </button>
               <button
                 type="submit"
                 disabled={submittingAction}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-extrabold rounded-xl cursor-pointer transition-colors"
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-extrabold rounded-xl disabled:opacity-50"
               >
-                {submittingAction ? 'Annulation...' : 'Confirmer l’annulation'}
+                {submittingAction ? 'Annulation...' : 'Confirmer l\'annulation'}
               </button>
             </div>
           </form>
         </Modal>
       )}
-
-      {/* Footer */}
-      <footer className="p-4 sm:p-6 border-t border-slate-900 text-center text-xs text-slate-500">
-        ÉcoleConnect — Espace Enseignant ({school?.name})
-      </footer>
     </div>
   );
 };
