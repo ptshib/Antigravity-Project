@@ -19,6 +19,7 @@ import { TeacherClassFinanceOverview } from '../../components/teacher/TeacherCla
 import { TeacherPortalSidebar } from '../../components/teacher/portal/TeacherPortalSidebar';
 import { TeacherPortalHeader } from '../../components/teacher/portal/TeacherPortalHeader';
 import { TeacherModulePlaceholder } from '../../components/teacher/portal/TeacherModulePlaceholder';
+import { TeacherTimetableModule } from '../../components/teacher/TeacherTimetableModule';
 
 export type TeacherTab = 
   | 'overview' 
@@ -1187,12 +1188,12 @@ export const RealTeacherPortal: React.FC = () => {
             </div>
           )}
 
-          {/* TAB 4: EMPLOI DU TEMPS (PROCHAINEMENT) */}
+          {/* TAB 4: EMPLOI DU TEMPS RÉEL */}
           {activeTab === 'schedule' && (
-            <TeacherModulePlaceholder
-              title="Emploi du Temps Officiel"
-              description="Consultez la grille horaire officielle de vos cours et vos salles attribuées dès publication par la direction de votre établissement."
-              icon={Clock}
+            <TeacherTimetableModule
+              selectedClassId={selectedClassId}
+              onSelectClassId={handleSelectClassId}
+              assignedClasses={groupedAssignments.map(g => ({ id: g.class_id, name: g.class_name }))}
             />
           )}
 
