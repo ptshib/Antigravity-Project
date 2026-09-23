@@ -105,8 +105,9 @@ export const TeacherHomeworkModule: React.FC<TeacherHomeworkModuleProps> = ({
 
   // Available subjects filtered by selected class in creation form
   const availableFormSubjects = React.useMemo(() => {
-    if (!formClassId) return assignedSubjects;
-    return assignedSubjects.filter(s => !s.class_id || s.class_id === formClassId);
+    const validSubjects = assignedSubjects.filter(s => s && typeof s.id === 'string' && s.id.trim() !== '');
+    if (!formClassId) return validSubjects;
+    return validSubjects.filter(s => !s.class_id || s.class_id === formClassId);
   }, [formClassId, assignedSubjects]);
 
   const resetForm = () => {
@@ -127,9 +128,13 @@ export const TeacherHomeworkModule: React.FC<TeacherHomeworkModuleProps> = ({
     if (assignedClasses.length > 0) {
       const defaultClassId = assignedClasses[0].id;
       setFormClassId(defaultClassId);
-      const matchedSubjects = assignedSubjects.filter(s => !s.class_id || s.class_id === defaultClassId);
+      const matchedSubjects = assignedSubjects.filter(
+        s => s && typeof s.id === 'string' && s.id.trim() !== '' && (!s.class_id || s.class_id === defaultClassId)
+      );
       if (matchedSubjects.length > 0) {
         setFormSubjectId(matchedSubjects[0].id);
+      } else {
+        setFormSubjectId('');
       }
     }
     setShowCreateModal(true);
@@ -636,7 +641,9 @@ export const TeacherHomeworkModule: React.FC<TeacherHomeworkModuleProps> = ({
                     onChange={e => {
                       const newCls = e.target.value;
                       setFormClassId(newCls);
-                      const matched = assignedSubjects.filter(s => !s.class_id || s.class_id === newCls);
+                      const matched = assignedSubjects.filter(
+                        s => s && typeof s.id === 'string' && s.id.trim() !== '' && (!s.class_id || s.class_id === newCls)
+                      );
                       if (matched.length > 0) setFormSubjectId(matched[0].id);
                       else setFormSubjectId('');
                     }}
@@ -656,13 +663,24 @@ export const TeacherHomeworkModule: React.FC<TeacherHomeworkModuleProps> = ({
                     aria-label="Sélectionner une matière"
                     value={formSubjectId}
                     onChange={e => setFormSubjectId(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-xs font-medium focus:outline-none focus:border-amber-500"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl text-xs font-medium focus:outline-none focus:border-amber-500 disabled:opacity-50 disabled:cursor-not-allowed"
                     required
+                    disabled={availableFormSubjects.length === 0}
                   >
-                    {availableFormSubjects.map(s => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
+                    {availableFormSubjects.length === 0 ? (
+                      <option value="">-- Aucune matière affectée --</option>
+                    ) : (
+                      availableFormSubjects.map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))
+                    )}
                   </select>
+                  {availableFormSubjects.length === 0 && (
+                    <p className="text-xs text-rose-600 font-bold mt-1.5 p-2 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-1.5">
+                      <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+                      <span>Aucune matière ne vous est affectée pour cette classe. Contactez l’administration de l’établissement.</span>
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -756,8 +774,8 @@ export const TeacherHomeworkModule: React.FC<TeacherHomeworkModuleProps> = ({
 
                 <button
                   type="submit"
-                  disabled={submitting}
-                  className="px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-slate-950 text-xs font-black rounded-xl shadow-xs cursor-pointer transition-all"
+                  disabled={submitting || !formSubjectId || formSubjectId.trim() === '' || availableFormSubjects.length === 0}
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 text-xs font-black rounded-xl shadow-xs cursor-pointer transition-all"
                 >
                   {submitting ? 'Création en cours...' : 'Enregistrer en brouillon'}
                 </button>

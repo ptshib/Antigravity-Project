@@ -1176,7 +1176,10 @@ export const RealTeacherPortal: React.FC = () => {
           {activeTab === 'homework' && (
             <TeacherHomeworkModule
               assignedClasses={groupedAssignments.map(g => ({ id: g.class_id, name: g.class_name }))}
-              assignedSubjects={assignments.map(a => ({ id: a.subject_id || '', name: a.subject_name || 'Matière', class_id: a.class_id }))}
+              assignedSubjects={assignments
+                .filter(a => Boolean(a.subject_id))
+                .map(a => ({ id: a.subject_id!, name: a.subject_name || 'Matière', class_id: a.class_id }))
+              }
               showToast={(msg, type) => showToast(msg, type === 'error' ? 'warning' : type)}
             />
           )}
