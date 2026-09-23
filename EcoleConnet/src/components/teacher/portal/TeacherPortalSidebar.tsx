@@ -53,7 +53,7 @@ export const TeacherPortalSidebar: React.FC<TeacherPortalSidebarProps> = ({
     { id: 'overview', label: 'Tableau de bord', icon: LayoutDashboard },
     { id: 'classes', label: 'Mes classes', icon: School, count: assignedClassesCount },
     { id: 'presences', label: 'Présences', icon: CalendarCheck },
-    { id: 'schedule', label: 'Emploi du temps', icon: Clock, badge: 'Bientôt' },
+    { id: 'schedule', label: 'Emploi du temps', icon: Clock },
     { id: 'homework', label: 'Devoirs', icon: BookOpen, count: homeworkCount },
     { id: 'grades', label: 'Notes et évaluations', icon: Award, count: gradesCount },
     { id: 'finance', label: 'Situation financière', icon: CreditCard },

@@ -397,4 +397,16 @@ describe('RealTeacherPortal - Lot 2G Refonte Portail Enseignant Réel', () => {
 
     expect(mockSignOutReal).toHaveBeenCalled();
   });
+
+  it('19. confirme que l’onglet Emploi du temps n’a plus de badge Bientôt tandis que Messages le conserve', async () => {
+    render(<RealTeacherPortal />);
+
+    await waitFor(() => {
+      const scheduleBtn = screen.getByRole('button', { name: /Emploi du temps/i });
+      const messagesBtn = screen.getByRole('button', { name: /Messages/i });
+
+      expect(scheduleBtn.textContent).not.toContain('Bientôt');
+      expect(messagesBtn.textContent).toContain('Bientôt');
+    });
+  });
 });
