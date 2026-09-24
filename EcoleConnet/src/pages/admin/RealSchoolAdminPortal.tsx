@@ -503,6 +503,12 @@ export const RealSchoolAdminPortal: React.FC = () => {
   const [savingHomeroom, setSavingHomeroom] = useState<boolean>(false);
   const [showConfirmRemoveHomeroom, setShowConfirmRemoveHomeroom] = useState<boolean>(false);
   const [showConfirmReplaceHomeroom, setShowConfirmReplaceHomeroom] = useState<boolean>(false);
+  const [pendingPrimaryReplace, setPendingPrimaryReplace] = useState<{
+    classId: string;
+    teacherId: string;
+    className: string;
+    newTeacherName: string;
+  } | null>(null);
 
   // Pedagogical Mode Management States
   const [classPedagogicalMode, setClassPedagogicalMode] = useState<'primary_homeroom' | 'secondary_subjects'>('secondary_subjects');
@@ -1957,6 +1963,22 @@ export const RealSchoolAdminPortal: React.FC = () => {
 
     try {
       if (isPrimaryHomeroom) {
+        const currentHomeroomTeacherId = targetClass?.homeroom_teacher_id;
+        const isReplacing = currentHomeroomTeacherId &&
+          currentHomeroomTeacherId !== targetTeacher.profile_id &&
+          currentHomeroomTeacherId !== targetTeacher.id;
+
+        if (isReplacing) {
+          setPendingPrimaryReplace({
+            classId: selectedClassId,
+            teacherId: targetTeacher.id,
+            className: targetClass?.name || '',
+            newTeacherName: `${targetTeacher.first_name} ${targetTeacher.last_name}`
+          });
+          setShowConfirmReplaceHomeroom(true);
+          return;
+        }
+
         const { error } = await supabase.rpc('assign_class_homeroom_teacher', {
           p_class_id: selectedClassId,
           p_teacher_id: targetTeacher.id
@@ -4109,43 +4131,92 @@ export const RealSchoolAdminPortal: React.FC = () => {
               </button>
             </div>
 
-            {assignments.length === 0 ? (
-              <div className="p-8 text-center bg-slate-950 rounded-2xl border border-slate-800 space-y-3 text-xs">
-                <Layers className="w-10 h-10 text-slate-600 mx-auto" />
-                <p className="font-bold text-slate-300">Aucune affectation n'est encore configurée.</p>
-                <button
-                  onClick={() => setShowAssignModal(true)}
-                  className="px-4 py-2 bg-amber-500 text-slate-950 font-black rounded-xl cursor-pointer"
-                >
-                  Créer la première affectation
-                </button>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="bg-slate-950 text-slate-400 font-bold uppercase border-b border-slate-800">
-                      <th className="p-3">Enseignant</th>
-                      <th className="p-3">Matière Enseignée</th>
-                      <th className="p-3">Classe</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800">
-                    {assignments.map(a => {
-                      const tch = teachers.find(t => t.id === a.teacher_id);
-                      const cls = classes.find(c => c.id === a.class_id);
-                      return (
-                        <tr key={a.id}>
-                          <td className="p-3 font-bold text-white">{tch ? `${tch.first_name} ${tch.last_name}` : 'Enseignant Rattaché'}</td>
-                          <td className="p-3 font-extrabold text-amber-400">{a.subject_name}</td>
-                          <td className="p-3 text-slate-300">{cls ? cls.name : 'Classe Rattachée'}</td>
+            {(() => {
+              // 1. Lignes Titularisation Primaire (dérivées exclusivement de classes.homeroom_teacher_id)
+              const primaryClasses = classes.filter(c => c.pedagogical_mode === 'primary_homeroom');
+              const primaryRows = primaryClasses.map(cls => {
+                const homeroomTeacher = teachers.find(t => t.profile_id === cls.homeroom_teacher_id || t.id === cls.homeroom_teacher_id);
+                return {
+                  id: `primary-${cls.id}`,
+                  class_id: cls.id,
+                  class_name: cls.name,
+                  teacher_name: homeroomTeacher ? `${homeroomTeacher.first_name} ${homeroomTeacher.last_name}` : 'Aucun titulaire affecté',
+                  subject_name: 'Titulaire — Toutes les matières',
+                  mode: 'primary_homeroom' as const
+                };
+              });
+
+              // 2. Lignes Secondaire (dérivées de teacher_class_assignments, en ignorant les anciennes lignes d'une classe primaire)
+              const secondaryAssignments = assignments.filter(a => {
+                const cls = classes.find(c => c.id === a.class_id);
+                return cls ? cls.pedagogical_mode !== 'primary_homeroom' : true;
+              });
+
+              const secondaryRows = secondaryAssignments.map(a => {
+                const tch = teachers.find(t => t.id === a.teacher_id);
+                const cls = classes.find(c => c.id === a.class_id);
+                return {
+                  id: a.id,
+                  class_id: a.class_id,
+                  class_name: cls ? cls.name : 'Classe Rattachée',
+                  teacher_name: tch ? `${tch.first_name} ${tch.last_name}` : 'Enseignant Rattaché',
+                  subject_name: a.subject_name,
+                  mode: 'secondary_subjects' as const
+                };
+              });
+
+              const displayRows = [...primaryRows, ...secondaryRows];
+
+              if (displayRows.length === 0) {
+                return (
+                  <div className="p-8 text-center bg-slate-950 rounded-2xl border border-slate-800 space-y-3 text-xs">
+                    <Layers className="w-10 h-10 text-slate-600 mx-auto" />
+                    <p className="font-bold text-slate-300">Aucune affectation n'est encore configurée.</p>
+                    <button
+                      onClick={() => setShowAssignModal(true)}
+                      className="px-4 py-2 bg-amber-500 text-slate-950 font-black rounded-xl cursor-pointer"
+                    >
+                      Créer la première affectation
+                    </button>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="bg-slate-950 text-slate-400 font-bold uppercase border-b border-slate-800 text-[10px]">
+                        <th className="p-3">Enseignant</th>
+                        <th className="p-3">Matière Enseignée</th>
+                        <th className="p-3">Classe</th>
+                        <th className="p-3 text-center">Mode</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800">
+                      {displayRows.map(row => (
+                        <tr key={row.id}>
+                          <td className="p-3 font-bold text-white">{row.teacher_name}</td>
+                          <td className="p-3 font-extrabold text-amber-400">{row.subject_name}</td>
+                          <td className="p-3 text-slate-300">{row.class_name}</td>
+                          <td className="p-3 text-center">
+                            {row.mode === 'primary_homeroom' ? (
+                              <span className="px-2.5 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-full text-[10px] font-bold">
+                                Primaire
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-full text-[10px] font-bold">
+                                Secondaire
+                              </span>
+                            )}
+                          </td>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -5348,6 +5419,65 @@ export const RealSchoolAdminPortal: React.FC = () => {
           );
         })()}
       </Modal>
+
+      {/* Modal: Confirmation de Remplacement du Titulaire */}
+      {showConfirmReplaceHomeroom && (
+        <Modal
+          isOpen={showConfirmReplaceHomeroom}
+          onClose={() => {
+            setShowConfirmReplaceHomeroom(false);
+            setPendingPrimaryReplace(null);
+          }}
+          title="Remplacement du Titulaire de Classe"
+          darkMode={true}
+        >
+          <div className="space-y-4 text-xs">
+            <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-300">
+              <p className="font-extrabold text-white">Confirmation requise</p>
+              <p className="mt-1 leading-relaxed">
+                La classe <strong className="text-white">{pendingPrimaryReplace?.className}</strong> possède déjà un enseignant titulaire.
+                Voulez-vous remplacer le titulaire actuel par <strong className="text-amber-300">{pendingPrimaryReplace?.newTeacherName}</strong> ?
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowConfirmReplaceHomeroom(false);
+                  setPendingPrimaryReplace(null);
+                }}
+                className="px-4 py-2 text-xs font-bold text-slate-300 hover:text-white"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!pendingPrimaryReplace) return;
+                  try {
+                    const { error } = await supabase.rpc('assign_class_homeroom_teacher', {
+                      p_class_id: pendingPrimaryReplace.classId,
+                      p_teacher_id: pendingPrimaryReplace.teacherId
+                    });
+                    if (error) throw error;
+                    showToast('Enseignant titulaire remplacé avec succès !', 'success');
+                    setShowConfirmReplaceHomeroom(false);
+                    setShowAssignModal(false);
+                    setPendingPrimaryReplace(null);
+                    loadSchoolPortalData();
+                  } catch (err: any) {
+                    showToast(err?.message || 'Erreur lors du remplacement du titulaire.', 'warning');
+                  }
+                }}
+                className="px-5 py-2 text-xs font-extrabold bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl font-black cursor-pointer"
+              >
+                Confirmer le Remplacement
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* Modal: Importation CSV */}
       <Modal

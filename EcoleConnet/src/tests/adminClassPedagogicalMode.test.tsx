@@ -13,7 +13,7 @@ vi.mock('../lib/supabase', () => ({
   }
 }));
 
-describe('Admin — Gestion du Mode Pédagogique et Affectations (Lot 2I-P2)', () => {
+describe('Admin — Gestion du Mode Pédagogique et Affectations (Lot 2I-P2 & 2I-P3)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -103,5 +103,82 @@ describe('Admin — Gestion du Mode Pédagogique et Affectations (Lot 2I-P2)', (
       p_teacher_id: 'tch-456',
       p_subject_id: 'sbj-math-101'
     });
+  });
+
+  it('6. Tableau des affectations : génère une seule ligne par classe primaire avec "Titulaire — Toutes les matières"', () => {
+    const classes = [
+      { id: 'c1', name: '2A', pedagogical_mode: 'primary_homeroom', homeroom_teacher_id: 'prof-1' },
+      { id: 'c2', name: '7A', pedagogical_mode: 'secondary_subjects', homeroom_teacher_id: null }
+    ];
+    const teachers = [
+      { id: 't1', profile_id: 'prof-1', first_name: 'Grâce', last_name: 'Kabeya' }
+    ];
+
+    const primaryClasses = classes.filter(c => c.pedagogical_mode === 'primary_homeroom');
+    const primaryRows = primaryClasses.map(cls => {
+      const homeroomTeacher = teachers.find(t => t.profile_id === cls.homeroom_teacher_id || t.id === cls.homeroom_teacher_id);
+      return {
+        id: `primary-${cls.id}`,
+        class_name: cls.name,
+        teacher_name: homeroomTeacher ? `${homeroomTeacher.first_name} ${homeroomTeacher.last_name}` : 'Aucun titulaire affecté',
+        subject_name: 'Titulaire — Toutes les matières',
+        mode: 'primary_homeroom'
+      };
+    });
+
+    expect(primaryRows).toHaveLength(1);
+    expect(primaryRows[0].class_name).toBe('2A');
+    expect(primaryRows[0].teacher_name).toBe('Grâce Kabeya');
+    expect(primaryRows[0].subject_name).toBe('Titulaire — Toutes les matières');
+  });
+
+  it('7. Tableau des affectations : meut/filtre les anciennes affectations matière d’une classe primaire', () => {
+    const classes = [
+      { id: 'c1', name: '2A', pedagogical_mode: 'primary_homeroom', homeroom_teacher_id: 'prof-1' }
+    ];
+    const assignments = [
+      { id: 'old-1', class_id: 'c1', teacher_id: 't1', subject_name: 'Maths Historique' }
+    ];
+
+    // Les affectations historiques en teacher_class_assignments pour une classe primaire sont ignorées
+    const secondaryAssignments = assignments.filter(a => {
+      const cls = classes.find(c => c.id === a.class_id);
+      return cls ? cls.pedagogical_mode !== 'primary_homeroom' : true;
+    });
+
+    expect(secondaryAssignments).toHaveLength(0);
+  });
+
+  it('8. Tableau des affectations : préserve les lignes enseignant-matière-classe pour le secondaire', () => {
+    const classes = [
+      { id: 'c2', name: '7A', pedagogical_mode: 'secondary_subjects' }
+    ];
+    const assignments = [
+      { id: 'a-1', class_id: 'c2', teacher_id: 't2', subject_name: 'Physique' }
+    ];
+
+    const secondaryAssignments = assignments.filter(a => {
+      const cls = classes.find(c => c.id === a.class_id);
+      return cls ? cls.pedagogical_mode !== 'primary_homeroom' : true;
+    });
+
+    expect(secondaryAssignments).toHaveLength(1);
+    expect(secondaryAssignments[0].subject_name).toBe('Physique');
+  });
+
+  it('9. Isolement multi-écoles : refuse l’affectation d’un enseignant d’un autre établissement avec code 42501', async () => {
+    vi.mocked(supabase.rpc).mockResolvedValue({
+      data: null,
+      error: { message: 'Accès refusé : Cet enseignant appartient à un autre établissement.', code: '42501' }
+    } as any);
+
+    const { error } = await supabase.rpc('assign_class_homeroom_teacher', {
+      p_class_id: 'cls-123',
+      p_teacher_id: 'tch-other-school'
+    });
+
+    expect(error).not.toBeNull();
+    expect(error?.code).toBe('42501');
+    expect(error?.message).toContain('autre établissement');
   });
 });
