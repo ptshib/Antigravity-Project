@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { supabase } from '../lib/supabase';
 
-// Mock de Supabase pour vérifier les RPCs de gestion des modes pédagogiques des classes
+// Mock de Supabase pour vérifier les RPCs de gestion des modes pédagogiques et affectations des classes
 vi.mock('../lib/supabase', () => ({
   supabase: {
     rpc: vi.fn(),
@@ -13,7 +13,7 @@ vi.mock('../lib/supabase', () => ({
   }
 }));
 
-describe('Admin — Gestion du Mode Pédagogique des Classes (Lot 2I-P/2I-PV)', () => {
+describe('Admin — Gestion du Mode Pédagogique et Affectations (Lot 2I-P2)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -64,5 +64,44 @@ describe('Admin — Gestion du Mode Pédagogique des Classes (Lot 2I-P/2I-PV)', 
 
     expect(error).not.toBeNull();
     expect(error?.message).toContain('Mode pédagogique invalide');
+  });
+
+  it('4. Classe primaire : assign_class_homeroom_teacher enregistre le titulaire sans champ Matière', async () => {
+    vi.mocked(supabase.rpc).mockResolvedValue({ data: true, error: null } as any);
+
+    const classId = 'cls-prim-123';
+    const teacherId = 'tch-456';
+
+    const { error } = await supabase.rpc('assign_class_homeroom_teacher', {
+      p_class_id: classId,
+      p_teacher_id: teacherId
+    });
+
+    expect(error).toBeNull();
+    expect(supabase.rpc).toHaveBeenCalledWith('assign_class_homeroom_teacher', {
+      p_class_id: 'cls-prim-123',
+      p_teacher_id: 'tch-456'
+    });
+  });
+
+  it('5. Classe secondaire : assign_teacher_subject exige la matière et enregistre l’affectation', async () => {
+    vi.mocked(supabase.rpc).mockResolvedValue({ data: true, error: null } as any);
+
+    const classId = 'cls-sec-789';
+    const teacherId = 'tch-456';
+    const subjectId = 'sbj-math-101';
+
+    const { error } = await supabase.rpc('assign_teacher_subject', {
+      p_class_id: classId,
+      p_teacher_id: teacherId,
+      p_subject_id: subjectId
+    });
+
+    expect(error).toBeNull();
+    expect(supabase.rpc).toHaveBeenCalledWith('assign_teacher_subject', {
+      p_class_id: 'cls-sec-789',
+      p_teacher_id: 'tch-456',
+      p_subject_id: 'sbj-math-101'
+    });
   });
 });

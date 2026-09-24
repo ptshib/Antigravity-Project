@@ -1939,42 +1939,59 @@ export const RealSchoolAdminPortal: React.FC = () => {
       return;
     }
 
-    const selectedTeacherId = assignTeacherId || teachers[0]?.id;
-    const selectedSubjectId = assignSubjectId || subjects[0]?.id;
     const selectedClassId = assignClassId || classes[0]?.id;
+    const selectedTeacherId = assignTeacherId || teachers[0]?.id;
+    const targetClass = classes.find(c => c.id === selectedClassId);
+    const isPrimaryHomeroom = targetClass?.pedagogical_mode === 'primary_homeroom';
 
-    if (!school?.id || !selectedTeacherId || !selectedSubjectId || !selectedClassId) {
-      showToast('L’enseignant, la matière et la classe sont obligatoires.', 'warning');
+    if (!selectedClassId || !selectedTeacherId) {
+      showToast('La classe et l’enseignant sont obligatoires.', 'warning');
       return;
     }
 
     const targetTeacher = teachers.find(t => t.id === selectedTeacherId);
-    const targetSubject = subjects.find(s => s.id === selectedSubjectId);
-
-    if (!targetTeacher || !targetSubject) {
-      showToast('Enseignant ou matière introuvable.', 'warning');
+    if (!targetTeacher) {
+      showToast('Enseignant introuvable.', 'warning');
       return;
     }
 
     try {
-      const { error } = await supabase.from('teacher_class_assignments').insert({
-        school_id: school.id,
-        teacher_id: targetTeacher.id,
-        teacher_profile_id: targetTeacher.profile_id ?? null,
-        class_id: selectedClassId,
-        subject_id: targetSubject.id,
-        subject_name: targetSubject.name,
-        academic_year_id: activeYear.id,
-        is_active: true
-      });
+      if (isPrimaryHomeroom) {
+        const { error } = await supabase.rpc('assign_class_homeroom_teacher', {
+          p_class_id: selectedClassId,
+          p_teacher_id: targetTeacher.id
+        });
 
-      if (error) throw error;
-      showToast('Affectation enseignant enregistrée avec succès !', 'success');
+        if (error) throw error;
+        showToast('Enseignant titulaire affecté à la classe primaire avec succès !', 'success');
+      } else {
+        const selectedSubjectId = assignSubjectId || subjects[0]?.id;
+        if (!selectedSubjectId) {
+          showToast('La matière est obligatoire pour une classe en mode secondaire par matière.', 'warning');
+          return;
+        }
+
+        const targetSubject = subjects.find(s => s.id === selectedSubjectId);
+        if (!targetSubject) {
+          showToast('Matière introuvable.', 'warning');
+          return;
+        }
+
+        const { error } = await supabase.rpc('assign_teacher_subject', {
+          p_class_id: selectedClassId,
+          p_teacher_id: targetTeacher.id,
+          p_subject_id: targetSubject.id
+        });
+
+        if (error) throw error;
+        showToast('Affectation enseignant enregistrée avec succès !', 'success');
+      }
+
       setShowAssignModal(false);
       loadSchoolPortalData();
     } catch (err: any) {
       if (err?.code === '23505' || err?.message?.includes('23505') || err?.message?.includes('duplicate key')) {
-        showToast('Cette affectation active existe déjà pour cet enseignant, cette classe, cette matière et cette année scolaire.', 'warning');
+        showToast('Cette affectation active existe déjà.', 'warning');
       } else {
         showToast(err.message || 'Erreur lors de la création de l’affectation.', 'warning');
       }
@@ -5260,30 +5277,76 @@ export const RealSchoolAdminPortal: React.FC = () => {
         title="Créer une Affectation Enseignant"
         darkMode={true}
       >
-        <form onSubmit={handleCreateAssignment} className="space-y-4 text-xs">
-          <div>
-            <label className="block text-xs font-extrabold text-slate-200 uppercase tracking-wider mb-1.5">Enseignant *</label>
-            <select value={assignTeacherId || (teachers[0]?.id ?? '')} onChange={e => setAssignTeacherId(e.target.value)} className="w-full px-3.5 py-2.5 bg-slate-950 border-2 border-slate-600 rounded-xl text-sm font-medium text-white focus:outline-none focus:border-amber-500">
-              {teachers.map(t => <option key={t.id} value={t.id} className="bg-slate-900 text-white">{t.first_name} {t.last_name} ({t.employee_number})</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-extrabold text-slate-200 uppercase tracking-wider mb-1.5">Matière *</label>
-            <select value={assignSubjectId || (subjects[0]?.id ?? '')} onChange={e => setAssignSubjectId(e.target.value)} className="w-full px-3.5 py-2.5 bg-slate-950 border-2 border-slate-600 rounded-xl text-sm font-medium text-white focus:outline-none focus:border-amber-500">
-              {subjects.map(s => <option key={s.id} value={s.id} className="bg-slate-900 text-white">{s.name} ({s.code || 'SANS CODE'})</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-extrabold text-slate-200 uppercase tracking-wider mb-1.5">Classe *</label>
-            <select value={assignClassId || (classes[0]?.id ?? '')} onChange={e => setAssignClassId(e.target.value)} className="w-full px-3.5 py-2.5 bg-slate-950 border-2 border-slate-600 rounded-xl text-sm font-medium text-white focus:outline-none focus:border-amber-500">
-              {classes.map(c => <option key={c.id} value={c.id} className="bg-slate-900 text-white">{c.name}</option>)}
-            </select>
-          </div>
-          <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
-            <button type="button" onClick={() => setShowAssignModal(false)} className="px-4 py-2 text-xs font-bold text-slate-300">Annuler</button>
-            <button type="submit" className="px-5 py-2 text-xs font-extrabold bg-amber-500 text-slate-950 rounded-xl font-black">Valider Affectation</button>
-          </div>
-        </form>
+        {(() => {
+          const activeAssignClassId = assignClassId || (classes[0]?.id ?? '');
+          const targetClass = classes.find(c => c.id === activeAssignClassId);
+          const isPrimaryHomeroom = targetClass?.pedagogical_mode === 'primary_homeroom';
+
+          return (
+            <form onSubmit={handleCreateAssignment} className="space-y-4 text-xs">
+              <div>
+                <label className="block text-xs font-extrabold text-slate-200 uppercase tracking-wider mb-1.5">1. Classe *</label>
+                <select
+                  value={activeAssignClassId}
+                  onChange={e => setAssignClassId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border-2 border-slate-600 rounded-xl text-sm font-medium text-white focus:outline-none focus:border-amber-500"
+                >
+                  {classes.map(c => (
+                    <option key={c.id} value={c.id} className="bg-slate-900 text-white">
+                      {c.name} {c.pedagogical_mode === 'primary_homeroom' ? '(Primaire Titulaire)' : '(Secondaire par Matière)'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-extrabold text-slate-200 uppercase tracking-wider mb-1.5">2. Enseignant *</label>
+                <select
+                  value={assignTeacherId || (teachers[0]?.id ?? '')}
+                  onChange={e => setAssignTeacherId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border-2 border-slate-600 rounded-xl text-sm font-medium text-white focus:outline-none focus:border-amber-500"
+                >
+                  {teachers.map(t => (
+                    <option key={t.id} value={t.id} className="bg-slate-900 text-white">
+                      {t.first_name} {t.last_name} ({t.employee_number})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {isPrimaryHomeroom ? (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-200 text-xs font-medium">
+                  <strong>Mode Titulaire Primaire :</strong> Le titulaire enseignera automatiquement toutes les matières configurées pour cette classe.
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-xs font-extrabold text-slate-200 uppercase tracking-wider mb-1.5">3. Matière *</label>
+                  <select
+                    value={assignSubjectId || (subjects[0]?.id ?? '')}
+                    onChange={e => setAssignSubjectId(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-950 border-2 border-slate-600 rounded-xl text-sm font-medium text-white focus:outline-none focus:border-amber-500"
+                  >
+                    {subjects.map(s => (
+                      <option key={s.id} value={s.id} className="bg-slate-900 text-white">
+                        {s.name} ({s.code || 'SANS CODE'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+                <button type="button" onClick={() => setShowAssignModal(false)} className="px-4 py-2 text-xs font-bold text-slate-300">Annuler</button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 text-xs font-extrabold bg-amber-500 text-slate-950 rounded-xl font-black"
+                >
+                  {isPrimaryHomeroom ? 'Affecter comme titulaire' : 'Valider l’affectation'}
+                </button>
+              </div>
+            </form>
+          );
+        })()}
       </Modal>
 
       {/* Modal: Importation CSV */}

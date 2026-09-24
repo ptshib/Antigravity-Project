@@ -25,6 +25,7 @@ import type { TeacherHomework } from '../../services/teacherHomeworkService';
 export interface AssignedClass {
   id: string;
   name: string;
+  pedagogical_mode?: string;
 }
 
 export interface AssignedSubject {
@@ -147,9 +148,13 @@ export const TeacherHomeworkModule: React.FC<TeacherHomeworkModuleProps> = ({
   // Available subjects filtered by selected class in creation form
   const availableFormSubjects = React.useMemo(() => {
     if (serverAuthorizedSubjects !== null) {
-      return serverAuthorizedSubjects;
+      return serverAuthorizedSubjects.filter(
+        s => s && typeof s.id === 'string' && s.id.trim() !== '' && !s.name?.toLowerCase().includes('titularisation')
+      );
     }
-    const validSubjects = assignedSubjects.filter(s => s && typeof s.id === 'string' && s.id.trim() !== '');
+    const validSubjects = assignedSubjects.filter(
+      s => s && typeof s.id === 'string' && s.id.trim() !== '' && !s.name?.toLowerCase().includes('titularisation')
+    );
     if (!formClassId) return validSubjects;
     return validSubjects.filter(s => !s.class_id || s.class_id === formClassId);
   }, [formClassId, assignedSubjects, serverAuthorizedSubjects]);
@@ -723,7 +728,11 @@ export const TeacherHomeworkModule: React.FC<TeacherHomeworkModuleProps> = ({
                   {availableFormSubjects.length === 0 && (
                     <p className="text-xs text-rose-600 font-bold mt-1.5 p-2 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-1.5">
                       <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
-                      <span>Aucune matière ne vous est affectée pour cette classe. Contactez l’administration de l’établissement.</span>
+                      <span>
+                        {assignedClasses.find(c => c.id === formClassId)?.pedagogical_mode === 'primary_homeroom'
+                          ? 'Aucune matière n’est configurée pour cette classe. Contactez l’administration de l’établissement.'
+                          : 'Aucune matière ne vous est affectée pour cette classe. Contactez l’administration de l’établissement.'}
+                      </span>
                     </p>
                   )}
                 </div>
