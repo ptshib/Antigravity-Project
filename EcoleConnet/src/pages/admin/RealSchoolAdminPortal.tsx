@@ -40,7 +40,8 @@ import {
   Sliders,
   DollarSign,
   Eye,
-  Edit3
+  Edit3,
+  Info
 } from 'lucide-react';
 import { AdminGradesModule } from '../../components/admin/AdminGradesModule';
 import { ClassSubjectCoefficientsModule } from '../../components/admin/ClassSubjectCoefficientsModule';
@@ -180,10 +181,12 @@ interface ClassRow {
   section: string | null;
   room: string | null;
   education_cycle: 'primary' | 'secondary' | null;
+  pedagogical_mode?: 'primary_homeroom' | 'secondary_subjects' | null;
   homeroom_teacher_id: string | null;
   is_active: boolean;
   created_at: string;
 }
+
 
 interface AcademicYearRow {
   id: string;
@@ -500,6 +503,14 @@ export const RealSchoolAdminPortal: React.FC = () => {
   const [savingHomeroom, setSavingHomeroom] = useState<boolean>(false);
   const [showConfirmRemoveHomeroom, setShowConfirmRemoveHomeroom] = useState<boolean>(false);
   const [showConfirmReplaceHomeroom, setShowConfirmReplaceHomeroom] = useState<boolean>(false);
+
+  // Pedagogical Mode Management States
+  const [classPedagogicalMode, setClassPedagogicalMode] = useState<'primary_homeroom' | 'secondary_subjects'>('secondary_subjects');
+  const [showPedagogicalModeModal, setShowPedagogicalModeModal] = useState<boolean>(false);
+  const [selectedClassForMode, setSelectedClassForMode] = useState<ClassRow | null>(null);
+  const [targetPedagogicalMode, setTargetPedagogicalMode] = useState<'primary_homeroom' | 'secondary_subjects'>('secondary_subjects');
+  const [savingPedagogicalMode, setSavingPedagogicalMode] = useState<boolean>(false);
+
 
   // DRC Calendar Configuration States
   const [showDrcConfigModal, setShowDrcConfigModal] = useState(false);
@@ -876,6 +887,7 @@ export const RealSchoolAdminPortal: React.FC = () => {
         section: classSection,
         room: classRoom,
         education_cycle: classCycle || null,
+        pedagogical_mode: classPedagogicalMode || 'secondary_subjects',
         homeroom_teacher_id: null,
         is_active: true
       });
@@ -884,9 +896,32 @@ export const RealSchoolAdminPortal: React.FC = () => {
       setShowClassModal(false);
       setClassName('');
       setClassCycle('');
+      setClassPedagogicalMode('secondary_subjects');
       loadSchoolPortalData();
     } catch (err: any) {
       showToast(err.message || 'Erreur lors de la création de la classe.', 'warning');
+    }
+  };
+
+  // Handler - Set / Update Class Pedagogical Mode via RPC
+  const handleSetPedagogicalMode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedClassForMode) return;
+    setSavingPedagogicalMode(true);
+    try {
+      const { error } = await supabase.rpc('set_class_pedagogical_mode', {
+        p_class_id: selectedClassForMode.id,
+        p_pedagogical_mode: targetPedagogicalMode
+      });
+      if (error) throw error;
+      showToast(`Mode pédagogique de la classe "${selectedClassForMode.name}" mis à jour (${targetPedagogicalMode === 'primary_homeroom' ? 'Primaire — Titulaire' : 'Secondaire — Par matière'}).`, 'success');
+      setShowPedagogicalModeModal(false);
+      setSelectedClassForMode(null);
+      await loadSchoolPortalData();
+    } catch (err: any) {
+      showToast(err.message || 'Erreur lors de la mise à jour du mode pédagogique.', 'warning');
+    } finally {
+      setSavingPedagogicalMode(false);
     }
   };
 
@@ -911,6 +946,7 @@ export const RealSchoolAdminPortal: React.FC = () => {
       setSettingCycle(false);
     }
   };
+
 
   // Handler - Configure DRC Academic Calendar via RPC
   const handleConfigureDrcCalendar = async (e: React.FormEvent) => {
@@ -3103,6 +3139,19 @@ export const RealSchoolAdminPortal: React.FC = () => {
 
                               <button
                                 onClick={() => {
+                                  setSelectedClassForMode(c);
+                                  setTargetPedagogicalMode(c.pedagogical_mode === 'primary_homeroom' ? 'primary_homeroom' : 'secondary_subjects');
+                                  setShowPedagogicalModeModal(true);
+                                }}
+                                className="px-2.5 py-1 bg-slate-800 hover:bg-emerald-500/20 text-slate-300 hover:text-emerald-300 border border-slate-700 hover:border-emerald-500/40 font-bold rounded-lg transition-colors cursor-pointer text-[11px]"
+                                title="Définir ou modifier le mode pédagogique (Primaire/Secondaire) de cette classe"
+                              >
+                                Mode Pédagogique
+                              </button>
+
+
+                              <button
+                                onClick={() => {
                                   setSelectedClassFilterId(c.id);
                                   setActiveTab('eleves');
                                 }}
@@ -4590,6 +4639,22 @@ export const RealSchoolAdminPortal: React.FC = () => {
             </select>
           </div>
 
+          <div>
+            <label className="block text-xs font-extrabold text-slate-200 uppercase tracking-wider mb-1.5">Mode Pédagogique *</label>
+            <select
+              value={classPedagogicalMode}
+              onChange={e => setClassPedagogicalMode(e.target.value as 'primary_homeroom' | 'secondary_subjects')}
+              className="w-full px-3.5 py-2.5 bg-slate-950 border-2 border-slate-600 rounded-xl text-sm font-medium text-white focus:outline-none focus:border-amber-500"
+            >
+              <option value="secondary_subjects" className="bg-slate-900 text-white">Secondaire — Enseignants affectés par matière</option>
+              <option value="primary_homeroom" className="bg-slate-900 text-white">Primaire — Titulaire enseigne toutes les matières</option>
+            </select>
+            <p className="mt-1 text-[10px] text-slate-400 leading-relaxed">
+              En mode Primaire, l'enseignant titulaire désigné aura automatiquement l'autorisation pédagogique sur toutes les matières configurées de la classe.
+            </p>
+          </div>
+
+
           <div className="grid grid-cols-3 gap-2">
             <div>
               <label className="block text-xs font-extrabold text-slate-200 uppercase mb-1">Niveau</label>
@@ -4667,6 +4732,92 @@ export const RealSchoolAdminPortal: React.FC = () => {
           </form>
         </Modal>
       )}
+
+      {/* Modal: Définir / Modifier le Mode Pédagogique d'une Classe (Auditée) */}
+      {showPedagogicalModeModal && selectedClassForMode && (
+        <Modal
+          isOpen={showPedagogicalModeModal}
+          onClose={() => setShowPedagogicalModeModal(false)}
+          title={`Mode Pédagogique : ${selectedClassForMode.name}`}
+          darkMode={true}
+        >
+          <form onSubmit={handleSetPedagogicalMode} className="space-y-4 text-xs">
+            <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-200 space-y-1.5">
+              <div className="font-extrabold flex items-center gap-1.5 text-xs">
+                <Info className="w-4 h-4 text-amber-400" />
+                <span>Explication du Mode Pédagogique</span>
+              </div>
+              <p className="text-[11px] leading-relaxed text-amber-300/90">
+                • <strong>Primaire — Titulaire enseigne toutes les matières</strong> : L’enseignant titulaire désigné aura automatiquement l’autorisation pédagogique (devoirs, notes) sur toutes les matières configurées pour cette classe.<br />
+                • <strong>Secondaire — Enseignants affectés par matière</strong> : Les autorisations pédagogiques proviennent exclusivement des affectations individuelles enseignant–classe–matière.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-extrabold text-slate-200 uppercase tracking-wider mb-2">
+                Sélectionner le mode pédagogique
+              </label>
+              <div className="space-y-2">
+                <label className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${
+                  targetPedagogicalMode === 'primary_homeroom'
+                    ? 'bg-amber-500/10 border-amber-500 text-white'
+                    : 'bg-slate-950 border-slate-700 text-slate-300 hover:border-slate-600'
+                }`}>
+                  <input
+                    type="radio"
+                    name="pedagogicalMode"
+                    value="primary_homeroom"
+                    checked={targetPedagogicalMode === 'primary_homeroom'}
+                    onChange={() => setTargetPedagogicalMode('primary_homeroom')}
+                    className="mt-0.5 text-amber-500 focus:ring-amber-500"
+                  />
+                  <div>
+                    <div className="font-extrabold text-xs text-amber-400">Primaire — Titulaire enseigne toutes les matières</div>
+                    <div className="text-[11px] text-slate-400">Accès global du titulaire à toutes les matières configurées.</div>
+                  </div>
+                </label>
+
+                <label className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${
+                  targetPedagogicalMode === 'secondary_subjects'
+                    ? 'bg-purple-500/10 border-purple-500 text-white'
+                    : 'bg-slate-950 border-slate-700 text-slate-300 hover:border-slate-600'
+                }`}>
+                  <input
+                    type="radio"
+                    name="pedagogicalMode"
+                    value="secondary_subjects"
+                    checked={targetPedagogicalMode === 'secondary_subjects'}
+                    onChange={() => setTargetPedagogicalMode('secondary_subjects')}
+                    className="mt-0.5 text-purple-500 focus:ring-purple-500"
+                  />
+                  <div>
+                    <div className="font-extrabold text-xs text-purple-400">Secondaire — Enseignants affectés par matière</div>
+                    <div className="text-[11px] text-slate-400">Accès strictement basé sur les affectations enseignant-matière.</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowPedagogicalModeModal(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-300"
+              >
+                Annuler
+              </button>
+              <button
+                type="submit"
+                disabled={savingPedagogicalMode}
+                className="px-5 py-2 text-xs font-extrabold bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl font-black transition-colors disabled:opacity-50"
+              >
+                {savingPedagogicalMode ? 'Enregistrement...' : 'Enregistrer le Mode'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
 
       {/* Modal: Configuration du Calendrier RDC (Primaire ou Secondaire) */}
       {showDrcConfigModal && (

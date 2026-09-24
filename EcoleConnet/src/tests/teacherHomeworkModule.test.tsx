@@ -8,6 +8,7 @@ import {
   updateTeacherHomework,
   publishTeacherHomework,
   cancelTeacherHomework,
+  fetchTeacherAuthorizedSubjects,
 } from '../services/teacherHomeworkService';
 import type { TeacherHomework } from '../services/teacherHomeworkService';
 
@@ -19,6 +20,7 @@ vi.mock('../services/teacherHomeworkService', () => {
     updateTeacherHomework: vi.fn(),
     publishTeacherHomework: vi.fn(),
     cancelTeacherHomework: vi.fn(),
+    fetchTeacherAuthorizedSubjects: vi.fn(),
     TeacherHomeworkError: class TeacherHomeworkError extends Error {
       public code?: string;
       constructor(message: string, code?: string) {
@@ -117,6 +119,15 @@ describe('TeacherHomeworkModule — Suite de Tests Frontend Complète (24 scéna
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(fetchTeacherHomework).mockResolvedValue(mockHomeworks);
+    vi.mocked(fetchTeacherAuthorizedSubjects).mockImplementation(async (classId: string) => {
+      const filtered = mockSubjects.filter((s) => s.class_id === classId && s.id && s.id.trim() !== '');
+      return filtered.map(s => ({
+        subject_id: s.id,
+        subject_name: s.name,
+        subject_code: s.name.substring(0, 4).toUpperCase(),
+        pedagogical_mode: 'secondary_subjects' as const
+      }));
+    });
   });
 
   const renderModule = (props = {}) => {
@@ -661,6 +672,28 @@ describe('TeacherHomeworkModule — Suite de Tests Frontend Complète (24 scéna
           instructions: 'Read chapter 3.',
         })
       );
+    });
+  });
+
+  // 30. Mode hybride : fetchTeacherAuthorizedSubjects est appelé au changement de classe
+  it('30. Récupère automatiquement les matières autorisées via le service serveur RPC au changement de classe', async () => {
+    const { fetchTeacherAuthorizedSubjects } = await import('../services/teacherHomeworkService');
+    vi.mocked(fetchTeacherAuthorizedSubjects).mockResolvedValue([
+      { subject_id: 'subj-rpc-1', subject_name: 'Calcul Primaire', subject_code: 'CALC', pedagogical_mode: 'primary_homeroom' },
+      { subject_id: 'subj-rpc-2', subject_name: 'Lecture Primaire', subject_code: 'LECT', pedagogical_mode: 'primary_homeroom' },
+    ]);
+
+    renderModule();
+    await waitFor(() => {
+      expect(screen.queryByTestId('teacher-homework-skeleton')).toBeNull();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Nouveau devoir/i }));
+    const classSelect = screen.getByLabelText(/Classe \*/i);
+    fireEvent.change(classSelect, { target: { value: 'cls-1' } });
+
+    await waitFor(() => {
+      expect(fetchTeacherAuthorizedSubjects).toHaveBeenCalledWith('cls-1');
     });
   });
 });

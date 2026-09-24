@@ -17,7 +17,8 @@ import {
   createTeacherHomework,
   updateTeacherHomework,
   publishTeacherHomework,
-  cancelTeacherHomework
+  cancelTeacherHomework,
+  fetchTeacherAuthorizedSubjects
 } from '../../services/teacherHomeworkService';
 import type { TeacherHomework } from '../../services/teacherHomeworkService';
 
@@ -47,6 +48,9 @@ export const TeacherHomeworkModule: React.FC<TeacherHomeworkModuleProps> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // Dynamic server-authorized subjects per class
+  const [serverAuthorizedSubjects, setServerAuthorizedSubjects] = useState<AssignedSubject[] | null>(null);
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -103,12 +107,53 @@ export const TeacherHomeworkModule: React.FC<TeacherHomeworkModuleProps> = ({
     loadHomeworkData();
   }, [loadHomeworkData]);
 
+  // Fetch server authorized subjects when formClassId changes
+  useEffect(() => {
+    let isMounted = true;
+    if (!formClassId) {
+      setServerAuthorizedSubjects(null);
+      return;
+    }
+
+    fetchTeacherAuthorizedSubjects(formClassId)
+      .then(subjects => {
+        if (!isMounted) return;
+        if (subjects && Array.isArray(subjects) && subjects.length > 0) {
+          const mapped = subjects.map(s => ({
+            id: s.subject_id,
+            name: s.subject_name + (s.subject_code ? ` (${s.subject_code})` : ''),
+            class_id: formClassId
+          }));
+          setServerAuthorizedSubjects(mapped);
+          setFormSubjectId(prev => {
+            if (mapped.some(m => m.id === prev)) return prev;
+            return mapped[0]?.id || '';
+          });
+        } else {
+          setServerAuthorizedSubjects([]);
+          setFormSubjectId('');
+        }
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setServerAuthorizedSubjects(null);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [formClassId]);
+
   // Available subjects filtered by selected class in creation form
   const availableFormSubjects = React.useMemo(() => {
+    if (serverAuthorizedSubjects !== null) {
+      return serverAuthorizedSubjects;
+    }
     const validSubjects = assignedSubjects.filter(s => s && typeof s.id === 'string' && s.id.trim() !== '');
     if (!formClassId) return validSubjects;
     return validSubjects.filter(s => !s.class_id || s.class_id === formClassId);
-  }, [formClassId, assignedSubjects]);
+  }, [formClassId, assignedSubjects, serverAuthorizedSubjects]);
+
 
   const resetForm = () => {
     setSelectedHomework(null);

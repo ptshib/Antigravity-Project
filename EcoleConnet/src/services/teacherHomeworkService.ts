@@ -258,3 +258,44 @@ export async function closeTeacherHomework(homeworkId: string): Promise<boolean>
     throw new TeacherHomeworkError(`Erreur lors de la clôture du devoir : ${err?.message || 'Erreur inconnue'}`);
   }
 }
+
+export interface AuthorizedSubject {
+  subject_id: string;
+  subject_name: string;
+  subject_code: string | null;
+  pedagogical_mode: 'primary_homeroom' | 'secondary_subjects';
+}
+
+/**
+ * Récupère les matières autorisées pour une classe donnée selon le mode pédagogique (Primaire ou Secondaire).
+ */
+export async function fetchTeacherAuthorizedSubjects(classId: string): Promise<AuthorizedSubject[]> {
+  try {
+    if (!classId) return [];
+
+    const { data, error } = await supabase.rpc('get_teacher_authorized_subjects', {
+      p_class_id: classId,
+    });
+
+    if (error) {
+      if (error.code === '42501') {
+        throw new TeacherHomeworkError(error.message || 'Accès non autorisé aux matières de cette classe.', '42501');
+      }
+      throw new TeacherHomeworkError(`Erreur RPC get_teacher_authorized_subjects : ${error.message}`, error.code);
+    }
+
+    if (!data || !Array.isArray(data)) {
+      return [];
+    }
+
+    return data.map((item: any) => ({
+      subject_id: String(item.subject_id || ''),
+      subject_name: String(item.subject_name || ''),
+      subject_code: item.subject_code ? String(item.subject_code) : null,
+      pedagogical_mode: (item.pedagogical_mode as AuthorizedSubject['pedagogical_mode']) || 'secondary_subjects',
+    }));
+  } catch (err: any) {
+    if (err instanceof TeacherHomeworkError) throw err;
+    throw new TeacherHomeworkError(`Impossible de charger les matières autorisées : ${err?.message || 'Erreur inconnue'}`);
+  }
+}
