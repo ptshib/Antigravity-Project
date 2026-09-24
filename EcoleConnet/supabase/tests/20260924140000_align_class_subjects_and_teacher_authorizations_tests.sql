@@ -188,18 +188,117 @@ BEGIN
 
 
   -- ============================================================================
-  -- TEST 4 : Titulaire Primaire reçoit les 7 matières effectives via RPC Enseignant
+  -- TEST 4 : Titulaire Primaire (Grâce Kabeya) - Verification des 10 points de l'Incident
   -- ============================================================================
   EXECUTE format('SET LOCAL %I = %L', 'request.jwt.claim.sub', v_prof_teacher_a::text);
+
+  -- 1. get_teacher_authorized_subjects(2A) retourne Mathématiques
+  SELECT count(*) INTO v_res_count
+  FROM public.get_teacher_authorized_subjects(v_class_primary_2a)
+  WHERE subject_id = v_sbj_1;
+
+  IF v_res_count <> 1 THEN
+    RAISE EXCEPTION 'INCIDENT TEST 1 FAILED: Mathématiques (v_sbj_1) non retourné par get_teacher_authorized_subjects.';
+  END IF;
 
   SELECT count(*) INTO v_res_count
   FROM public.get_teacher_authorized_subjects(v_class_primary_2a);
 
   IF v_res_count <> 7 THEN
-    RAISE EXCEPTION 'TEST 4 FAILED: Le titulaire 2A doit recevoir 7 matières autorisées, obtenu : %', v_res_count;
+    RAISE EXCEPTION 'INCIDENT TEST 1 FAILED: Le titulaire 2A doit recevoir 7 matières autorisées, obtenu : %', v_res_count;
   END IF;
 
-  RAISE NOTICE 'TEST 4 PASSED: Titulaire 2A reçoit exactement ses 7 matières effectives.';
+  -- 2, 3 & 4. Création d'un devoir brouillon en Mathématiques, validation par trigger et lecture via get_teacher_homework
+  v_homework_id := public.create_teacher_homework(
+    v_class_primary_2a,
+    v_sbj_1,
+    'Devoir Brouillon Math 2A',
+    'Exercices de calcul mental page 12',
+    CURRENT_DATE,
+    NOW() + INTERVAL '3 days',
+    20,
+    false -- is_published = false (brouillon)
+  );
+
+  IF v_homework_id IS NULL THEN
+    RAISE EXCEPTION 'INCIDENT TEST 2/3 FAILED: Impossible de créer le devoir brouillon en Mathématiques.';
+  END IF;
+
+  SELECT count(*) INTO v_res_count
+  FROM public.get_teacher_homework(v_class_primary_2a, v_year_2027)
+  WHERE id = v_homework_id;
+
+  IF v_res_count <> 1 THEN
+    RAISE EXCEPTION 'INCIDENT TEST 4 FAILED: Le devoir créé n’est pas présent dans get_teacher_homework.';
+  END IF;
+
+  -- 5. Une matière explicitement désactivée reste refusée
+  BEGIN
+    PERFORM public.create_teacher_homework(
+      v_class_primary_2a,
+      v_sbj_inactive,
+      'Devoir Matière Inactive',
+      'Consigne',
+      CURRENT_DATE,
+      NOW() + INTERVAL '3 days',
+      20,
+      false
+    );
+    RAISE EXCEPTION 'INCIDENT TEST 5 FAILED: La création sur matière inactive aurait dû être refusée.';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE '%Cette matière n’est pas configurée ou est désactivée%' AND SQLERRM NOT LIKE '%n’appartient pas à l’établissement%' THEN
+      RAISE EXCEPTION 'INCIDENT TEST 5 FAILED: Message d’erreur inattendu : %', SQLERRM;
+    END IF;
+  END;
+
+  -- 6. Une matière d’une autre école reste refusée
+  DECLARE
+    v_sbj_other_school UUID := gen_random_uuid();
+  BEGIN
+    INSERT INTO public.subjects (id, school_id, name, code, is_active)
+    VALUES (v_sbj_other_school, v_school_b, 'Math B', 'MATH-B', true);
+
+    PERFORM public.create_teacher_homework(
+      v_class_primary_2a,
+      v_sbj_other_school,
+      'Devoir Autre École',
+      'Consigne',
+      CURRENT_DATE,
+      NOW() + INTERVAL '3 days',
+      20,
+      false
+    );
+    RAISE EXCEPTION 'INCIDENT TEST 6 FAILED: La création sur une matière d’une autre école aurait dû être refusée.';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE '%Incohérence multi-écoles : La matière%' THEN
+      RAISE EXCEPTION 'INCIDENT TEST 6 FAILED: Message d’erreur inattendu : %', SQLERRM;
+    END IF;
+  END;
+
+  -- 7. Un enseignant non titulaire reste refusé sur cette classe primaire
+  EXECUTE format('SET LOCAL %I = %L', 'request.jwt.claim.sub', v_prof_teacher_c::text);
+  BEGIN
+    PERFORM public.create_teacher_homework(
+      v_class_primary_2a,
+      v_sbj_1,
+      'Devoir Enseignant Non Titulaire',
+      'Consigne',
+      CURRENT_DATE,
+      NOW() + INTERVAL '3 days',
+      20,
+      false
+    );
+    RAISE EXCEPTION 'INCIDENT TEST 7 FAILED: L’enseignant non titulaire aurait dû être refusé.';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM NOT LIKE '%Accès refusé : L’enseignant n’est pas le titulaire de cette classe primaire.%' THEN
+      RAISE EXCEPTION 'INCIDENT TEST 7 FAILED: Message d’erreur inattendu : %', SQLERRM;
+    END IF;
+  END;
+
+  -- Rétablir le contexte du titulaire
+  EXECUTE format('SET LOCAL %I = %L', 'request.jwt.claim.sub', v_prof_teacher_a::text);
+
+  RAISE NOTICE 'TEST 4 PASSED: Titulaire 2A valide la création de devoir et l’ensemble des 10 points d’intégrité.';
 
 
   -- ============================================================================
