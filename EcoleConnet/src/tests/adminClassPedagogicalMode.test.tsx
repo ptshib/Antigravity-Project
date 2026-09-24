@@ -181,4 +181,36 @@ describe('Admin — Gestion du Mode Pédagogique et Affectations (Lot 2I-P2 & 2I
     expect(error?.code).toBe('42501');
     expect(error?.message).toContain('autre établissement');
   });
+
+  it('10. Lot 2I-P4 — get_effective_class_subjects invoque la RPC Supabase et retourne toutes les matières applicables par défaut', async () => {
+    const mockSubjects = [
+      { subject_id: 'sbj-1', subject_name: 'Mathématiques', subject_code: 'MATH', coefficient: 1.0, is_custom: false, setting_id: null },
+      { subject_id: 'sbj-2', subject_name: 'Français', subject_code: 'FRAN', coefficient: 1.0, is_custom: false, setting_id: null }
+    ];
+    vi.mocked(supabase.rpc).mockResolvedValue({ data: mockSubjects, error: null } as any);
+
+    const { data, error } = await supabase.rpc('get_admin_class_subject_coefficients', {
+      p_class_id: 'cls-prim-2a'
+    });
+
+    expect(error).toBeNull();
+    expect(data).toHaveLength(2);
+    expect(data?.[0].subject_name).toBe('Mathématiques');
+    expect(data?.[0].coefficient).toBe(1.0);
+  });
+
+  it('11. Lot 2I-P4 — get_teacher_authorized_subjects pour titulaire primaire s’aligne sur les matières applicables', async () => {
+    const mockSubjects = [
+      { subject_id: 'sbj-1', subject_name: 'Mathématiques', subject_code: 'MATH', pedagogical_mode: 'primary_homeroom' },
+      { subject_id: 'sbj-2', subject_name: 'Français', subject_code: 'FRAN', pedagogical_mode: 'primary_homeroom' }
+    ];
+    vi.mocked(supabase.rpc).mockResolvedValue({ data: mockSubjects, error: null } as any);
+
+    const { data, error } = await supabase.rpc('get_teacher_authorized_subjects', {
+      p_class_id: 'cls-prim-2a'
+    });
+
+    expect(error).toBeNull();
+    expect(data).toHaveLength(2);
+  });
 });

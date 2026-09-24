@@ -95,14 +95,32 @@ export const ClassSubjectCoefficientsModule: React.FC<ClassSubjectCoefficientsMo
 
     setLoading(true);
     try {
-      // 1. Fetch class_subject_settings for this class
-      const { data: settingsData, error: settingsError } = await supabase
+      // Source unique serveur : RPC Admin get_admin_class_subject_coefficients
+      const { data: rpcData, error: rpcError } = await supabase.rpc('get_admin_class_subject_coefficients', {
+        p_class_id: selectedClassId,
+        p_academic_year_id: selectedYearId
+      });
+
+      if (!rpcError && Array.isArray(rpcData)) {
+        const mappedList: ClassSubjectItem[] = rpcData.map((row: any) => ({
+          subject_id: row.subject_id,
+          subject_name: row.subject_name,
+          subject_code: row.subject_code,
+          coefficient: Number(row.coefficient),
+          setting_id: row.setting_id || undefined,
+          is_active: row.is_active ?? true,
+          is_custom: Boolean(row.is_custom)
+        }));
+        setItems(mappedList);
+        return;
+      }
+
+      // Mode dégradé / secours hors-ligne avec le jeu de données local
+      const { data: settingsData } = await supabase
         .from('class_subject_settings')
         .select('id, subject_id, coefficient, is_active')
         .eq('class_id', selectedClassId)
         .eq('academic_year_id', selectedYearId);
-
-      if (settingsError) throw settingsError;
 
       const settingsMap = new Map<string, { id: string; coefficient: number; is_active: boolean }>();
       (settingsData || []).forEach((s: any) => {
@@ -113,10 +131,7 @@ export const ClassSubjectCoefficientsModule: React.FC<ClassSubjectCoefficientsMo
         });
       });
 
-      // 2. Fetch active subjects in school
       const activeSubjects = subjects.filter(s => s.is_active !== false);
-
-      // 3. Merge subjects with settings
       const mergedList: ClassSubjectItem[] = activeSubjects.map(sbj => {
         const setting = settingsMap.get(sbj.id);
         return {
@@ -130,7 +145,6 @@ export const ClassSubjectCoefficientsModule: React.FC<ClassSubjectCoefficientsMo
         };
       });
 
-      // Sort alphabetically by subject name
       mergedList.sort((a, b) => a.subject_name.localeCompare(b.subject_name));
       setItems(mergedList);
     } catch (err: any) {
@@ -301,7 +315,7 @@ export const ClassSubjectCoefficientsModule: React.FC<ClassSubjectCoefficientsMo
           </span>
           <span className="flex items-center gap-1.5 bg-slate-900/60 px-3 py-1.5 rounded-lg border border-slate-800">
             <BookOpen className="w-4 h-4 text-emerald-400" />
-            Matières configurées : <strong className="text-white">{items.length}</strong>
+            Matières applicables : <strong className="text-white">{items.length}</strong>
           </span>
         </div>
       )}
