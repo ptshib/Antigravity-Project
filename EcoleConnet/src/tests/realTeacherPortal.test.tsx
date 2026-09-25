@@ -400,7 +400,7 @@ describe('RealTeacherPortal - Lot 2G Refonte Portail Enseignant Réel', () => {
     expect(mockSignOutReal).toHaveBeenCalled();
   });
 
-  it('19. confirme que l’onglet Emploi du temps n’a plus de badge Bientôt tandis que Messages le conserve', async () => {
+  it('19. confirme que les onglets Emploi du temps et Messages n’ont plus de badge Bientôt', async () => {
     render(<RealTeacherPortal />);
 
     await waitFor(() => {
@@ -408,7 +408,7 @@ describe('RealTeacherPortal - Lot 2G Refonte Portail Enseignant Réel', () => {
       const messagesBtn = screen.getByRole('button', { name: /Messages/i });
 
       expect(scheduleBtn.textContent).not.toContain('Bientôt');
-      expect(messagesBtn.textContent).toContain('Bientôt');
+      expect(messagesBtn.textContent).not.toContain('Bientôt');
     });
   });
 });

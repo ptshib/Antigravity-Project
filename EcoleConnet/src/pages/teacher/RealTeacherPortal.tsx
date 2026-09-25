@@ -8,7 +8,7 @@ import { useNotifications } from '../../context/NotificationContext';
 import { Modal } from '../../components/common/Modal';
 import { 
   Clock, Plus, AlertCircle,
-  School, Users, CalendarCheck, MessageSquare, Phone
+  School, Users, CalendarCheck, Phone
 } from 'lucide-react';
 
 import { TeacherGradesModule } from '../../components/teacher/TeacherGradesModule';
@@ -18,9 +18,9 @@ import { TeacherClassFinanceOverview } from '../../components/teacher/TeacherCla
 // Sub-composants du Design Modernisé
 import { TeacherPortalSidebar } from '../../components/teacher/portal/TeacherPortalSidebar';
 import { TeacherPortalHeader } from '../../components/teacher/portal/TeacherPortalHeader';
-import { TeacherModulePlaceholder } from '../../components/teacher/portal/TeacherModulePlaceholder';
 import { TeacherTimetableModule } from '../../components/teacher/TeacherTimetableModule';
 import { TeacherHomeworkModule } from '../../components/teacher/TeacherHomeworkModule';
+import { SchoolMessagingModule } from '../../components/messaging/SchoolMessagingModule';
 
 export type TeacherTab = 
   | 'overview' 
@@ -1197,12 +1197,12 @@ export const RealTeacherPortal: React.FC = () => {
             />
           )}
 
-          {/* TAB 7: MESSAGES (PROCHAINEMENT) */}
+          {/* TAB 7: MESSAGES */}
           {activeTab === 'messages' && (
-            <TeacherModulePlaceholder
-              title="Messagerie Enseignants — Parents & Direction"
-              description="Communiquez en toute sécurité avec les responsables légaux de vos élèves et la direction de l'établissement dès l'activation du module."
-              icon={MessageSquare}
+            <SchoolMessagingModule
+              mode="teacher"
+              assignedClasses={groupedAssignments}
+              assignedStudentsMap={classStudentsMap}
             />
           )}
 

@@ -19,7 +19,6 @@ import {
   Download,
   FileCheck,
   ShieldCheck,
-  MessageSquare,
   ChevronRight,
   GraduationCap
 } from 'lucide-react';
@@ -37,7 +36,7 @@ import { ParentDocumentsModule } from '../../components/parent/ParentDocumentsMo
 import { ParentPortalSidebar } from '../../components/parent/portal/ParentPortalSidebar';
 import { ParentPortalHeader } from '../../components/parent/portal/ParentPortalHeader';
 import { ParentChildSwitcher, type LinkedChild } from '../../components/parent/portal/ParentChildSwitcher';
-import { ParentModulePlaceholder } from '../../components/parent/portal/ParentModulePlaceholder';
+import { SchoolMessagingModule } from '../../components/messaging/SchoolMessagingModule';
 
 interface PeriodResultSubject {
   subject_id: string;
@@ -959,11 +958,16 @@ export const RealParentPortal: React.FC = () => {
               )}
 
               {activeTab === 'messages' && (
-                <ParentModulePlaceholder
-                  title="Messagerie & Communications Officieuses"
-                  description="Échangez des messages sécurisés avec la direction et les enseignants de votre enfant directement depuis votre portail."
-                  icon={MessageSquare}
-                  childName={activeChild?.first_name}
+                <SchoolMessagingModule
+                  mode="parent"
+                  selectedChildId={selectedChildId || undefined}
+                  childrenList={childrenList.map(ch => ({
+                    id: ch.student_id,
+                    first_name: ch.first_name,
+                    last_name: ch.last_name,
+                    class_name: ch.class_name
+                  }))}
+                  onSelectChildId={(childId) => setSelectedChildId(childId)}
                 />
               )}
 

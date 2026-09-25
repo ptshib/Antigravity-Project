@@ -57,7 +57,7 @@ export const TeacherPortalSidebar: React.FC<TeacherPortalSidebarProps> = ({
     { id: 'homework', label: 'Devoirs', icon: BookOpen, count: homeworkCount },
     { id: 'grades', label: 'Notes et évaluations', icon: Award, count: gradesCount },
     { id: 'finance', label: 'Situation financière', icon: CreditCard },
-    { id: 'messages', label: 'Messages', icon: MessageSquare, badge: 'Bientôt' },
+    { id: 'messages', label: 'Messages', icon: MessageSquare },
     { id: 'profile', label: 'Mon profil', icon: User }
   ];
 
