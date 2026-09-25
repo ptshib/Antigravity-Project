@@ -828,4 +828,304 @@ describe('SchoolMessagingModule — Suite complète de tests (30 Scénarios)', (
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
   });
+
+  // 35. Clarification des expéditeurs et inversion selon la perspective (HOTFIX LOT 2J-T3)
+  it('35. Affiche "Vous · Nom" pour les messages envoyés à droite et le nom de l’expéditeur à gauche', async () => {
+    // Vue Enseignant
+    render(<SchoolMessagingModule mode="teacher" />);
+    await waitFor(() => expect(screen.getAllByText('Marie Dupont').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByText('Marie Dupont')[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText('Vous · M. Martin')).toBeInTheDocument();
+      const marieElements = screen.getAllByText('Marie Dupont');
+      expect(marieElements.length).toBeGreaterThanOrEqual(2);
+
+      const sentContainer = screen.getByText('Vous · M. Martin').closest('.flex-col');
+      const receivedContainer = marieElements[marieElements.length - 1].closest('.flex-col');
+
+      expect(sentContainer).toHaveClass('items-end');
+      expect(receivedContainer).toHaveClass('items-start');
+    });
+  });
+
+  // 36. Messages successifs du même auteur et d'auteurs différents
+  it('36. Gère correctement l’affichage des auteurs pour des messages successifs', async () => {
+    const multiAuthorMessages: MessagingMessage[] = [
+      {
+        message_id: 'msg-m1',
+        conversation_id: 'conv-1',
+        sender_profile_id: 'parent-1',
+        sender_name: 'Marie Dupont',
+        content: 'Question 1',
+        created_at: '2026-09-25T09:00:00Z',
+        is_mine: false,
+      },
+      {
+        message_id: 'msg-m2',
+        conversation_id: 'conv-1',
+        sender_profile_id: 'teacher-1',
+        sender_name: 'M. Martin',
+        content: 'Réponse 1',
+        created_at: '2026-09-25T09:01:00Z',
+        is_mine: true,
+      },
+      {
+        message_id: 'msg-m3',
+        conversation_id: 'conv-1',
+        sender_profile_id: 'teacher-1',
+        sender_name: 'M. Martin',
+        content: 'Réponse 2 (précision)',
+        created_at: '2026-09-25T09:02:00Z',
+        is_mine: true,
+      },
+    ];
+
+    vi.mocked(schoolMessagingService.getMessages).mockResolvedValue(multiAuthorMessages);
+
+    render(<SchoolMessagingModule mode="teacher" />);
+    await waitFor(() => expect(screen.getAllByText('Marie Dupont').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByText('Marie Dupont')[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText('Question 1')).toBeInTheDocument();
+      expect(screen.getByText('Réponse 1')).toBeInTheDocument();
+      expect(screen.getByText('Réponse 2 (précision)')).toBeInTheDocument();
+      expect(screen.getAllByText('Vous · M. Martin').length).toBe(2);
+    });
+  });
+
+  // 37. Persistance d’identité lors du changement de conversation
+  it('37. Conserve l’identité exacte des expéditeurs lors d’un changement de conversation', async () => {
+    const conv2Messages: MessagingMessage[] = [
+      {
+        message_id: 'msg-c2-1',
+        conversation_id: 'conv-2',
+        sender_profile_id: 'parent-2',
+        sender_name: 'Pierre Smith',
+        content: 'Message de Pierre',
+        created_at: '2026-09-24T15:00:00Z',
+        is_mine: false,
+      },
+    ];
+
+    vi.mocked(schoolMessagingService.getMessages)
+      .mockResolvedValueOnce(mockMessages)
+      .mockResolvedValueOnce(conv2Messages);
+
+    render(<SchoolMessagingModule mode="teacher" />);
+    await waitFor(() => expect(screen.getAllByText('Marie Dupont').length).toBeGreaterThan(0));
+
+    // Clic conv 1
+    fireEvent.click(screen.getAllByText('Marie Dupont')[0]);
+    await waitFor(() => expect(screen.getByText('Vous · M. Martin')).toBeInTheDocument());
+
+    // Clic onglet archivées puis conv 2
+    fireEvent.click(screen.getByRole('button', { name: /archivées/i }));
+    await waitFor(() => expect(screen.getByText('Pierre Smith')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Pierre Smith'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Message de Pierre')).toBeInTheDocument();
+      expect(screen.queryByText('Vous · M. Martin')).not.toBeInTheDocument();
+    });
+  });
+
+  // 38. Accessibilité aria-label sur chaque bulle
+  it('38. Attribue un aria-label accessible sur chaque bulle de message', async () => {
+    render(<SchoolMessagingModule mode="teacher" />);
+    await waitFor(() => expect(screen.getAllByText('Marie Dupont').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByText('Marie Dupont')[0]);
+
+    await waitFor(() => {
+      const sentMsg = screen.getByLabelText(/Message de Vous · M. Martin à .* : Bonjour, pages 12 et 14/i);
+      const receivedMsg = screen.getByLabelText(/Message de Marie Dupont à .* : Bonjour Monsieur, quelles sont les leçons/i);
+
+      expect(sentMsg).toBeInTheDocument();
+      expect(receivedMsg).toBeInTheDocument();
+    });
+  });
+
+  // 39. Échappement XSS dans les noms d’expéditeurs
+  it('39. Échappe tout code HTML ou XSS présent dans les noms d’expéditeurs', async () => {
+    const xssAuthorMessages: MessagingMessage[] = [
+      {
+        message_id: 'msg-xss-author',
+        conversation_id: 'conv-1',
+        sender_profile_id: 'parent-1',
+        sender_name: '<b id="xss-author">Marie</b>',
+        content: 'Test XSS dans le nom',
+        created_at: '2026-09-25T10:00:00Z',
+        is_mine: false,
+      },
+    ];
+    vi.mocked(schoolMessagingService.getMessages).mockResolvedValue(xssAuthorMessages);
+
+    render(<SchoolMessagingModule mode="teacher" />);
+    await waitFor(() => expect(screen.getAllByText('Marie Dupont').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByText('Marie Dupont')[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText('<b id="xss-author">Marie</b>')).toBeInTheDocument();
+      expect(document.getElementById('xss-author')).toBeNull();
+    });
+  });
+
+  // 40. Test de validation stricte des perspectives Grâce Kabeya (Enseignante) vs Jonas Banza (Parent) (LOT 2J-T3-V2)
+  it('40. Valide l’inversion exacte des perspectives entre Grâce Kabeya (Enseignante) et Jonas Banza (Parent)', async () => {
+    const realConvData: MessagingConversation = {
+      conversation_id: 'bdbc24a1-127b-4bd2-b49d-6db9d827a587',
+      school_id: 'school-real',
+      student_id: 'student-daniel',
+      student_name: 'Daniel Banza',
+      class_name: '2A',
+      counterparty_profile_id: 'cd1ea95d-a6f4-4431-be14-864147b1e87e',
+      counterparty_name: 'Jonas Banza',
+      counterparty_role: 'parent',
+      subject_name: null,
+      status: 'active',
+      is_archived: false,
+      unread_count: 0,
+      last_message_content: 'en tout cas son evolution est  parfaite',
+      last_message_at: '2026-09-25T12:16:00Z',
+    };
+
+    // Perspective 1: Vue Enseignant Grâce Kabeya
+    const teacherPerspectiveMessages: MessagingMessage[] = [
+      {
+        message_id: 'msg-1',
+        conversation_id: 'bdbc24a1-127b-4bd2-b49d-6db9d827a587',
+        sender_profile_id: '0a5fffed-4292-4183-bf43-ed1ebf79cfb9',
+        sender_name: 'Grâce Kabeya',
+        content: 'Bonjour Mr Jonas',
+        created_at: '2026-09-25T12:13:29Z',
+        is_mine: true, // Grâce est l'appelante
+      },
+      {
+        message_id: 'msg-2',
+        conversation_id: 'bdbc24a1-127b-4bd2-b49d-6db9d827a587',
+        sender_profile_id: 'cd1ea95d-a6f4-4431-be14-864147b1e87e',
+        sender_name: 'Jonas Banza',
+        content: 'Bonjour Madame',
+        created_at: '2026-09-25T12:14:21Z',
+        is_mine: false,
+      },
+      {
+        message_id: 'msg-3',
+        conversation_id: 'bdbc24a1-127b-4bd2-b49d-6db9d827a587',
+        sender_profile_id: '0a5fffed-4292-4183-bf43-ed1ebf79cfb9',
+        sender_name: 'Grâce Kabeya',
+        content: 'comment evolue mon fils Daniel?',
+        created_at: '2026-09-25T12:15:17Z',
+        is_mine: true, // Grâce est l'appelante
+      },
+      {
+        message_id: 'msg-4',
+        conversation_id: 'bdbc24a1-127b-4bd2-b49d-6db9d827a587',
+        sender_profile_id: 'cd1ea95d-a6f4-4431-be14-864147b1e87e',
+        sender_name: 'Jonas Banza',
+        content: 'en tout cas son evolution est  parfaite',
+        created_at: '2026-09-25T12:16:00Z',
+        is_mine: false,
+      },
+    ];
+
+    vi.mocked(schoolMessagingService.getConversations).mockResolvedValueOnce([realConvData]);
+    vi.mocked(schoolMessagingService.getMessages).mockResolvedValueOnce(teacherPerspectiveMessages);
+
+    render(<SchoolMessagingModule mode="teacher" />);
+    await waitFor(() => expect(screen.getAllByText('Jonas Banza').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByText('Jonas Banza')[0]);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Vous · Grâce Kabeya').length).toBe(2);
+      const graceMsgContainer = screen.getAllByText('Vous · Grâce Kabeya')[0].closest('.items-end');
+      expect(graceMsgContainer).toBeInTheDocument();
+
+      const jonasMsgContainer = screen.getByText('Bonjour Madame').closest('.items-start');
+      expect(jonasMsgContainer).toBeInTheDocument();
+    });
+  });
+
+  // 41. Test de validation stricte des perspectives Parent (Jonas Banza) (LOT 2J-T3-V2)
+  it('41. Perspective Parent (Jonas Banza): ses messages à droite, ceux de Grâce à gauche', async () => {
+    const parentConvData: MessagingConversation = {
+      conversation_id: 'bdbc24a1-127b-4bd2-b49d-6db9d827a587',
+      school_id: 'school-real',
+      student_id: 'student-daniel',
+      student_name: 'Daniel Banza',
+      class_name: '2A',
+      counterparty_profile_id: '0a5fffed-4292-4183-bf43-ed1ebf79cfb9',
+      counterparty_name: 'Grâce Kabeya',
+      counterparty_role: 'teacher',
+      subject_name: null,
+      status: 'active',
+      is_archived: false,
+      unread_count: 0,
+      last_message_content: 'en tout cas son evolution est  parfaite',
+      last_message_at: '2026-09-25T12:16:00Z',
+    };
+
+    const parentPerspectiveMessages: MessagingMessage[] = [
+      {
+        message_id: 'msg-1',
+        conversation_id: 'bdbc24a1-127b-4bd2-b49d-6db9d827a587',
+        sender_profile_id: '0a5fffed-4292-4183-bf43-ed1ebf79cfb9',
+        sender_name: 'Grâce Kabeya',
+        content: 'Bonjour Mr Jonas',
+        created_at: '2026-09-25T12:13:29Z',
+        is_mine: false,
+      },
+      {
+        message_id: 'msg-2',
+        conversation_id: 'bdbc24a1-127b-4bd2-b49d-6db9d827a587',
+        sender_profile_id: 'cd1ea95d-a6f4-4431-be14-864147b1e87e',
+        sender_name: 'Jonas Banza',
+        content: 'Bonjour Madame',
+        created_at: '2026-09-25T12:14:21Z',
+        is_mine: true,
+      },
+      {
+        message_id: 'msg-3',
+        conversation_id: 'bdbc24a1-127b-4bd2-b49d-6db9d827a587',
+        sender_profile_id: '0a5fffed-4292-4183-bf43-ed1ebf79cfb9',
+        sender_name: 'Grâce Kabeya',
+        content: 'comment evolue mon fils Daniel?',
+        created_at: '2026-09-25T12:15:17Z',
+        is_mine: false,
+      },
+      {
+        message_id: 'msg-4',
+        conversation_id: 'bdbc24a1-127b-4bd2-b49d-6db9d827a587',
+        sender_profile_id: 'cd1ea95d-a6f4-4431-be14-864147b1e87e',
+        sender_name: 'Jonas Banza',
+        content: 'en tout cas son evolution est  parfaite',
+        created_at: '2026-09-25T12:16:00Z',
+        is_mine: true,
+      },
+    ];
+
+    vi.mocked(schoolMessagingService.getConversations).mockResolvedValueOnce([parentConvData]);
+    vi.mocked(schoolMessagingService.getMessages).mockResolvedValueOnce(parentPerspectiveMessages);
+
+    render(
+      <SchoolMessagingModule
+        mode="parent"
+        selectedChildId="student-daniel"
+        childrenList={[{ id: 'student-daniel', first_name: 'Daniel', last_name: 'Banza' }]}
+      />
+    );
+
+    await waitFor(() => expect(screen.getAllByText('Grâce Kabeya').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByText('Grâce Kabeya')[0]);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Vous · Jonas Banza').length).toBe(2);
+      const jonasSentContainer = screen.getAllByText('Vous · Jonas Banza')[0].closest('.items-end');
+      expect(jonasSentContainer).toBeInTheDocument();
+
+      const graceReceivedContainer = screen.getByText('Bonjour Mr Jonas').closest('.items-start');
+      expect(graceReceivedContainer).toBeInTheDocument();
+    });
+  });
 });

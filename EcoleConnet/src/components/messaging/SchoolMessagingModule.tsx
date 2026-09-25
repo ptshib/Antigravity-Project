@@ -676,39 +676,51 @@ export const SchoolMessagingModule: React.FC<SchoolMessagingModuleProps> = ({
                     <p>Tapez votre premier message ci-dessous pour démarrer la discussion.</p>
                   </div>
                 ) : (
-                  [...messages].reverse().map(m => (
-                    <div
-                      key={m.message_id}
-                      className={`flex flex-col ${m.is_mine ? 'items-end' : 'items-start'}`}
-                    >
+                  [...messages].reverse().map(m => {
+                    const formattedTime = new Date(m.created_at).toLocaleTimeString('fr-FR', {
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    });
+                    const authorLabel = m.is_mine
+                      ? (m.sender_name && m.sender_name !== 'Moi' ? `Vous · ${m.sender_name}` : 'Vous')
+                      : m.sender_name;
+
+                    return (
                       <div
-                        className={`max-w-[85%] sm:max-w-[75%] p-3.5 rounded-2xl text-xs space-y-1 ${
-                          m.is_mine
-                            ? 'bg-slate-900 text-white rounded-tr-none shadow-xs'
-                            : 'bg-white text-slate-800 border border-slate-200 rounded-tl-none shadow-xs'
-                        }`}
+                        key={m.message_id}
+                        className={`flex flex-col ${m.is_mine ? 'items-end' : 'items-start'}`}
                       >
-                        {!m.is_mine && (
-                          <p className="text-[10px] font-extrabold text-amber-700 block mb-0.5">
-                            {m.sender_name}
-                          </p>
-                        )}
-                        <p className="whitespace-pre-wrap break-words leading-relaxed">
-                          {m.content}
-                        </p>
                         <span
-                          className={`text-[9px] font-mono block text-right ${
-                            m.is_mine ? 'text-slate-400' : 'text-slate-400'
+                          className={`text-[10px] font-extrabold mb-1 px-1 select-none ${
+                            m.is_mine ? 'text-slate-500 text-right' : 'text-amber-700 text-left'
                           }`}
                         >
-                          {new Date(m.created_at).toLocaleTimeString('fr-FR', {
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
+                          {authorLabel}
                         </span>
+
+                        <div
+                          tabIndex={0}
+                          aria-label={`Message de ${authorLabel} à ${formattedTime} : ${m.content}`}
+                          className={`max-w-[85%] sm:max-w-[75%] p-3.5 rounded-2xl text-xs space-y-1.5 transition-shadow ${
+                            m.is_mine
+                              ? 'bg-slate-900 text-white rounded-tr-none shadow-sm'
+                              : 'bg-white text-slate-800 border border-slate-200/90 rounded-tl-none shadow-xs'
+                          }`}
+                        >
+                          <p className="whitespace-pre-wrap break-words leading-relaxed">
+                            {m.content}
+                          </p>
+                          <span
+                            className={`text-[9px] font-mono block text-right ${
+                              m.is_mine ? 'text-slate-400' : 'text-slate-400'
+                            }`}
+                          >
+                            {formattedTime}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
                 <div ref={messagesEndRef} />
               </div>
