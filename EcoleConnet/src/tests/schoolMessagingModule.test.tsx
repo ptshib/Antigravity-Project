@@ -1128,4 +1128,232 @@ describe('SchoolMessagingModule — Suite complète de tests (30 Scénarios)', (
       expect(graceReceivedContainer).toBeInTheDocument();
     });
   });
+
+  // 42. Arrivée d’un message dans la conversation active — Synchro auto du fil droit, marquage lu et disparition du badge (HOTFIX LOT 2J-T4)
+  it('42. Synchronise automatiquement le fil droit lors de l’arrivée d’un nouveau message dans la conversation active et efface le badge', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    const initialConv: MessagingConversation = {
+      ...mockConversations[0],
+      unread_count: 0,
+      last_message_at: '2026-09-25T10:00:00Z',
+    };
+
+    const updatedConv: MessagingConversation = {
+      ...mockConversations[0],
+      unread_count: 1,
+      last_message_content: 'Nouveau message auto-reçu !',
+      last_message_at: '2026-09-25T10:05:00Z',
+    };
+
+    const newArrivalMsg: MessagingMessage = {
+      message_id: 'msg-auto-1',
+      conversation_id: 'conv-1',
+      sender_profile_id: 'parent-1',
+      sender_name: 'Marie Dupont',
+      content: 'Nouveau message auto-reçu !',
+      created_at: '2026-09-25T10:05:00Z',
+      is_mine: false,
+    };
+
+    vi.mocked(schoolMessagingService.getConversations)
+      .mockResolvedValueOnce([initialConv])
+      .mockResolvedValueOnce([updatedConv]);
+
+    vi.mocked(schoolMessagingService.getMessages)
+      .mockResolvedValueOnce(mockMessages)
+      .mockResolvedValueOnce([newArrivalMsg, ...mockMessages]);
+
+    render(<SchoolMessagingModule mode="teacher" />);
+    await act(async () => { await Promise.resolve(); });
+
+    // Ouverture de la conversation conv-1
+    fireEvent.click(screen.getAllByText('Marie Dupont')[0]);
+    await act(async () => { await Promise.resolve(); });
+
+    // Déclenchement du polling (25s)
+    await act(async () => {
+      vi.advanceTimersByTime(25000);
+      await Promise.resolve();
+    });
+
+    expect(screen.getAllByText('Nouveau message auto-reçu !').length).toBe(2);
+    expect(schoolMessagingService.markRead).toHaveBeenCalledWith('conv-1');
+
+    vi.useRealTimers();
+  });
+
+  // 43. Absence de doublon après plusieurs pollings
+  it('43. Évite la création de doublons dans le fil lors de pollings répétés', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    render(<SchoolMessagingModule mode="teacher" />);
+    await act(async () => { await Promise.resolve(); });
+
+    fireEvent.click(screen.getAllByText('Marie Dupont')[0]);
+    await act(async () => { await Promise.resolve(); });
+
+    // Deux cycles de polling (50s)
+    await act(async () => {
+      vi.advanceTimersByTime(50000);
+      await Promise.resolve();
+    });
+
+    expect(screen.getAllByText('Bonjour Monsieur, quelles sont les leçons ?').length).toBe(1);
+
+    vi.useRealTimers();
+  });
+
+  // 44. Conservation de la pagination lors du rafraîchissement automatique
+  it('44. Conserve les anciens messages chargés par pagination lors de l’arrivée d’un nouveau message', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    const oldMessages: MessagingMessage[] = Array.from({ length: 30 }, (_, i) => ({
+      message_id: `msg-old-${i}`,
+      conversation_id: 'conv-1',
+      sender_profile_id: 'teacher-1',
+      sender_name: 'M. Martin',
+      content: `Message Ancien ${i}`,
+      created_at: `2026-09-25T08:${i < 10 ? '0' : ''}${i}:00Z`,
+      is_mine: true,
+    }));
+
+    const paginatedMessages: MessagingMessage[] = Array.from({ length: 5 }, (_, i) => ({
+      message_id: `msg-page2-${i}`,
+      conversation_id: 'conv-1',
+      sender_profile_id: 'parent-1',
+      sender_name: 'Marie Dupont',
+      content: `Message Très Ancien ${i}`,
+      created_at: `2026-09-25T07:${i < 10 ? '0' : ''}${i}:00Z`,
+      is_mine: false,
+    }));
+
+    const brandNewMsg: MessagingMessage = {
+      message_id: 'msg-brand-new',
+      conversation_id: 'conv-1',
+      sender_profile_id: 'parent-1',
+      sender_name: 'Marie Dupont',
+      content: 'Nouveau message récent !',
+      created_at: '2026-09-25T11:00:00Z',
+      is_mine: false,
+    };
+
+    vi.mocked(schoolMessagingService.getMessages)
+      .mockResolvedValueOnce(oldMessages)
+      .mockResolvedValueOnce(paginatedMessages)
+      .mockResolvedValueOnce([brandNewMsg, ...oldMessages]);
+
+    render(<SchoolMessagingModule mode="teacher" />);
+    await act(async () => { await Promise.resolve(); });
+
+    fireEvent.click(screen.getAllByText('Marie Dupont')[0]);
+    await act(async () => { await Promise.resolve(); });
+
+    fireEvent.click(screen.getByRole('button', { name: /charger les messages précédents/i }));
+    await act(async () => { await Promise.resolve(); });
+
+    expect(screen.getByText('Message Très Ancien 0')).toBeInTheDocument();
+
+    // Polling automatique
+    await act(async () => {
+      vi.advanceTimersByTime(25000);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('Nouveau message récent !')).toBeInTheDocument();
+    expect(screen.getByText('Message Très Ancien 0')).toBeInTheDocument();
+
+    vi.useRealTimers();
+  });
+
+  // 45. Protection lors de changements rapides de conversation pendant une requête de synchro
+  it('45. Empêche l’injection de messages d’une autre conversation lors d’une synchro tardive', async () => {
+    let resolveConv1Msgs: any;
+    const slowConv1Promise = new Promise(res => { resolveConv1Msgs = res; });
+
+    vi.mocked(schoolMessagingService.getMessages)
+      .mockResolvedValueOnce(mockMessages)
+      .mockResolvedValueOnce([mockMessages[1]])
+      .mockReturnValueOnce(slowConv1Promise as any);
+
+    render(<SchoolMessagingModule mode="teacher" />);
+    await waitFor(() => expect(screen.getAllByText('Marie Dupont').length).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getAllByText('Marie Dupont')[0]);
+    await waitFor(() => expect(screen.getByText('Bonjour Monsieur, quelles sont les leçons ?')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: /archivées/i }));
+    await waitFor(() => expect(screen.getByText('Pierre Smith')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Pierre Smith'));
+
+    await act(async () => {
+      resolveConv1Msgs([{
+        message_id: 'late-conv1-msg',
+        conversation_id: 'conv-1',
+        sender_profile_id: 'parent-1',
+        sender_name: 'Marie Dupont',
+        content: 'Message tardif de la conv 1',
+        created_at: '2026-09-25T12:00:00Z',
+        is_mine: false,
+      }]);
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('Message tardif de la conv 1')).not.toBeInTheDocument();
+    });
+  });
+
+  // 46. Message reçu dans une conversation inactive (aperçu mis à jour, fil droit inchangé)
+  it('46. Met à jour l’aperçu et le badge pour une conversation inactive sans altérer le fil actif', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    const conv2InactiveWithNewMsg: MessagingConversation = {
+      ...mockConversations[1],
+      unread_count: 1,
+      last_message_content: 'Avis aux parents de 3ème B',
+      last_message_at: '2026-09-25T11:30:00Z',
+    };
+
+    vi.mocked(schoolMessagingService.getConversations)
+      .mockResolvedValueOnce(mockConversations)
+      .mockResolvedValueOnce([mockConversations[0], conv2InactiveWithNewMsg]);
+
+    render(<SchoolMessagingModule mode="teacher" />);
+    await act(async () => { await Promise.resolve(); });
+
+    fireEvent.click(screen.getAllByText('Marie Dupont')[0]);
+    await act(async () => { await Promise.resolve(); });
+
+    // Polling
+    await act(async () => {
+      vi.advanceTimersByTime(25000);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('Bonjour Monsieur, quelles sont les leçons ?')).toBeInTheDocument();
+    expect(screen.queryByText('Avis aux parents de 3ème B')).not.toBeInTheDocument();
+
+    vi.useRealTimers();
+  });
+
+  // 47. Nettoyage du timer de polling au démontage
+  it('47. Nettoie l’intervalle de polling lors du démontage du composant', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { unmount } = render(<SchoolMessagingModule mode="teacher" />);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const callCountBefore = vi.mocked(schoolMessagingService.getConversations).mock.calls.length;
+
+    unmount();
+
+    await act(async () => {
+      vi.advanceTimersByTime(50000);
+    });
+
+    expect(vi.mocked(schoolMessagingService.getConversations).mock.calls.length).toBe(callCountBefore);
+    vi.useRealTimers();
+  });
 });

@@ -13,7 +13,8 @@ import {
   CheckCheck,
   ChevronLeft,
   Loader2,
-  Lock
+  Lock,
+  ArrowDown
 } from 'lucide-react';
 import {
   schoolMessagingService,
@@ -69,19 +70,34 @@ export const SchoolMessagingModule: React.FC<SchoolMessagingModuleProps> = ({
   const [selectedContact, setSelectedContact] = useState<MessagingContact | null>(null);
   const [creatingConv, setCreatingConv] = useState<boolean>(false);
 
-  // Ref pour scroll et gestion des réponses obsolètes
+  // Ref pour scroll et gestion des réponses obsolètes / synchro
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const currentFetchReqId = useRef<number>(0);
   const contactsReqIdRef = useRef<number>(0);
+  const selectedConvIdRef = useRef<string | null>(null);
+  const conversationsRef = useRef<MessagingConversation[]>(conversations);
+  const isSyncingActiveRef = useRef<boolean>(false);
+  const [showNewMsgIndicator, setShowNewMsgIndicator] = useState<boolean>(false);
+
+  useEffect(() => {
+    selectedConvIdRef.current = selectedConvId;
+  }, [selectedConvId]);
+
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
 
   // Réinitialiser la sélection et le fil quand l'enfant sélectionné change (Mode Parent)
   useEffect(() => {
     if (mode === 'parent') {
       setSelectedConvId(null);
+      selectedConvIdRef.current = null;
       setMessages([]);
       setMessagesError(null);
       setReadOnlyNotice(null);
       setSendError(null);
+      setShowNewMsgIndicator(false);
     }
   }, [selectedChildId, mode]);
 
@@ -96,6 +112,75 @@ export const SchoolMessagingModule: React.FC<SchoolMessagingModuleProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [showNewModal]);
 
+  // Utilitaires de défilement
+  const checkIfNearBottom = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return true;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    return distanceToBottom < 100;
+  }, []);
+
+  const scrollToBottom = useCallback((smooth = true) => {
+    if (messagesEndRef.current && typeof messagesEndRef.current.scrollIntoView === 'function') {
+      messagesEndRef.current.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+    }
+    setShowNewMsgIndicator(false);
+  }, []);
+
+  // Synchroniser automatiquement les messages du fil actif si un nouveau message arrive
+  const syncActiveMessages = useCallback(async (convId: string) => {
+    if (!convId || isSyncingActiveRef.current) return;
+    isSyncingActiveRef.current = true;
+
+    const wasNearBottom = checkIfNearBottom();
+
+    try {
+      const data = await schoolMessagingService.getMessages(convId, null, null, 30);
+      if (selectedConvIdRef.current === convId) {
+        let hasNew = false;
+        setMessages(prev => {
+          const existingIds = new Set(prev.map(m => m.message_id));
+          const newMsgs = data.filter(m => !existingIds.has(m.message_id));
+          if (newMsgs.length > 0) {
+            hasNew = true;
+            // Fusion déterministe par date décroissante (plus récent au début du tableau)
+            const merged = [...newMsgs, ...prev].sort((a, b) =>
+              new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+            );
+            return merged;
+          }
+          return prev;
+        });
+
+        if (hasNew) {
+          await schoolMessagingService.markRead(convId);
+          setConversations(prev =>
+            prev.map(c => (c.conversation_id === convId ? { ...c, unread_count: 0 } : c))
+          );
+
+          if (wasNearBottom) {
+            setTimeout(() => scrollToBottom(true), 50);
+          } else {
+            setShowNewMsgIndicator(true);
+          }
+        } else {
+          // Même sans nouveaux messages dans le sous-ensemble, effacer le badge s'il était marqué non lu en liste
+          const activeConvInState = conversationsRef.current.find(c => c.conversation_id === convId);
+          if (activeConvInState && activeConvInState.unread_count > 0) {
+            await schoolMessagingService.markRead(convId);
+            setConversations(prev =>
+              prev.map(c => (c.conversation_id === convId ? { ...c, unread_count: 0 } : c))
+            );
+          }
+        }
+      }
+    } catch (err) {
+      // Ignorer silencieusement les erreurs de synchro réseau d'arrière-plan
+    } finally {
+      isSyncingActiveRef.current = false;
+    }
+  }, [checkIfNearBottom, scrollToBottom]);
+
   // Charger les conversations
   const loadConversations = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -103,6 +188,10 @@ export const SchoolMessagingModule: React.FC<SchoolMessagingModuleProps> = ({
     try {
       const data = await schoolMessagingService.getConversations();
       setConversations(data);
+
+      if (selectedConvIdRef.current) {
+        await syncActiveMessages(selectedConvIdRef.current);
+      }
     } catch (err: any) {
       if (!quiet) {
         if (err?.code === '42501' || err?.message?.includes('permission denied')) {
@@ -114,7 +203,7 @@ export const SchoolMessagingModule: React.FC<SchoolMessagingModuleProps> = ({
     } finally {
       if (!quiet) setLoading(false);
     }
-  }, []);
+  }, [syncActiveMessages]);
 
   useEffect(() => {
     loadConversations();
@@ -136,10 +225,11 @@ export const SchoolMessagingModule: React.FC<SchoolMessagingModuleProps> = ({
     setMessagesError(null);
     setReadOnlyNotice(null);
     setHasMore(true);
+    setShowNewMsgIndicator(false);
 
     try {
       const data = await schoolMessagingService.getMessages(convId, null, null, 30);
-      if (reqId === currentFetchReqId.current) {
+      if (reqId === currentFetchReqId.current && selectedConvIdRef.current === convId) {
         setMessages(data);
         if (data.length < 30) setHasMore(false);
 
@@ -149,20 +239,22 @@ export const SchoolMessagingModule: React.FC<SchoolMessagingModuleProps> = ({
         setConversations(prev =>
           prev.map(c => (c.conversation_id === convId ? { ...c, unread_count: 0 } : c))
         );
+        setTimeout(() => scrollToBottom(false), 50);
       }
     } catch (err: any) {
-      if (reqId === currentFetchReqId.current) {
+      if (reqId === currentFetchReqId.current && selectedConvIdRef.current === convId) {
         setMessagesError(err.message || 'Erreur lors du chargement des messages.');
       }
     } finally {
-      if (reqId === currentFetchReqId.current) {
+      if (reqId === currentFetchReqId.current && selectedConvIdRef.current === convId) {
         setLoadingMessages(false);
       }
     }
-  }, []);
+  }, [scrollToBottom]);
 
   const handleSelectConversation = (convId: string) => {
     setSelectedConvId(convId);
+    selectedConvIdRef.current = convId;
     loadMessages(convId);
   };
 
@@ -219,6 +311,7 @@ export const SchoolMessagingModule: React.FC<SchoolMessagingModuleProps> = ({
           is_mine: true
         };
         setMessages(prev => [newMsgRow, ...prev]);
+        setTimeout(() => scrollToBottom(true), 50);
         await loadConversations(true);
       } else {
         // Refus métier CONVERSATION_READ_ONLY
@@ -638,7 +731,19 @@ export const SchoolMessagingModule: React.FC<SchoolMessagingModuleProps> = ({
               </div>
 
               {/* Conteneur des Messages */}
-              <div className="flex-1 p-4 overflow-y-auto space-y-4 max-h-[420px] bg-slate-50/30">
+              <div ref={scrollContainerRef} className="flex-1 p-4 overflow-y-auto space-y-4 max-h-[420px] bg-slate-50/30 relative">
+                {showNewMsgIndicator && (
+                  <button
+                    type="button"
+                    data-testid="new-message-indicator"
+                    onClick={() => scrollToBottom(true)}
+                    className="sticky top-2 left-1/2 -translate-x-1/2 px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-full shadow-lg transition-all flex items-center gap-1.5 z-10 cursor-pointer animate-bounce mx-auto"
+                  >
+                    <ArrowDown className="w-3.5 h-3.5" />
+                    <span>Nouveau message</span>
+                  </button>
+                )}
+
                 {/* Bouton de chargement précédent */}
                 {hasMore && messages.length >= 30 && (
                   <div className="text-center py-2">
