@@ -448,7 +448,193 @@ BEGIN
 
   RAISE NOTICE 'TEST 7 PASSED: Validation complète UPDATE HOMEWORK sur matière désactivée post-création (Primaire & Secondaire).';
 
-  RAISE NOTICE '=== TOUS LES TESTS GATE LOT 2I-P4-V2 ONT RÉUSSI AVEC SUCCÈS ===';
+
+  -- ============================================================================
+  -- TEST 8 (LOT 2I-P4-T2-V2) : Validation du Cycle de Vie et Règles Post-Désactivation
+  -- ============================================================================
+  DECLARE
+    v_hw_cancel_id UUID;
+    v_hw_close_id UUID;
+    v_hw_draft_id UUID;
+    v_sec_hw_id UUID;
+    v_status_check TEXT;
+    v_pub_at_check TIMESTAMPTZ;
+    v_student_id UUID := gen_random_uuid();
+    v_enrollment_id UUID := gen_random_uuid();
+  BEGIN
+    -- Configuration élève et inscription dans classe 2A
+    INSERT INTO public.students (id, profile_id, school_id, is_active)
+    VALUES (v_student_id, v_prof_student, v_school_a, true);
+
+    INSERT INTO public.parent_student_relationships (parent_profile_id, student_id, relationship_type, is_active)
+    VALUES (v_prof_parent, v_student_id, 'father', true);
+
+    INSERT INTO public.student_enrollments (id, school_id, academic_year_id, class_id, student_id, status)
+    VALUES (v_enrollment_id, v_school_a, v_year_2027, v_class_primary_2a, v_student_id, 'active');
+
+    -- SCÉNARIO 1 : Création de devoirs sur une matière effective (v_sbj_1 - Mathématiques) par le titulaire
+    EXECUTE format('SET LOCAL %I = %L', 'request.jwt.claim.sub', v_prof_teacher_a::text);
+
+    v_hw_cancel_id := public.create_teacher_homework(
+      v_class_primary_2a,
+      v_sbj_1,
+      'Devoir 1 Math (pour annulation)',
+      'Exercices p.10',
+      CURRENT_DATE,
+      NOW() + INTERVAL '4 days',
+      20,
+      false
+    );
+
+    v_hw_close_id := public.create_teacher_homework(
+      v_class_primary_2a,
+      v_sbj_1,
+      'Devoir 2 Math (pour clôture)',
+      'Exercices p.12',
+      CURRENT_DATE,
+      NOW() + INTERVAL '4 days',
+      20,
+      false
+    );
+
+    v_hw_draft_id := public.create_teacher_homework(
+      v_class_primary_2a,
+      v_sbj_1,
+      'Devoir 3 Math (reste brouillon)',
+      'Exercices p.14',
+      CURRENT_DATE,
+      NOW() + INTERVAL '4 days',
+      20,
+      false
+    );
+
+    IF v_hw_cancel_id IS NULL OR v_hw_close_id IS NULL OR v_hw_draft_id IS NULL THEN
+      RAISE EXCEPTION 'TEST 8.1 FAILED: La création des devoirs sur matière effective a échoué.';
+    END IF;
+
+    -- SCÉNARIO 2 : Publication des devoirs tant que la matière est effective
+    PERFORM public.publish_teacher_homework(v_hw_cancel_id);
+    PERFORM public.publish_teacher_homework(v_hw_close_id);
+
+    SELECT status, published_at INTO v_status_check, v_pub_at_check FROM public.school_homework WHERE id = v_hw_cancel_id;
+    IF v_status_check <> 'published' OR v_pub_at_check IS NULL THEN
+      RAISE EXCEPTION 'TEST 8.2 FAILED: Publication de Devoir 1 échouée.';
+    END IF;
+
+    -- SCÉNARIO 3 : Désactivation de la matière par l'administration après publication
+    EXECUTE format('SET LOCAL %I = %L', 'request.jwt.claim.sub', v_prof_admin_a::text);
+    INSERT INTO public.class_subject_settings (school_id, academic_year_id, class_id, subject_id, coefficient, is_active)
+    VALUES (v_school_a, v_year_2027, v_class_primary_2a, v_sbj_1, 1.0, false)
+    ON CONFLICT (school_id, academic_year_id, class_id, subject_id) DO UPDATE SET is_active = false;
+
+    -- SCÉNARIO 4 : Modification du devoir après désactivation -> REFUSÉE
+    EXECUTE format('SET LOCAL %I = %L', 'request.jwt.claim.sub', v_prof_teacher_a::text);
+    BEGIN
+      PERFORM public.update_teacher_homework(
+        v_hw_cancel_id,
+        'Devoir 1 Modifié',
+        'Nouvelle consigne',
+        CURRENT_DATE,
+        NOW() + INTERVAL '5 days',
+        25
+      );
+      RAISE EXCEPTION 'TEST 8.4 FAILED: La modification après désactivation aurait dû être refusée.';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE '%Cette matière n’est pas configurée ou est désactivée%' THEN
+        RAISE EXCEPTION 'TEST 8.4 FAILED: Message inattendu : %', SQLERRM;
+      END IF;
+    END;
+
+    -- SCÉNARIO 5 : Nouvelle publication d'un brouillon après désactivation -> REFUSÉE
+    BEGIN
+      PERFORM public.publish_teacher_homework(v_hw_draft_id);
+      RAISE EXCEPTION 'TEST 8.5 FAILED: La publication d’un brouillon après désactivation aurait dû être refusée.';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE '%Cette matière n’est plus configurée ou est désactivée%' THEN
+        RAISE EXCEPTION 'TEST 8.5 FAILED: Message inattendu : %', SQLERRM;
+      END IF;
+    END;
+
+    -- SCÉNARIO 6 : Annulation du devoir déjà publié après désactivation -> AUTORISÉE
+    PERFORM public.cancel_teacher_homework(v_hw_cancel_id, 'Annulation suite réorganisation du programme');
+    SELECT status INTO v_status_check FROM public.school_homework WHERE id = v_hw_cancel_id;
+    IF v_status_check <> 'cancelled' THEN
+      RAISE EXCEPTION 'TEST 8.6 FAILED: L’annulation du devoir publié après désactivation de la matière a été refusée (status=%).', v_status_check;
+    END IF;
+
+    -- SCÉNARIO 7 : Clôture d'un autre devoir déjà publié après désactivation -> AUTORISÉE
+    PERFORM public.close_teacher_homework(v_hw_close_id);
+    SELECT status INTO v_status_check FROM public.school_homework WHERE id = v_hw_close_id;
+    IF v_status_check <> 'closed' THEN
+      RAISE EXCEPTION 'TEST 8.7 FAILED: La clôture du devoir publié après désactivation de la matière a été refusée (status=%).', v_status_check;
+    END IF;
+
+    -- SCÉNARIO 8 : Un autre enseignant ne peut ni annuler ni clôturer le devoir
+    EXECUTE format('SET LOCAL %I = %L', 'request.jwt.claim.sub', v_prof_teacher_c::text);
+    BEGIN
+      PERFORM public.cancel_teacher_homework(v_hw_close_id, 'TENTATIVE ILLICITE');
+      RAISE EXCEPTION 'TEST 8.8.a FAILED: Un autre enseignant n’aurait pas dû pouvoir annuler.';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE '%Accès refusé%' THEN
+        RAISE EXCEPTION 'TEST 8.8.a FAILED: Message inattendu : %', SQLERRM;
+      END IF;
+    END;
+
+    BEGIN
+      PERFORM public.close_teacher_homework(v_hw_draft_id);
+      RAISE EXCEPTION 'TEST 8.8.b FAILED: Un autre enseignant n’aurait pas dû pouvoir clôturer.';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE '%Accès refusé%' THEN
+        RAISE EXCEPTION 'TEST 8.8.b FAILED: Message inattendu : %', SQLERRM;
+      END IF;
+    END;
+
+    -- SCÉNARIO 9 : Un enseignant d'un autre établissement est refusé
+    EXECUTE format('SET LOCAL %I = %L', 'request.jwt.claim.sub', v_prof_teacher_other_school::text);
+    BEGIN
+      PERFORM public.cancel_teacher_homework(v_hw_close_id, 'Autre école');
+      RAISE EXCEPTION 'TEST 8.9 FAILED: Enseignant d’une autre école doit être refusé.';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE '%Accès refusé%' THEN
+        RAISE EXCEPTION 'TEST 8.9 FAILED: Message inattendu : %', SQLERRM;
+      END IF;
+    END;
+
+    -- SCÉNARIO 10 : Les transitions invalides restent refusées
+    EXECUTE format('SET LOCAL %I = %L', 'request.jwt.claim.sub', v_prof_teacher_a::text);
+    BEGIN
+      PERFORM public.close_teacher_homework(v_hw_cancel_id);
+      RAISE EXCEPTION 'TEST 8.10 FAILED: Clôturer un devoir déjà annulé aurait dû échouer.';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLERRM NOT LIKE '%Clôture impossible%' THEN
+        RAISE EXCEPTION 'TEST 8.10 FAILED: Message inattendu : %', SQLERRM;
+      END IF;
+    END;
+
+    -- SCÉNARIO 11 : Les modes primaire et secondaire restent fonctionnels
+    EXECUTE format('SET LOCAL %I = %L', 'request.jwt.claim.sub', v_prof_teacher_b::text);
+    v_sec_hw_id := public.create_teacher_homework(
+      v_class_secondary_7a,
+      v_sbj_2,
+      'Devoir Secondaire Français',
+      'Grammaire',
+      CURRENT_DATE,
+      NOW() + INTERVAL '3 days',
+      30,
+      false
+    );
+    PERFORM public.publish_teacher_homework(v_sec_hw_id);
+    PERFORM public.cancel_teacher_homework(v_sec_hw_id, 'Annulation secondaire test');
+    SELECT status INTO v_status_check FROM public.school_homework WHERE id = v_sec_hw_id;
+    IF v_status_check <> 'cancelled' THEN
+      RAISE EXCEPTION 'TEST 8.11 FAILED: Cycle de vie secondaire échoué.';
+    END IF;
+
+    RAISE NOTICE 'TEST 8 PASSED: Validation complète des 12 scénarios LOT 2I-P4-T2-V2.';
+  END;
+
+  -- SCÉNARIO 12 : Validation que la transaction entière se termine par ROLLBACK sans résidu
+  RAISE NOTICE '=== TOUS LES TESTS GATE LOT 2I-P4-T2-V2 ONT RÉUSSI AVEC SUCCÈS ===';
 END $$;
 
 ROLLBACK;
