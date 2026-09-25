@@ -1858,12 +1858,66 @@ export const RealSchoolAdminPortal: React.FC = () => {
     setShowStudentInviteModal(true);
   };
 
+  const parseStudentInviteError = async (error: any, fallbackBodyError?: string): Promise<string> => {
+    let techDetails = error ? error.message : fallbackBodyError;
+
+    if (error) {
+      try {
+        if ((error as any).context && typeof (error as any).context.json === 'function') {
+          const errBody = await (error as any).context.json();
+          if (errBody?.error) {
+            techDetails = errBody.error;
+          }
+        }
+      } catch (_e) {
+        // ignore context parse error
+      }
+    }
+
+    const techLower = String(techDetails || '').toLowerCase();
+
+    if (error?.name === 'FunctionsFetchError' || techLower.includes('failed to send a request')) {
+      return 'Le service d’invitation est momentanément indisponible. Veuillez réessayer.';
+    }
+    if (techLower.includes('session') || techLower.includes('authentifié') || techLower.includes('jeton expiré')) {
+      return 'Votre session a expiré. Veuillez vous reconnecter.';
+    }
+    if (techLower.includes('déjà associée') || techLower.includes('compte existant') || techLower.includes('déjà utilisée')) {
+      return 'Cette adresse email est déjà associée à un compte ÉcoleConnect. Veuillez vérifier l’identité de l’élève.';
+    }
+    if (techLower.includes('première invitation refusée') || techLower.includes('statut exact "not_invited"') || techLower.includes('déjà active')) {
+      return 'Une invitation est déjà active pour cet élève. Utilisez l’option de renvoi d’invitation si nécessaire.';
+    }
+    if (techLower.includes('serveur de messagerie') || techLower.includes('limite temporaire') || techLower.includes('email d’invitation') || techLower.includes('fournisseur')) {
+      return 'L’invitation n’a pas pu être envoyée par email. Veuillez réessayer plus tard.';
+    }
+    if (techLower.includes('pas à votre établissement') || techLower.includes('accès refusé')) {
+      return 'Vous n’avez pas les droits d’administration nécessaires pour cet élève.';
+    }
+    if (techLower.includes('adresse email personnelle valide est requise')) {
+      return 'Une adresse email personnelle valide est requise pour inviter l’élève.';
+    }
+    if (techLower.includes('dossier élève introuvable')) {
+      return 'Dossier élève introuvable dans cet établissement.';
+    }
+
+    return 'Le service d’invitation est momentanément indisponible. Veuillez réessayer.';
+  };
+
   const handleInviteStudentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedStudentForInvite) return;
+    if (!selectedStudentForInvite || invitingStudentId !== null) return;
 
-    if (!studentInviteEmail.trim() || !studentInviteEmail.includes('@')) {
+    const trimmedEmail = studentInviteEmail.trim();
+    if (!trimmedEmail || !trimmedEmail.includes('@')) {
       showToast('Une adresse email personnelle valide est requise pour inviter l’élève.', 'warning');
+      return;
+    }
+
+    // 1. Vérification / Renouvellement de la session Supabase
+    const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+    if (sessionErr || !sessionData?.session) {
+      showToast('Votre session a expiré. Veuillez vous reconnecter.', 'warning');
       return;
     }
 
@@ -1872,13 +1926,17 @@ export const RealSchoolAdminPortal: React.FC = () => {
       const { data, error } = await supabase.functions.invoke('invite-school-student', {
         body: {
           student_id: selectedStudentForInvite.id,
-          email: studentInviteEmail.trim(),
+          email: trimmedEmail,
           action: 'invite'
         }
       });
 
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      if (error || data?.error) {
+        console.error('[invite-school-student] Technical error:', error || data?.error);
+        const userMsg = await parseStudentInviteError(error, data?.error);
+        showToast(userMsg, 'warning');
+        return;
+      }
 
       showToast(data?.message || 'Invitation envoyée avec succès à l’élève !', 'success');
       setShowStudentInviteModal(false);
@@ -1886,13 +1944,25 @@ export const RealSchoolAdminPortal: React.FC = () => {
       setStudentInviteEmail('');
       loadSchoolPortalData();
     } catch (err: any) {
-      showToast(err.message || 'Erreur lors de l’invitation de l’élève.', 'warning');
+      console.error('[invite-school-student] Unexpected error:', err);
+      const userMsg = await parseStudentInviteError(err);
+      showToast(userMsg, 'warning');
     } finally {
       setInvitingStudentId(null);
     }
   };
 
   const handleReinviteStudent = async (student: StudentRow) => {
+    if (invitingStudentId !== null) return;
+
+    // 1. Vérification / Renouvellement de la session Supabase
+    const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+    if (sessionErr || !sessionData?.session) {
+      showToast('Votre session a expiré. Veuillez vous reconnecter.', 'warning');
+      return;
+    }
+
+    setInvitingStudentId(student.id);
     try {
       const { data, error } = await supabase.functions.invoke('invite-school-student', {
         body: {
@@ -1902,12 +1972,20 @@ export const RealSchoolAdminPortal: React.FC = () => {
         }
       });
 
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
+      if (error || data?.error) {
+        console.error('[reinvite-school-student] Technical error:', error || data?.error);
+        const userMsg = await parseStudentInviteError(error, data?.error);
+        showToast(userMsg, 'warning');
+        return;
+      }
 
-      showToast('Nouvelle invitation envoyée.', 'success');
+      showToast(data?.message || 'Nouvelle invitation envoyée.', 'success');
     } catch (err: any) {
-      showToast(err.message || 'Erreur lors du renvoi de l’invitation.', 'warning');
+      console.error('[reinvite-school-student] Unexpected error:', err);
+      const userMsg = await parseStudentInviteError(err);
+      showToast(userMsg, 'warning');
+    } finally {
+      setInvitingStudentId(null);
     }
   };
 
