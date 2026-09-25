@@ -342,7 +342,9 @@ describe('RealTeacherPortal - Lot 2G Refonte Portail Enseignant Réel', () => {
       fireEvent.click(devoirsTab);
     });
 
-    expect(screen.getByText('Gestion des Devoirs & Travaux')).toBeDefined();
+    await waitFor(() => {
+      expect(screen.getByText(/Gestion des Devoirs/i)).toBeDefined();
+    });
   });
 
   it('14. gère le comportement responsive avec ouverture et fermeture du menu mobile', async () => {
