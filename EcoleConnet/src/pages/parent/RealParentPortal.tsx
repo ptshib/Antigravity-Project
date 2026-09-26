@@ -120,6 +120,11 @@ export const RealParentPortal: React.FC = () => {
           can_view_academic,
           status,
           student_id,
+          school_id,
+          school:schools (
+            id,
+            name
+          ),
           student:students (
             id,
             student_number,
@@ -163,9 +168,10 @@ export const RealParentPortal: React.FC = () => {
         }
       }
 
-      const list: LinkedChild[] = (data || [])
-        .filter((row: any) => row.student && row.can_view_academic)
-        .map((row: any) => {
+      // Déduplication par student_id pour éviter les doublons en cas d'inscriptions historiques multiples
+      const uniqueChildrenMap = new Map<string, LinkedChild>();
+      (data || []).forEach((row: any) => {
+        if (row.student && row.can_view_academic && !uniqueChildrenMap.has(row.student.id)) {
           let rel = row.relationship || 'Parent';
           if (rel.toLowerCase() === 'father') rel = 'Père';
           else if (rel.toLowerCase() === 'mother') rel = 'Mère';
@@ -173,7 +179,7 @@ export const RealParentPortal: React.FC = () => {
 
           const enrInfo = enrollmentsMap[row.student.id];
 
-          return {
+          uniqueChildrenMap.set(row.student.id, {
             link_id: row.id,
             student_id: row.student.id,
             student_number: row.student.student_number || '',
@@ -183,9 +189,14 @@ export const RealParentPortal: React.FC = () => {
             can_view_academic: !!row.can_view_academic,
             enrollment_status: row.student.enrollment_status,
             class_id: enrInfo?.class_id,
-            class_name: enrInfo?.class_name
-          };
-        });
+            class_name: enrInfo?.class_name,
+            school_id: row.school_id || row.school?.id,
+            school_name: row.school?.name
+          });
+        }
+      });
+
+      const list: LinkedChild[] = Array.from(uniqueChildrenMap.values());
 
       setChildrenList(list);
 

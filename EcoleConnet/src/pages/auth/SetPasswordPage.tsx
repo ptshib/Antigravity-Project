@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useRealAuth } from '../../contexts/RealAuthContext';
+import { schoolInvitationService } from '../../services/schoolInvitationService';
 import { Eye, EyeOff, CheckCircle2, AlertCircle, ArrowRight, ShieldCheck, Mail } from 'lucide-react';
 
 interface SetPasswordPageProps {
@@ -206,6 +207,20 @@ export const SetPasswordPage: React.FC<SetPasswordPageProps> = ({ onSuccessNavig
         if (actErr) throw new Error(translateAuthError(actErr.message));
         if (actData !== true) throw new Error("L'activation du compte élève a renvoyé un résultat inattendu.");
       } else if (userRole === 'parent') {
+        const validEnvelope = schoolInvitationService.getValidInvitationEnvelope();
+        if (validEnvelope) {
+          setActivationStatusText("Configuration réussie. Redirection vers la confirmation de votre invitation...");
+          setSuccessMsg("Mot de passe configuré ! Redirection vers la finalisation de votre invitation...");
+          setTimeout(() => {
+            if (onSuccessNavigate) {
+              onSuccessNavigate('/auth/accept-school-invitation');
+            } else {
+              window.location.replace('/auth/accept-school-invitation');
+            }
+          }, 1000);
+          return;
+        }
+
         targetPath = '/app/parent';
         setActivationStatusText("Activation sécurisée de votre espace parent...");
         const { data: actData, error: actErr } = await supabase.rpc('activate_parent_on_password_set');

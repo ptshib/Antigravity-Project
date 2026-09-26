@@ -25,6 +25,7 @@ import { LoginPage } from './pages/auth/LoginPage';
 import { ForgotPasswordPage } from './pages/auth/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/auth/ResetPasswordPage';
 import { SetPasswordPage } from './pages/auth/SetPasswordPage';
+import { AcceptSchoolInvitationPage } from './pages/auth/AcceptSchoolInvitationPage';
 import { AccountSuspendedPage } from './pages/auth/AccountSuspendedPage';
 import { ConfigRequiredPage } from './pages/auth/ConfigRequiredPage';
 import { SuperAdminDashboard } from './pages/superadmin/SuperAdminDashboard';
@@ -35,6 +36,8 @@ import { RealTeacherPortal } from './pages/teacher/RealTeacherPortal';
 import { RealParentPortal } from './pages/parent/RealParentPortal';
 import { RealStudentPortal } from './pages/student/RealStudentPortal';
 
+import { schoolInvitationService } from './services/schoolInvitationService';
+
 export type AppView = 
   | 'landing' 
   | 'demo_selector' 
@@ -43,6 +46,7 @@ export type AppView =
   | 'mot_de_passe_oublie' 
   | 'reinitialiser_mot_de_passe' 
   | 'auth_set_password'
+  | 'auth_accept_invitation'
   | 'acces_suspendu' 
   | 'configuration_requise' 
   | 'app_superadmin_school'
@@ -56,6 +60,7 @@ function parsePathToView(pathname: string): AppView {
   if (cleanPath === '/mot-de-passe-oublie') return 'mot_de_passe_oublie';
   if (cleanPath === '/reinitialiser-mot-de-passe') return 'reinitialiser_mot_de_passe';
   if (cleanPath === '/auth/set-password' || cleanPath === '/auth/definir-mot-de-passe' || cleanPath === '/definir-mot-de-passe') return 'auth_set_password';
+  if (cleanPath === '/auth/accept-school-invitation' || cleanPath === '/auth/accepter-invitation') return 'auth_accept_invitation';
   if (cleanPath === '/acces-suspendu') return 'acces_suspendu';
   if (cleanPath === '/configuration-requise') return 'configuration_requise';
   if (cleanPath === '/demo' || cleanPath.startsWith('/demo/')) return 'demo_selector';
@@ -126,7 +131,18 @@ const MainLayout: React.FC = () => {
           pathname === '/' ||
           (pathname.startsWith('/app') && pathname !== targetRolePath && !isSuperAdminSubRoute)
         ) {
-          navigate(targetRolePath);
+          const urlParams = new URLSearchParams(window.location.search);
+          const rawReturnTo = urlParams.get('returnTo');
+          const hasValidInvitation = !!schoolInvitationService.getValidInvitationToken();
+
+          if (hasValidInvitation) {
+            navigate('/auth/accept-school-invitation');
+          } else if (rawReturnTo) {
+            const safeReturnTo = schoolInvitationService.sanitizeReturnTo(rawReturnTo);
+            navigate(safeReturnTo);
+          } else {
+            navigate(targetRolePath);
+          }
         }
       }
     }
@@ -200,6 +216,10 @@ const MainLayout: React.FC = () => {
 
   if (currentView === 'auth_set_password') {
     return <SetPasswordPage onSuccessNavigate={(path) => navigate(path)} />;
+  }
+
+  if (currentView === 'auth_accept_invitation') {
+    return <AcceptSchoolInvitationPage onNavigate={(path) => navigate(path)} />;
   }
 
   if (currentView === 'acces_suspendu') {

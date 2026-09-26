@@ -13,6 +13,8 @@ export interface LinkedChild {
   enrollment_status: string;
   class_id?: string;
   class_name?: string;
+  school_id?: string;
+  school_name?: string;
 }
 
 export interface ParentChildSwitcherProps {
@@ -53,6 +55,11 @@ export const ParentChildSwitcher: React.FC<ParentChildSwitcherProps> = ({
             ) : (
               <span className="px-2.5 py-0.5 rounded-full bg-slate-700 text-slate-300 font-bold text-[10px]">
                 Inscrit
+              </span>
+            )}
+            {activeChild.school_name && (
+              <span className="px-2.5 py-0.5 rounded-full bg-indigo-600/90 text-white font-extrabold text-[10px]">
+                {activeChild.school_name}
               </span>
             )}
           </div>
