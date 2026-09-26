@@ -77,6 +77,26 @@ interface OfficialChildReportCard {
   homeroom_teacher_remarks: string | null;
 }
 
+export interface ParentChildRpcRow {
+  student_id: string;
+  student_full_name: string;
+  school_id: string;
+  school_name: string;
+  class_id: string | null;
+  class_name: string | null;
+  academic_year_id: string | null;
+  academic_year_name: string | null;
+  link_status: string;
+  permissions: {
+    can_view_academic?: boolean;
+    can_view_attendance?: boolean;
+    can_view_homework?: boolean;
+    can_view_finances?: boolean;
+    can_pickup_student?: boolean;
+    can_receive_notifications?: boolean;
+  } | null;
+}
+
 export const RealParentPortal: React.FC = () => {
   const { profile, school, signOutReal } = useRealAuth();
   const { showToast } = useNotifications();
@@ -107,91 +127,141 @@ export const RealParentPortal: React.FC = () => {
     loading: boolean;
   } | null>(null);
 
-  // 1. Fetch Approved Linked Children (Real Supabase RLS)
+  // 1. Fetch Approved Linked Children via Canonical RPC + Complementary Metadata
   const loadLinkedChildren = useCallback(async () => {
     if (!profile?.id) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('parent_student_links')
-        .select(`
-          id,
-          relationship,
-          can_view_academic,
-          status,
-          student_id,
-          school_id,
-          school:schools (
-            id,
-            name
-          ),
-          student:students (
-            id,
-            student_number,
-            first_name,
-            last_name,
-            enrollment_status
-          )
-        `)
-        .eq('parent_profile_id', profile.id)
-        .eq('status', 'approved');
+      // Étape A : RPC Canonique (Autorisation, Écoles, Classes, Année Scolaire & Permissions)
+      const { data: rpcData, error: rpcError } = await supabase.rpc('get_parent_children_and_schools');
 
-      if (error) throw error;
+      if (rpcError) throw rpcError;
 
-      // Récupérer la classe active pour chaque élève rattaché
-      const studentIds = (data || []).filter((row: any) => row.student).map((row: any) => row.student.id);
-      let enrollmentsMap: Record<string, { class_id: string; class_name: string }> = {};
+      const rpcRows = (rpcData || []) as ParentChildRpcRow[];
+
+      if (rpcRows.length === 0) {
+        setChildrenList([]);
+        setSelectedChildId('');
+        return;
+      }
+
+      // Extraction des student_id autorisés par la RPC
+      const studentIds = rpcRows.map(r => r.student_id).filter(Boolean);
+
+      // Étape B : Métadonnées complémentaires autorisées (matricule, noms réels, relation, link_id)
+      let complementaryMap = new Map<string, {
+        link_id?: string;
+        student_number?: string;
+        first_name?: string;
+        middle_name?: string;
+        last_name?: string;
+        relationship?: string;
+      }>();
 
       if (studentIds.length > 0) {
-        const { data: enrData, error: enrError } = await supabase
-          .from('student_enrollments')
+        const { data: linksData, error: linksError } = await supabase
+          .from('parent_student_links')
           .select(`
+            id,
+            relationship,
             student_id,
-            class_id,
-            class:classes (
+            student:students (
               id,
-              name
+              student_number,
+              first_name,
+              middle_name,
+              last_name
             )
           `)
-          .in('student_id', studentIds)
-          .eq('status', 'active');
+          .eq('parent_profile_id', profile.id)
+          .eq('status', 'approved')
+          .in('student_id', studentIds);
 
-        if (!enrError && enrData) {
-          enrData.forEach((enr: any) => {
-            if (enr.class) {
-              enrollmentsMap[enr.student_id] = {
-                class_id: enr.class.id,
-                class_name: enr.class.name
-              };
+        if (!linksError && linksData) {
+          // Résolution déterministe des doublons de métadonnées : tri par ID ascendant
+          const sortedLinks = [...linksData].sort((a: any, b: any) => String(a.id || '').localeCompare(String(b.id || '')));
+
+          sortedLinks.forEach((row: any) => {
+            if (row.student_id && !complementaryMap.has(row.student_id)) {
+              let rel: string | undefined = undefined;
+              if (row.relationship) {
+                const rawRel = String(row.relationship).trim();
+                if (rawRel.toLowerCase() === 'father') rel = 'Père';
+                else if (rawRel.toLowerCase() === 'mother') rel = 'Mère';
+                else if (rawRel.toLowerCase() === 'guardian') rel = 'Tuteur';
+                else rel = rawRel;
+              }
+
+              const st = row.student || {};
+              complementaryMap.set(row.student_id, {
+                link_id: row.id,
+                student_number: st.student_number || undefined,
+                first_name: st.first_name || undefined,
+                middle_name: st.middle_name || undefined,
+                last_name: st.last_name || undefined,
+                relationship: rel
+              });
             }
           });
+        } else if (linksError) {
+          console.warn('[RealParentPortal] Erreur métadonnées complémentaires:', linksError);
         }
       }
 
-      // Déduplication par student_id pour éviter les doublons en cas d'inscriptions historiques multiples
+      // Étape C : Fusion stricte par student_id et déduplication
+      // La liste finale des enfants est construite EXCLUSIVEMENT à partir des student_id retournés par la RPC.
       const uniqueChildrenMap = new Map<string, LinkedChild>();
-      (data || []).forEach((row: any) => {
-        if (row.student && row.can_view_academic && !uniqueChildrenMap.has(row.student.id)) {
-          let rel = row.relationship || 'Parent';
-          if (rel.toLowerCase() === 'father') rel = 'Père';
-          else if (rel.toLowerCase() === 'mother') rel = 'Mère';
-          else if (rel.toLowerCase() === 'guardian') rel = 'Tuteur';
 
-          const enrInfo = enrollmentsMap[row.student.id];
+      rpcRows.forEach(row => {
+        if (row.student_id && !uniqueChildrenMap.has(row.student_id)) {
+          const extra = complementaryMap.get(row.student_id);
 
-          uniqueChildrenMap.set(row.student.id, {
-            link_id: row.id,
-            student_id: row.student.id,
-            student_number: row.student.student_number || '',
-            first_name: row.student.first_name || '',
-            last_name: row.student.last_name || '',
-            relationship: rel,
-            can_view_academic: !!row.can_view_academic,
-            enrollment_status: row.student.enrollment_status,
-            class_id: enrInfo?.class_id,
-            class_name: enrInfo?.class_name,
-            school_id: row.school_id || row.school?.id,
-            school_name: row.school?.name
+          // Règle 1: Nom complet & display_name
+          const firstName = extra?.first_name || undefined;
+          const middleName = extra?.middle_name || undefined;
+          const lastName = extra?.last_name || undefined;
+          const hasStudentMeta = Boolean(firstName || middleName || lastName);
+
+          const displayName = hasStudentMeta
+            ? [firstName, middleName, lastName].filter(Boolean).join(' ')
+            : row.student_full_name;
+
+          // Règle 2: Permissions FAIL-CLOSED
+          // Provenance exclusive : rpcRow.permissions
+          // Si permissions est NULL, absente, non-objet ou malformée => TOUTES les permissions fonctionnelles sont false
+          const perms = (row.permissions && typeof row.permissions === 'object' && !Array.isArray(row.permissions))
+            ? row.permissions
+            : null;
+
+          const canViewAcademic = perms ? Boolean(perms.can_view_academic) : false;
+          const canViewAttendance = perms ? Boolean(perms.can_view_attendance) : false;
+          const canViewHomework = perms ? Boolean(perms.can_view_homework) : false;
+          const canViewFinances = perms ? Boolean(perms.can_view_finances) : false;
+          const canPickupStudent = perms ? Boolean(perms.can_pickup_student) : false;
+          const canReceiveNotifications = perms ? Boolean(perms.can_receive_notifications) : false;
+
+          uniqueChildrenMap.set(row.student_id, {
+            link_id: extra?.link_id,
+            student_id: row.student_id,
+            student_number: extra?.student_number || 'Non renseigné',
+            student_full_name: row.student_full_name,
+            display_name: displayName || row.student_full_name,
+            first_name: firstName,
+            middle_name: middleName,
+            last_name: lastName,
+            school_id: row.school_id,
+            school_name: row.school_name || 'Établissement non disponible',
+            class_id: row.class_id || undefined,
+            class_name: row.class_name || 'Classe non attribuée',
+            academic_year_id: row.academic_year_id || undefined,
+            academic_year_name: row.academic_year_name || undefined,
+            can_view_academic: canViewAcademic,
+            can_view_attendance: canViewAttendance,
+            can_view_homework: canViewHomework,
+            can_view_finances: canViewFinances,
+            can_pickup_student: canPickupStudent,
+            can_receive_notifications: canReceiveNotifications,
+            relationship: extra?.relationship || 'Lien non renseigné'
           });
         }
       });
@@ -202,9 +272,14 @@ export const RealParentPortal: React.FC = () => {
 
       if (list.length > 0) {
         setSelectedChildId(prev => (prev && list.some(c => c.student_id === prev) ? prev : list[0].student_id));
+      } else {
+        setSelectedChildId('');
       }
     } catch (err: any) {
+      console.error('[RealParentPortal] Erreur chargement RPC get_parent_children_and_schools:', err);
       showToast(err.message || 'Erreur lors du chargement de vos enfants rattachés.', 'warning');
+      setChildrenList([]);
+      setSelectedChildId('');
     } finally {
       setLoading(false);
     }
@@ -219,7 +294,7 @@ export const RealParentPortal: React.FC = () => {
     return childrenList.find(c => c.student_id === selectedChildId);
   }, [childrenList, selectedChildId]);
 
-  // 2. Fetch School Calendar for Selected Child
+  // 2. Fetch School Calendar for Selected Child using RPC metadata
   const loadCalendarForChild = useCallback(async (childId: string) => {
     if (!childId) {
       setCalendarPeriods([]);
@@ -233,40 +308,29 @@ export const RealParentPortal: React.FC = () => {
     setPeriodResult(null);
     setOfficialReportCard(null);
 
+    const targetChild = childrenList.find(c => c.student_id === childId);
+    if (!targetChild || !targetChild.school_id || !targetChild.academic_year_id) {
+      setCalendarPeriods([]);
+      return;
+    }
+
     try {
-      const { data: enrollment, error: enrError } = await supabase
-        .from('student_enrollments')
-        .select(`
-          id,
-          school_id,
-          academic_year_id,
-          class_id,
-          class:classes (
-            id,
-            name,
-            education_cycle
-          )
-        `)
-        .eq('student_id', childId)
-        .eq('status', 'active')
-        .maybeSingle();
-
-      if (enrError) {
-        console.error('[RealParentPortal] Erreur student_enrollments:', enrError, { childId });
-        setCalendarPeriods([]);
-        return;
+      let educationCycle = 'primary';
+      if (targetChild.class_id) {
+        const { data: clData } = await supabase
+          .from('classes')
+          .select('education_cycle')
+          .eq('id', targetChild.class_id)
+          .maybeSingle();
+        if (clData?.education_cycle) {
+          educationCycle = clData.education_cycle;
+        }
       }
 
-      if (!enrollment || !enrollment.class) {
-        setCalendarPeriods([]);
-        return;
-      }
-
-      const cl = enrollment.class as any;
       const calParams = buildGetSchoolCalendarParams(
-        enrollment.school_id,
-        enrollment.academic_year_id,
-        cl.education_cycle
+        targetChild.school_id,
+        targetChild.academic_year_id,
+        educationCycle
       );
 
       if (!calParams) {
@@ -292,7 +356,7 @@ export const RealParentPortal: React.FC = () => {
       console.error('[RealParentPortal] Erreur chargement calendrier:', err);
       setCalendarPeriods([]);
     }
-  }, [showToast]);
+  }, [childrenList, showToast]);
 
   useEffect(() => {
     if (selectedChildId) {
@@ -537,7 +601,8 @@ export const RealParentPortal: React.FC = () => {
                     <div className="grid md:grid-cols-2 gap-6">
                       {childrenList.map((ch) => {
                         const isSelected = ch.student_id === selectedChildId;
-                        const childInitials = `${ch.first_name.charAt(0)}${ch.last_name.charAt(0)}`.toUpperCase();
+                        const nameParts = (ch.display_name || ch.student_full_name || 'Élève').trim().split(' ');
+                        const childInitials = (nameParts[0].charAt(0) + (nameParts[1]?.charAt(0) || '')).toUpperCase();
                         return (
                           <div
                             key={ch.student_id}
@@ -553,7 +618,7 @@ export const RealParentPortal: React.FC = () => {
                                   </div>
                                   <div>
                                     <h4 className="font-extrabold text-base text-slate-900">
-                                      {ch.first_name} {ch.last_name}
+                                      {ch.display_name}
                                     </h4>
                                     <p className="text-xs text-slate-500 font-medium">
                                       {ch.class_name || 'Non affecté'} • <span className="font-mono">{ch.student_number}</span>
@@ -600,7 +665,7 @@ export const RealParentPortal: React.FC = () => {
                               }`}
                             >
                               <Award className="w-4 h-4 text-amber-400" />
-                              <span>Consulter bulletins & résultats de {ch.first_name}</span>
+                              <span>Consulter bulletins & résultats de {ch.display_name}</span>
                             </button>
                           </div>
                         );
@@ -662,7 +727,8 @@ export const RealParentPortal: React.FC = () => {
                     <div className="grid md:grid-cols-2 gap-6">
                       {childrenList.map((ch) => {
                         const isSelected = ch.student_id === selectedChildId;
-                        const childInitials = `${ch.first_name.charAt(0)}${ch.last_name.charAt(0)}`.toUpperCase();
+                        const nameParts = (ch.display_name || ch.student_full_name || 'Élève').trim().split(' ');
+                        const childInitials = (nameParts[0].charAt(0) + (nameParts[1]?.charAt(0) || '')).toUpperCase();
                         return (
                           <div
                             key={ch.student_id}
@@ -677,7 +743,7 @@ export const RealParentPortal: React.FC = () => {
                                 {childInitials}
                               </div>
                               <div>
-                                <h3 className="text-lg font-extrabold">{ch.first_name} {ch.last_name}</h3>
+                                <h3 className="text-lg font-extrabold">{ch.display_name}</h3>
                                 <p className={`text-xs ${isSelected ? 'text-slate-300' : 'text-slate-500'}`}>
                                   Matricule : <span className="font-mono font-bold text-amber-400">{ch.student_number}</span>
                                 </p>
@@ -708,7 +774,7 @@ export const RealParentPortal: React.FC = () => {
                                   : 'bg-slate-200 hover:bg-slate-300 text-slate-900'
                               }`}
                             >
-                              {isSelected ? 'Enfant actuellement sélectionné' : `Sélectionner ${ch.first_name}`}
+                              {isSelected ? 'Enfant actuellement sélectionné' : `Sélectionner ${ch.display_name}`}
                             </button>
                           </div>
                         );
@@ -720,13 +786,22 @@ export const RealParentPortal: React.FC = () => {
 
               {/* TAB 4: RÉSULTATS ET BULLETINS (PHASE 2F.3C) */}
               {activeTab === 'resultats' && (
+                activeChild && activeChild.can_view_academic === false ? (
+                  <div className="p-12 text-center bg-white rounded-3xl border border-rose-200 space-y-3">
+                    <AlertCircle className="w-12 h-12 text-rose-500 mx-auto" />
+                    <h3 className="text-base font-bold text-slate-900">Accès aux résultats restreint</h3>
+                    <p className="text-xs text-slate-500 max-w-md mx-auto">
+                      Vous ne disposez pas des autorisations nécessaires pour consulter les résultats scolaires de cet élève.
+                    </p>
+                  </div>
+                ) : (
                 <div className="space-y-6 animate-fade-in">
                   {/* Period Selector Header */}
                   <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                     <div>
                       <h2 className="text-xl font-extrabold text-slate-900">Bulletins & Résultats Scolaires</h2>
                       <p className="text-xs text-slate-500 mt-1">
-                        Évaluations périodiques et bulletin certifié conforme de {activeChild?.first_name}.
+                        Évaluations périodiques et bulletin certifié conforme de {activeChild?.display_name || activeChild?.first_name}.
                       </p>
                     </div>
 
@@ -758,7 +833,7 @@ export const RealParentPortal: React.FC = () => {
                         <div className="space-y-1">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-xs font-black text-amber-400 uppercase tracking-wider">
-                              Bulletin Officiel Publié pour {activeChild.first_name}
+                              Bulletin Officiel Publié pour {activeChild.display_name || activeChild.first_name}
                             </span>
                             <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full text-[10px] font-bold flex items-center gap-1">
                               <ShieldCheck className="w-3 h-3" />
@@ -937,28 +1012,59 @@ export const RealParentPortal: React.FC = () => {
                     </div>
                   )}
                 </div>
+                )
               )}
 
               {/* TAB 7: PAIEMENTS ET FINANCE */}
               {activeTab === 'paiements' && selectedChildId && (
-                <div className="animate-fade-in">
-                  <ParentFinanceModule studentId={selectedChildId} />
-                </div>
+                activeChild && activeChild.can_view_finances === false ? (
+                  <div className="p-12 text-center bg-white rounded-3xl border border-rose-200 space-y-3">
+                    <AlertCircle className="w-12 h-12 text-rose-500 mx-auto" />
+                    <h3 className="text-base font-bold text-slate-900">Accès à la finance restreint</h3>
+                    <p className="text-xs text-slate-500 max-w-md mx-auto">
+                      Vous ne disposez pas des autorisations nécessaires pour consulter la finance de cet élève.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="animate-fade-in">
+                    <ParentFinanceModule studentId={selectedChildId} />
+                  </div>
+                )
               )}
 
               {/* PLACEHOLDER TABS FOR FUTURE RPC INTEGRATION */}
               {/* TAB 3: PRÉSENCES & ASSIDUITÉ RÉELLES */}
               {activeTab === 'presences' && selectedChildId && (
-                <div className="animate-fade-in">
-                  <ParentAttendanceModule studentId={selectedChildId} />
-                </div>
+                activeChild && activeChild.can_view_attendance === false ? (
+                  <div className="p-12 text-center bg-white rounded-3xl border border-rose-200 space-y-3">
+                    <AlertCircle className="w-12 h-12 text-rose-500 mx-auto" />
+                    <h3 className="text-base font-bold text-slate-900">Accès aux présences restreint</h3>
+                    <p className="text-xs text-slate-500 max-w-md mx-auto">
+                      Vous ne disposez pas des autorisations nécessaires pour consulter les présences de cet élève.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="animate-fade-in">
+                    <ParentAttendanceModule studentId={selectedChildId} />
+                  </div>
+                )
               )}
 
               {/* TAB 5: DEVOIRS & CAHIER DE TEXTE RÉELS */}
               {activeTab === 'devoirs' && selectedChildId && (
-                <div className="animate-fade-in">
-                  <ParentHomeworkModule studentId={selectedChildId} />
-                </div>
+                activeChild && activeChild.can_view_homework === false ? (
+                  <div className="p-12 text-center bg-white rounded-3xl border border-rose-200 space-y-3">
+                    <AlertCircle className="w-12 h-12 text-rose-500 mx-auto" />
+                    <h3 className="text-base font-bold text-slate-900">Accès aux devoirs restreint</h3>
+                    <p className="text-xs text-slate-500 max-w-md mx-auto">
+                      Vous ne disposez pas des autorisations nécessaires pour consulter les devoirs de cet élève.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="animate-fade-in">
+                    <ParentHomeworkModule studentId={selectedChildId} />
+                  </div>
+                )
               )}
 
               {/* TAB 6: EMPLOI DU TEMPS RÉEL */}
@@ -974,8 +1080,9 @@ export const RealParentPortal: React.FC = () => {
                   selectedChildId={selectedChildId || undefined}
                   childrenList={childrenList.map(ch => ({
                     id: ch.student_id,
-                    first_name: ch.first_name,
-                    last_name: ch.last_name,
+                    display_name: ch.display_name,
+                    first_name: ch.first_name || ch.display_name,
+                    last_name: ch.last_name || '',
                     class_name: ch.class_name
                   }))}
                   onSelectChildId={(childId) => setSelectedChildId(childId)}
