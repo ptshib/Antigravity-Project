@@ -1,8 +1,7 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRealAuth } from '../../contexts/RealAuthContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { supabase } from '../../lib/supabase';
-import { Logo } from '../../components/common/Logo';
 import { Modal } from '../../components/common/Modal';
 import {
   Calendar,
@@ -10,11 +9,9 @@ import {
   BookOpen,
   UserCheck,
   GraduationCap,
-  Settings,
   Plus,
   CheckCircle2,
   Clock,
-  Activity,
   Upload,
   Download,
   LogOut,
@@ -27,9 +24,7 @@ import {
   CalendarCheck,
   RotateCcw,
   FileText,
-  FileCheck,
   XCircle,
-  Award,
   Mail,
   Send,
   UserPlus,
@@ -37,11 +32,10 @@ import {
   Lock,
   Unlock,
   CalendarDays,
-  Sliders,
-  DollarSign,
   Eye,
   Edit3,
-  Info
+  Info,
+  Menu
 } from 'lucide-react';
 import { AdminGradesModule } from '../../components/admin/AdminGradesModule';
 import { ClassSubjectCoefficientsModule } from '../../components/admin/ClassSubjectCoefficientsModule';
@@ -51,6 +45,7 @@ import { StudentDossierModal } from '../../components/modals/StudentDossierModal
 import { TeacherDossierModal } from '../../components/modals/TeacherDossierModal';
 import { SchoolTimetableManagement } from '../../components/admin/SchoolTimetableManagement';
 import { AdminSchoolDocumentsModule } from '../../components/admin/AdminSchoolDocumentsModule';
+import { AdminPortalSidebar } from '../../components/admin/portal/AdminPortalSidebar';
 
 interface SubjectRow {
   id: string;
@@ -306,69 +301,13 @@ export const RealSchoolAdminPortal: React.FC = () => {
   const [activeTab, setActiveTab] = useState<SchoolAdminTab>(() =>
     profile?.role === 'finance_agent' ? 'finance' : 'vue_densemble'
   );
+  const [isOpenMobile, setIsOpenMobile] = useState<boolean>(false);
 
   useEffect(() => {
     if (isFinanceAgent && activeTab !== 'finance') {
       setActiveTab('finance');
     }
   }, [isFinanceAgent, activeTab]);
-
-  // Horizontal Navigation Scroll Refs & Indicators
-  const navRef = useRef<HTMLElement | null>(null);
-  const activeTabRef = useRef<HTMLButtonElement | null>(null);
-  const [canScrollLeft, setCanScrollLeft] = useState(false);
-  const [canScrollRight, setCanScrollRight] = useState(false);
-
-  const updateScrollIndicators = useCallback(() => {
-    const container = navRef.current;
-    if (container) {
-      const { scrollLeft, scrollWidth, clientWidth } = container;
-      setCanScrollLeft(scrollLeft > 4);
-      setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 4);
-    }
-  }, []);
-
-  useEffect(() => {
-    const container = navRef.current;
-    if (container) {
-      updateScrollIndicators();
-      container.addEventListener('scroll', updateScrollIndicators, { passive: true });
-      window.addEventListener('resize', updateScrollIndicators);
-      return () => {
-        container.removeEventListener('scroll', updateScrollIndicators);
-        window.removeEventListener('resize', updateScrollIndicators);
-      };
-    }
-  }, [updateScrollIndicators]);
-
-  // Auto-scroll active tab into visible area
-  useEffect(() => {
-    const container = navRef.current;
-    const activeEl = activeTabRef.current;
-    if (container && activeEl) {
-      const containerRect = container.getBoundingClientRect();
-      const activeRect = activeEl.getBoundingClientRect();
-
-      if (activeRect.left < containerRect.left) {
-        container.scrollTo({
-          left: container.scrollLeft + (activeRect.left - containerRect.left) - 16,
-          behavior: 'smooth'
-        });
-      } else if (activeRect.right > containerRect.right) {
-        container.scrollTo({
-          left: container.scrollLeft + (activeRect.right - containerRect.right) + 16,
-          behavior: 'smooth'
-        });
-      }
-    }
-    updateScrollIndicators();
-  }, [activeTab, updateScrollIndicators]);
-
-  const handleNavWheel = (e: React.WheelEvent<HTMLElement>) => {
-    if (navRef.current && e.deltaY !== 0) {
-      navRef.current.scrollLeft += e.deltaY;
-    }
-  };
 
   const [loading, setLoading] = useState<boolean>(true);
   const [adminAssessmentsCount, setAdminAssessmentsCount] = useState<number>(0);
@@ -2307,104 +2246,131 @@ export const RealSchoolAdminPortal: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex flex-col justify-between selection:bg-amber-500 selection:text-white">
-      {/* Header Bar */}
-      <header className="bg-slate-900 border-b border-slate-800 px-4 sm:px-6 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-lg">
-        <div className="flex items-center gap-3">
-          <Logo />
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-black text-amber-400 uppercase tracking-wider">{school?.name}</span>
-              <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full text-[10px] font-bold">
-                {school?.status === 'active' ? 'Opérationnel' : 'Archivé/Suspendu'}
-              </span>
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col lg:flex-row antialiased selection:bg-blue-600 selection:text-white">
+      {/* Sidebar Vertical (Demo aesthetic navy theme) */}
+      <AdminPortalSidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        isOpenMobile={isOpenMobile}
+        onCloseMobile={() => setIsOpenMobile(false)}
+        isFinanceAgent={isFinanceAgent}
+        schoolName={school?.name}
+        schoolStatus={school?.status}
+        schoolSlug={school?.slug}
+        adminName={profile ? `${profile.first_name || ''} ${profile.last_name || ''}`.trim() : undefined}
+        adminRole={isFinanceAgent ? 'Agent financier' : 'Administrateur d\'Établissement'}
+        onSignOut={signOutReal}
+        counts={{
+          academicYears: academicYears.length,
+          schoolTerms: schoolTerms.length,
+          subjects: subjects.length,
+          classes: classes.length,
+          teachers: teachers.length,
+          parents: parents.length,
+          students: students.length,
+          attendanceSessions: attendanceSessions.length,
+          homework: adminHomeworkList.length,
+          assessments: adminAssessmentsCount,
+          assignments: assignments.length,
+          importJobs: importJobs.length
+        }}
+      />
+
+      {/* Main Area Shell */}
+      <div className="flex-1 flex flex-col min-w-0 bg-slate-50 min-h-screen">
+        {/* Structured White Top Header */}
+        <header className="sticky top-0 z-30 bg-white border-b border-slate-200 px-4 sm:px-6 py-3.5 flex items-center justify-between shadow-xs">
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              type="button"
+              onClick={() => setIsOpenMobile(true)}
+              className="lg:hidden p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
+              aria-label="Ouvrir le menu"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h1 className="text-base sm:text-lg font-extrabold text-slate-900 truncate">
+                  {school?.name || 'Portail Administrateur'}
+                </h1>
+                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-full text-[10px] font-extrabold shrink-0">
+                  {school?.status === 'active' ? 'Opérationnel' : 'Archivé'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 font-medium truncate">
+                Console d'Administration Établissement — ID : <span className="font-mono">{school?.slug}</span>
+              </p>
             </div>
-            <p className="text-[11px] text-slate-400 font-mono">ID École : {school?.slug}</p>
           </div>
-        </div>
 
-        <div className="flex items-center gap-3">
-          <div className="text-right hidden sm:block">
-            <p className="text-xs font-bold text-white">{profile?.first_name} {profile?.last_name}</p>
-            <p className="text-[10px] text-slate-400">
-              {profile?.role === 'finance_agent' ? 'Agent financier' : 'Administrateur d\'Établissement'}
-            </p>
+          <div className="flex items-center gap-3">
+            <div className="text-right hidden sm:block">
+              <p className="text-xs font-bold text-slate-900">{profile?.first_name} {profile?.last_name}</p>
+              <p className="text-[10px] text-slate-500 font-medium">
+                {isFinanceAgent ? 'Agent financier' : 'Administrateur d\'Établissement'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={signOutReal}
+              className="p-2 sm:px-3 sm:py-2 bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-700 rounded-xl border border-slate-200 text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer"
+              title="Se déconnecter"
+            >
+              <LogOut className="w-4 h-4" />
+              <span className="hidden sm:inline">Déconnexion</span>
+            </button>
           </div>
-          <button
-            onClick={signOutReal}
-            className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl border border-slate-700 transition-colors cursor-pointer"
-            title="Se déconnecter"
-          >
-            <LogOut className="w-5 h-5" />
-          </button>
-        </div>
-      </header>
+        </header>
 
-      {/* Navigation Tabs */}
-      <div className="relative bg-slate-900/80 border-b border-slate-800">
-        {canScrollLeft && (
-          <div className="absolute left-0 top-0 bottom-0 w-10 bg-gradient-to-r from-slate-900 via-slate-900/80 to-transparent pointer-events-none flex items-center justify-start pl-2 z-10 transition-opacity duration-300">
-            <span className="w-1.5 h-1.5 rounded-full bg-slate-400/60" />
+        {/* Main Content Area */}
+        <main className="flex-1 max-w-[1600px] w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-8">
+          {/* Page Title & Subtitle Banner */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pb-2 border-b border-slate-200">
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+                {activeTab === 'vue_densemble'
+                  ? 'Tableau de bord'
+                  : activeTab === 'finance'
+                  ? 'Finance & Frais Scolaires'
+                  : activeTab === 'annees_scolaires'
+                  ? 'Gestion des Années Scolaires'
+                  : activeTab === 'trimestres'
+                  ? 'Calendrier Scolaire & Découpage RDC'
+                  : activeTab === 'matieres'
+                  ? 'Répertoire des Matières'
+                  : activeTab === 'coefficients'
+                  ? 'Coefficients des Matières'
+                  : activeTab === 'classes'
+                  ? 'Gestion des Classes'
+                  : activeTab === 'enseignants'
+                  ? 'Corps Enseignant'
+                  : activeTab === 'parents'
+                  ? 'Répertoire des Parents'
+                  : activeTab === 'eleves'
+                  ? 'Répertoire des Élèves'
+                  : activeTab === 'presences'
+                  ? 'Suivi des Présences'
+                  : activeTab === 'devoirs'
+                  ? 'Supervision des Devoirs'
+                  : activeTab === 'emploi_du_temps'
+                  ? 'Emplois du Temps'
+                  : activeTab === 'notes'
+                  ? 'Notes & Évaluations'
+                  : activeTab === 'affectations'
+                  ? 'Affectations des Enseignants'
+                  : activeTab === 'importations'
+                  ? 'Importations de Données'
+                  : activeTab === 'documents'
+                  ? 'Documents Scolaires Officiels'
+                  : 'Paramètres de l’Établissement'}
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-500 font-medium mt-0.5">
+                {school?.name || 'Établissement'}
+                {currentYearObj ? ` — Année scolaire ${currentYearObj.name}` : ''}
+              </p>
+            </div>
           </div>
-        )}
-
-        <nav
-          ref={navRef}
-          onWheel={handleNavWheel}
-          className="px-4 sm:px-6 py-2 overflow-x-auto scrollbar-none flex items-center gap-1 text-xs scroll-smooth"
-          aria-label="Navigation principale administrateur"
-        >
-          {[
-            { id: 'vue_densemble', label: 'Vue d’ensemble', icon: Activity },
-            { id: 'finance', label: 'Finance & Frais', icon: DollarSign },
-            { id: 'annees_scolaires', label: `Années (${academicYears.length})`, icon: Calendar },
-            { id: 'trimestres', label: `Calendrier Scolaire (${schoolTerms.length})`, icon: Clock },
-            { id: 'matieres', label: `Matières (${subjects.length})`, icon: BookMarked },
-            { id: 'coefficients', label: 'Coefficients', icon: Sliders },
-            { id: 'classes', label: `Classes (${classes.length})`, icon: BookOpen },
-            { id: 'enseignants', label: `Enseignants (${teachers.length})`, icon: UserCheck },
-            { id: 'parents', label: `Parents (${parents.length})`, icon: Users },
-            { id: 'eleves', label: `Élèves (${students.length})`, icon: GraduationCap },
-            { id: 'presences', label: `Présences (${attendanceSessions.length})`, icon: CalendarCheck },
-            { id: 'devoirs', label: `Devoirs (${adminHomeworkList.length})`, icon: FileText },
-            { id: 'emploi_du_temps', label: 'Emploi du temps', icon: CalendarDays },
-            { id: 'notes', label: `Notes (${adminAssessmentsCount})`, icon: Award },
-            { id: 'affectations', label: `Affectations (${assignments.length})`, icon: Layers },
-            { id: 'importations', label: `Importations (${importJobs.length})`, icon: Upload },
-            { id: 'documents', label: 'Documents scolaires', icon: FileCheck },
-            { id: 'parametres', label: 'Paramètres', icon: Settings }
-          ]
-            .filter(tab => !isFinanceAgent || tab.id === 'finance')
-            .map(tab => {
-              const IconComp = tab.icon;
-              const isActive = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  ref={isActive ? activeTabRef : null}
-                  onClick={() => setActiveTab(tab.id as SchoolAdminTab)}
-                  className={`px-3.5 py-2 rounded-xl font-bold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap flex-shrink-0 ${
-                    isActive
-                      ? 'bg-amber-500 text-slate-950 font-black shadow-md'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-                  }`}
-                >
-                  <IconComp className="w-3.5 h-3.5" />
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
-        </nav>
-
-        {canScrollRight && (
-          <div className="absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-slate-900 via-slate-900/80 to-transparent pointer-events-none flex items-center justify-end pr-2 z-10 transition-opacity duration-300">
-            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shadow-sm shadow-amber-500/50" title="Plus d'onglets disponibles" />
-          </div>
-        )}
-      </div>
-
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-8">
         {/* TAB FINANCE (Exclusif finance_agent ou onglet actif) */}
         {(isFinanceAgent || activeTab === 'finance') && school?.id && (
           <FinanceDashboardModule schoolId={school.id} />
@@ -2463,30 +2429,50 @@ export const RealSchoolAdminPortal: React.FC = () => {
               </div>
             </div>
 
-            {/* Metrics Counters */}
-            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="p-5 bg-slate-900 rounded-3xl border border-slate-800 space-y-1">
-                <p className="text-[11px] font-bold text-slate-400 uppercase">Élèves Inscrits</p>
-                <p className="text-3xl font-black text-amber-400">{students.length}</p>
-                <p className="text-[10px] text-slate-500">Dossiers préenregistrés</p>
+            {/* Metrics Counters (Demo StatCard style) */}
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+              <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Élèves Inscrits</p>
+                  <h3 className="text-3xl font-extrabold text-slate-900 mt-1">{students.length}</h3>
+                  <p className="text-[11px] text-slate-400 mt-1">Dossiers préenregistrés</p>
+                </div>
+                <div className="p-3.5 bg-blue-50 text-blue-600 rounded-2xl border border-blue-100 shrink-0">
+                  <GraduationCap className="w-6 h-6" />
+                </div>
               </div>
 
-              <div className="p-5 bg-slate-900 rounded-3xl border border-slate-800 space-y-1">
-                <p className="text-[11px] font-bold text-slate-400 uppercase">Personnel Enseignant</p>
-                <p className="text-3xl font-black text-white">{teachers.length}</p>
-                <p className="text-[10px] text-slate-500">Professeurs dans le registre</p>
+              <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Corps Enseignant</p>
+                  <h3 className="text-3xl font-extrabold text-slate-900 mt-1">{teachers.length}</h3>
+                  <p className="text-[11px] text-slate-400 mt-1">Professeurs au registre</p>
+                </div>
+                <div className="p-3.5 bg-emerald-50 text-emerald-600 rounded-2xl border border-emerald-100 shrink-0">
+                  <UserCheck className="w-6 h-6" />
+                </div>
               </div>
 
-              <div className="p-5 bg-slate-900 rounded-3xl border border-slate-800 space-y-1">
-                <p className="text-[11px] font-bold text-slate-400 uppercase">Classes Opérationnelles</p>
-                <p className="text-3xl font-black text-white">{classes.length}</p>
-                <p className="text-[10px] text-slate-500">Salles de cours actives</p>
+              <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Classes Opérationnelles</p>
+                  <h3 className="text-3xl font-extrabold text-slate-900 mt-1">{classes.length}</h3>
+                  <p className="text-[11px] text-slate-400 mt-1">Salles de cours actives</p>
+                </div>
+                <div className="p-3.5 bg-amber-50 text-amber-600 rounded-2xl border border-amber-100 shrink-0">
+                  <BookOpen className="w-6 h-6" />
+                </div>
               </div>
 
-              <div className="p-5 bg-slate-900 rounded-3xl border border-slate-800 space-y-1">
-                <p className="text-[11px] font-bold text-slate-400 uppercase">Année Académique</p>
-                <p className="text-3xl font-black text-emerald-400">{currentYearObj ? currentYearObj.name : 'Non définie'}</p>
-                <p className="text-[10px] text-slate-500">{subjects.length} Matière(s) configurée(s)</p>
+              <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Année Académique</p>
+                  <h3 className="text-2xl font-extrabold text-emerald-600 mt-1 truncate">{currentYearObj ? currentYearObj.name : 'Non définie'}</h3>
+                  <p className="text-[11px] text-slate-400 mt-1">{subjects.length} Matière(s) configurée(s)</p>
+                </div>
+                <div className="p-3.5 bg-purple-50 text-purple-600 rounded-2xl border border-purple-100 shrink-0">
+                  <Calendar className="w-6 h-6" />
+                </div>
               </div>
             </div>
           </div>
@@ -7053,9 +7039,10 @@ export const RealSchoolAdminPortal: React.FC = () => {
       />
 
       {/* Footer */}
-      <footer className="p-4 sm:p-6 border-t border-slate-900 text-center text-xs text-slate-500">
+      <footer className="p-4 sm:p-6 border-t border-slate-200 bg-white text-center text-xs text-slate-500 mt-auto">
         ÉcoleConnect — Console d'Administration Établissement ({school?.name})
       </footer>
     </div>
+  </div>
   );
 };
