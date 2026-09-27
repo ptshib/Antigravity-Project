@@ -70,9 +70,14 @@ export const AcceptSchoolInvitationPage: React.FC<AcceptSchoolInvitationPageProp
     }
   }, []);
 
-  // 2. Évaluation de l'état UI en fonction de Auth et de l'enveloppe d'invitation
+  // 2. Évaluation de l'état UI et prévisualisation non-mutante de l'invitation
   useEffect(() => {
     if (authLoading) return;
+
+    // Ne pas ré-évaluer la prévisualisation si l'état est déjà soumis, confirmé, réussi ou terminal
+    if (['CONFIRM_ACCEPTANCE', 'SUBMITTING', 'SUCCESS', 'EXPIRED', 'ALREADY_ACCEPTED', 'REVOKED', 'WRONG_ACCOUNT', 'NETWORK_ERROR'].includes(uiState)) {
+      return;
+    }
 
     const token = schoolInvitationService.getValidInvitationToken();
 
@@ -87,10 +92,74 @@ export const AcceptSchoolInvitationPage: React.FC<AcceptSchoolInvitationPageProp
       return;
     }
 
-    // L'utilisateur est connecté et le token est valide
-    if (uiState === 'INITIALIZING' || uiState === 'LOGIN_REQUIRED') {
-      setUiState('CONFIRM_ACCEPTANCE');
-    }
+    let isMounted = true;
+
+    const checkPreview = async () => {
+      try {
+        const preview = await schoolInvitationService.getInvitationPreview(token);
+        if (!isMounted) return;
+
+        switch (preview.status) {
+          case 'PENDING':
+            if (preview.school_name || preview.student_count !== undefined) {
+              setSuccessDetails({
+                schoolName: preview.school_name || 'Établissement scolaire',
+                studentsLinked: preview.student_count || 0
+              });
+            }
+            setUiState('CONFIRM_ACCEPTANCE');
+            break;
+
+          case 'ALREADY_ACCEPTED':
+            schoolInvitationService.clearInvitationEnvelope();
+            setUiState('ALREADY_ACCEPTED');
+            setErrorMessage("Cette invitation a déjà été acceptée. Vous pouvez accéder à cet établissement depuis votre portail Parent.");
+            break;
+
+          case 'EXPIRED':
+            schoolInvitationService.clearInvitationEnvelope();
+            setUiState('EXPIRED');
+            setErrorMessage("Cette invitation a expiré. Demandez une nouvelle invitation à l’établissement.");
+            break;
+
+          case 'REVOKED':
+            schoolInvitationService.clearInvitationEnvelope();
+            setUiState('REVOKED');
+            setErrorMessage("Cette invitation a été révoquée par l’établissement.");
+            break;
+
+          case 'WRONG_ACCOUNT':
+            setUiState('WRONG_ACCOUNT');
+            setErrorMessage("Cette invitation est destinée à un autre compte. Déconnectez-vous puis connectez-vous avec l’adresse ayant reçu l’invitation.");
+            break;
+
+          case 'INVALID':
+          default:
+            schoolInvitationService.clearInvitationEnvelope();
+            setUiState('EXPIRED');
+            setErrorMessage("Ce lien d’invitation est invalide ou n’est plus disponible.");
+            break;
+        }
+      } catch (err: any) {
+        if (!isMounted) return;
+        if (err instanceof InvitationError && err.code === 'NETWORK_ERROR') {
+          setUiState('NETWORK_ERROR');
+          setErrorMessage("Une erreur de connexion réseau est survenue. Veuillez vérifier votre réseau.");
+        } else if (err instanceof InvitationError && err.code === 'NOT_AUTHENTICATED') {
+          setUiState('LOGIN_REQUIRED');
+        } else {
+          schoolInvitationService.clearInvitationEnvelope();
+          setUiState('EXPIRED');
+          setErrorMessage("Ce lien d’invitation est invalide ou n’est plus disponible.");
+        }
+      }
+    };
+
+    checkPreview();
+
+    return () => {
+      isMounted = false;
+    };
   }, [user, authLoading, uiState]);
 
   // 3. Action : Accepter l'invitation via la RPC sécurisée
@@ -271,7 +340,7 @@ export const AcceptSchoolInvitationPage: React.FC<AcceptSchoolInvitationPageProp
               {user?.email && (
                 <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl text-xs flex items-center justify-between">
                   <span className="text-slate-400">Compte connecté :</span>
-                  <code className="text-amber-400 font-bold">{user.email}</code>
+                  <code className="text-amber-400 font-bold">{schoolInvitationService.maskEmail(user.email)}</code>
                 </div>
               )}
 
@@ -378,13 +447,24 @@ export const AcceptSchoolInvitationPage: React.FC<AcceptSchoolInvitationPageProp
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={() => navigate('/connexion')}
-                className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer"
-              >
-                <span>Retour à la connexion</span>
-              </button>
+              {uiState === 'ALREADY_ACCEPTED' ? (
+                <button
+                  type="button"
+                  onClick={() => navigate('/app/parent')}
+                  className="w-full py-3.5 px-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-950/50 cursor-pointer flex items-center justify-center gap-2 transition-all"
+                >
+                  <span>Accéder à mon Espace Parent</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => navigate('/connexion')}
+                  className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                >
+                  <span>Retour à la connexion</span>
+                </button>
+              )}
             </div>
           )}
 

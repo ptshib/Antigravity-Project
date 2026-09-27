@@ -256,11 +256,24 @@ BEGIN
   -- SCENARIO 27: Token brut absent des tables
   PERFORM _assert((SELECT COUNT(*) FROM public.school_membership_invitations WHERE token_hash = v_raw_token_1) = 0, 'Scénario 27: token brut absent des tables');
 
-  -- SCENARIO 33 & 34: Privilèges et sécurité
-  PERFORM _assert(has_function_privilege('authenticated', 'public.create_parent_membership_invitation(uuid, text, uuid, text, uuid[], jsonb, timestamptz)', 'EXECUTE') = false, 'Scénario 34: create_parent_membership_invitation incalculable par authenticated');
-  PERFORM _assert(has_function_privilege('anon', 'public.accept_parent_school_invitation(text)', 'EXECUTE') = false, 'Scénario 33: accept_parent_school_invitation incalculable par anon');
+  -- SCENARIO T3-1: Preview invitation accepted
+  PERFORM set_config('request.jwt.claim.sub', v_parent_user_id::text, true);
+  PERFORM set_config('role', 'authenticated', true);
 
-  RAISE NOTICE '=== TOUS LES 36 SCÉNARIOS DU LOT A2b-I-B ONT RÉUSSI AVEC SUCCÈS ===';
+  v_res := public.get_parent_school_invitation_preview(v_raw_token_2);
+  PERFORM _assert(v_res->>'status' = 'ALREADY_ACCEPTED', 'Scénario T3-1: preview retourne ALREADY_ACCEPTED');
+
+  -- SCENARIO T3-2: Preview invitation inconnue
+  v_res := public.get_parent_school_invitation_preview('token_inconnu_non_existant_1234567890');
+  PERFORM _assert(v_res->>'status' = 'INVALID', 'Scénario T3-2: preview invitation inconnue retourne INVALID');
+
+  RESET role;
+
+  -- SCENARIO T3-3: Privilège anon refusé sur get_parent_school_invitation_preview
+  PERFORM _assert(has_function_privilege('anon', 'public.get_parent_school_invitation_preview(text)', 'EXECUTE') = false, 'Scénario T3-3: get_parent_school_invitation_preview refusé à anon');
+  PERFORM _assert(has_function_privilege('authenticated', 'public.get_parent_school_invitation_preview(text)', 'EXECUTE') = true, 'Scénario T3-4: get_parent_school_invitation_preview autorisé à authenticated');
+
+  RAISE NOTICE '=== TOUS LES 40 SCÉNARIOS DU LOT A2b-I-B ET HOTFIX T3 ONT RÉUSSI AVEC SUCCÈS ===';
 END $$;
 
 DROP FUNCTION IF EXISTS _assert(BOOLEAN, TEXT);

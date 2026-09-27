@@ -53,6 +53,21 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
       search: '',
       pathname: '/auth/accept-school-invitation'
     };
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'get_parent_school_invitation_preview') {
+        return {
+          data: { status: 'PENDING', school_name: 'École Test', student_count: 1 },
+          error: null
+        } as any;
+      }
+      if (fnName === 'accept_parent_school_invitation') {
+        return {
+          data: { success: true, school_id: 's-1', school_name: 'École Test', students_linked: 1 },
+          error: null
+        } as any;
+      }
+      return { data: null, error: null } as any;
+    });
   });
 
   afterEach(() => {
@@ -93,10 +108,12 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
     const logSpy = vi.spyOn(console, 'log');
     const errSpy = vi.spyOn(console, 'error');
 
-    vi.mocked(supabase.rpc).mockResolvedValueOnce({
-      data: null,
-      error: { message: 'REJET ACCÈS : Authentification requise.' }
-    } as any);
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'accept_parent_school_invitation') {
+        return { data: null, error: { message: 'REJET ACCÈS : Authentification requise.' } } as any;
+      }
+      return { data: null, error: null } as any;
+    });
 
     try {
       await schoolInvitationService.acceptParentSchoolInvitation(SAMPLE_TOKEN);
@@ -167,19 +184,27 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
     schoolInvitationService.saveInvitationToken(SAMPLE_TOKEN);
     mockUser = { id: 'parent-123', email: 'parent@example.com' };
 
-    vi.mocked(supabase.rpc).mockResolvedValueOnce({
-      data: {
-        success: true,
-        school_id: 'school-456',
-        school_name: 'Complexe Scolaire Pilote',
-        students_linked: 2
-      },
-      error: null
-    } as any);
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'get_parent_school_invitation_preview') {
+        return { data: { status: 'PENDING', school_name: 'Complexe Scolaire Pilote', student_count: 2 }, error: null } as any;
+      }
+      if (fnName === 'accept_parent_school_invitation') {
+        return {
+          data: {
+            success: true,
+            school_id: 'school-456',
+            school_name: 'Complexe Scolaire Pilote',
+            students_linked: 2
+          },
+          error: null
+        } as any;
+      }
+      return { data: null, error: null } as any;
+    });
 
     render(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
 
-    const acceptBtn = screen.getByRole('button', { name: /Rejoindre l'établissement/i });
+    const acceptBtn = await screen.findByRole('button', { name: /Rejoindre l'établissement/i });
     fireEvent.click(acceptBtn);
 
     await waitFor(() => {
@@ -194,19 +219,27 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
     schoolInvitationService.saveInvitationToken(SAMPLE_TOKEN);
     mockUser = { id: 'parent-123', email: 'parent@example.com' };
 
-    vi.mocked(supabase.rpc).mockResolvedValueOnce({
-      data: {
-        success: true,
-        school_id: 'school-456',
-        school_name: 'Complexe Scolaire Pilote',
-        students_linked: 1
-      },
-      error: null
-    } as any);
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'get_parent_school_invitation_preview') {
+        return { data: { status: 'PENDING', school_name: 'Complexe Scolaire Pilote', student_count: 1 }, error: null } as any;
+      }
+      if (fnName === 'accept_parent_school_invitation') {
+        return {
+          data: {
+            success: true,
+            school_id: 'school-456',
+            school_name: 'Complexe Scolaire Pilote',
+            students_linked: 1
+          },
+          error: null
+        } as any;
+      }
+      return { data: null, error: null } as any;
+    });
 
     render(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
 
-    const acceptBtn = screen.getByRole('button', { name: /Rejoindre l'établissement/i });
+    const acceptBtn = await screen.findByRole('button', { name: /Rejoindre l'établissement/i });
     fireEvent.click(acceptBtn);
 
     await waitFor(() => {
@@ -219,15 +252,14 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
     schoolInvitationService.saveInvitationToken(SAMPLE_TOKEN);
     mockUser = { id: 'wrong-user-999', email: 'wrong@example.com' };
 
-    vi.mocked(supabase.rpc).mockResolvedValueOnce({
-      data: null,
-      error: { message: 'REJET ACCÈS : L’adresse email du compte connecté ne correspond pas à l’invitation.' }
-    } as any);
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'get_parent_school_invitation_preview') {
+        return { data: { status: 'WRONG_ACCOUNT' }, error: null } as any;
+      }
+      return { data: null, error: null } as any;
+    });
 
     render(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
-
-    const acceptBtn = screen.getByRole('button', { name: /Rejoindre l'établissement/i });
-    fireEvent.click(acceptBtn);
 
     await waitFor(() => {
       expect(screen.getByText(/Compte incorrect/i)).toBeInTheDocument();
@@ -240,15 +272,14 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
     schoolInvitationService.saveInvitationToken(SAMPLE_TOKEN);
     mockUser = { id: 'parent-123', email: 'parent@example.com' };
 
-    vi.mocked(supabase.rpc).mockResolvedValueOnce({
-      data: null,
-      error: { message: 'REJET : L’invitation a expiré.' }
-    } as any);
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'get_parent_school_invitation_preview') {
+        return { data: { status: 'EXPIRED' }, error: null } as any;
+      }
+      return { data: null, error: null } as any;
+    });
 
     render(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
-
-    const acceptBtn = screen.getByRole('button', { name: /Rejoindre l'établissement/i });
-    fireEvent.click(acceptBtn);
 
     await waitFor(() => {
       expect(screen.getByText(/Invitation expirée/i)).toBeInTheDocument();
@@ -261,15 +292,14 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
     schoolInvitationService.saveInvitationToken(SAMPLE_TOKEN);
     mockUser = { id: 'parent-123', email: 'parent@example.com' };
 
-    vi.mocked(supabase.rpc).mockResolvedValueOnce({
-      data: null,
-      error: { message: 'REJET : Cette invitation a été révoquée.' }
-    } as any);
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'get_parent_school_invitation_preview') {
+        return { data: { status: 'REVOKED' }, error: null } as any;
+      }
+      return { data: null, error: null } as any;
+    });
 
     render(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
-
-    const acceptBtn = screen.getByRole('button', { name: /Rejoindre l'établissement/i });
-    fireEvent.click(acceptBtn);
 
     await waitFor(() => {
       expect(screen.getByText(/Invitation révoquée/i)).toBeInTheDocument();
@@ -282,15 +312,14 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
     schoolInvitationService.saveInvitationToken(SAMPLE_TOKEN);
     mockUser = { id: 'parent-123', email: 'parent@example.com' };
 
-    vi.mocked(supabase.rpc).mockResolvedValueOnce({
-      data: null,
-      error: { message: 'REJET : Cette invitation a déjà été acceptée.' }
-    } as any);
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'get_parent_school_invitation_preview') {
+        return { data: { status: 'ALREADY_ACCEPTED' }, error: null } as any;
+      }
+      return { data: null, error: null } as any;
+    });
 
     render(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
-
-    const acceptBtn = screen.getByRole('button', { name: /Rejoindre l'établissement/i });
-    fireEvent.click(acceptBtn);
 
     await waitFor(() => {
       expect(screen.getByText(/Invitation déjà acceptée/i)).toBeInTheDocument();
@@ -303,14 +332,19 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
     schoolInvitationService.saveInvitationToken(SAMPLE_TOKEN);
     mockUser = { id: 'parent-123', email: 'parent@example.com' };
 
-    vi.mocked(supabase.rpc).mockResolvedValueOnce({
-      data: null,
-      error: { message: 'REJET ACCÈS : L’appartenance parent dans cet établissement est suspended.' }
-    } as any);
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'get_parent_school_invitation_preview') {
+        return { data: { status: 'PENDING' }, error: null } as any;
+      }
+      if (fnName === 'accept_parent_school_invitation') {
+        return { data: null, error: { message: 'REJET ACCÈS : L’appartenance parent dans cet établissement est suspended.' } } as any;
+      }
+      return { data: null, error: null } as any;
+    });
 
     render(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
 
-    const acceptBtn = screen.getByRole('button', { name: /Rejoindre l'établissement/i });
+    const acceptBtn = await screen.findByRole('button', { name: /Rejoindre l'établissement/i });
     fireEvent.click(acceptBtn);
 
     await waitFor(() => {
@@ -323,14 +357,19 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
     schoolInvitationService.saveInvitationToken(SAMPLE_TOKEN);
     mockUser = { id: 'parent-123', email: 'parent@example.com' };
 
-    vi.mocked(supabase.rpc).mockResolvedValueOnce({
-      data: null,
-      error: { message: 'REJET ACCÈS : L’appartenance parent dans cet établissement est left.' }
-    } as any);
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'get_parent_school_invitation_preview') {
+        return { data: { status: 'PENDING' }, error: null } as any;
+      }
+      if (fnName === 'accept_parent_school_invitation') {
+        return { data: null, error: { message: 'REJET ACCÈS : L’appartenance parent dans cet établissement est left.' } } as any;
+      }
+      return { data: null, error: null } as any;
+    });
 
     render(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
 
-    const acceptBtn = screen.getByRole('button', { name: /Rejoindre l'établissement/i });
+    const acceptBtn = await screen.findByRole('button', { name: /Rejoindre l'établissement/i });
     fireEvent.click(acceptBtn);
 
     await waitFor(() => {
@@ -343,14 +382,19 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
     schoolInvitationService.saveInvitationToken(SAMPLE_TOKEN);
     mockUser = { id: 'parent-123', email: 'parent@example.com' };
 
-    vi.mocked(supabase.rpc).mockResolvedValueOnce({
-      data: null,
-      error: { message: 'Failed to fetch network error' }
-    } as any);
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'get_parent_school_invitation_preview') {
+        return { data: { status: 'PENDING' }, error: null } as any;
+      }
+      if (fnName === 'accept_parent_school_invitation') {
+        return { data: null, error: { message: 'Failed to fetch network error' } } as any;
+      }
+      return { data: null, error: null } as any;
+    });
 
     render(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
 
-    const acceptBtn = screen.getByRole('button', { name: /Rejoindre l'établissement/i });
+    const acceptBtn = await screen.findByRole('button', { name: /Rejoindre l'établissement/i });
     fireEvent.click(acceptBtn);
 
     await waitFor(() => {
@@ -364,15 +408,20 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
     schoolInvitationService.saveInvitationToken(SAMPLE_TOKEN);
     mockUser = { id: 'parent-123', email: 'parent@example.com' };
 
-    vi.mocked(supabase.rpc).mockReturnValue(new Promise(() => {}) as any);
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'get_parent_school_invitation_preview') {
+        return { data: { status: 'PENDING' }, error: null } as any;
+      }
+      return new Promise(() => {}) as any;
+    });
 
     render(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
 
-    const acceptBtn = screen.getByRole('button', { name: /Rejoindre l'établissement/i });
+    const acceptBtn = await screen.findByRole('button', { name: /Rejoindre l'établissement/i });
     fireEvent.click(acceptBtn);
     fireEvent.click(acceptBtn);
 
-    expect(supabase.rpc).toHaveBeenCalledTimes(1);
+    expect(supabase.rpc).toHaveBeenCalledTimes(2); // 1 preview + 1 accept
   });
 
   // 19. prévention du double appel StrictMode
@@ -383,36 +432,40 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
     const { rerender } = render(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
     rerender(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
 
-    expect(supabase.rpc).not.toHaveBeenCalled();
+    expect(supabase.rpc).toHaveBeenCalledWith('get_parent_school_invitation_preview', expect.anything());
   });
 
   // 20. aucun school_id transmis à la RPC
   it('20. N’envoie aucun school_id dans les arguments de accept_parent_school_invitation', async () => {
-    vi.mocked(supabase.rpc).mockResolvedValueOnce({
-      data: { success: true, school_id: 's-1', school_name: 'School', students_linked: 1 },
-      error: null
-    } as any);
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'accept_parent_school_invitation') {
+        return { data: { success: true, school_id: 's-1', school_name: 'School', students_linked: 1 }, error: null } as any;
+      }
+      return { data: { status: 'PENDING' }, error: null } as any;
+    });
 
     await schoolInvitationService.acceptParentSchoolInvitation(SAMPLE_TOKEN);
 
     expect(supabase.rpc).toHaveBeenCalledWith('accept_parent_school_invitation', {
       p_token: SAMPLE_TOKEN
     });
-    const callArgs = vi.mocked(supabase.rpc).mock.calls[0][1];
+    const callArgs = vi.mocked(supabase.rpc as any).mock.calls.find((c: any) => c[0] === 'accept_parent_school_invitation')?.[1];
     expect(callArgs).not.toHaveProperty('school_id');
     expect(callArgs).not.toHaveProperty('p_school_id');
   });
 
   // 21. aucun profile_id transmis
   it('21. N’envoie aucun profile_id dans les arguments de accept_parent_school_invitation', async () => {
-    vi.mocked(supabase.rpc).mockResolvedValueOnce({
-      data: { success: true, school_id: 's-1', school_name: 'School', students_linked: 1 },
-      error: null
-    } as any);
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'accept_parent_school_invitation') {
+        return { data: { success: true, school_id: 's-1', school_name: 'School', students_linked: 1 }, error: null } as any;
+      }
+      return { data: { status: 'PENDING' }, error: null } as any;
+    });
 
     await schoolInvitationService.acceptParentSchoolInvitation(SAMPLE_TOKEN);
 
-    const callArgs = vi.mocked(supabase.rpc).mock.calls[0][1];
+    const callArgs = vi.mocked(supabase.rpc as any).mock.calls.find((c: any) => c[0] === 'accept_parent_school_invitation')?.[1];
     expect(callArgs).not.toHaveProperty('profile_id');
     expect(callArgs).not.toHaveProperty('p_profile_id');
   });
@@ -422,13 +475,19 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
     schoolInvitationService.saveInvitationToken(SAMPLE_TOKEN);
     mockUser = { id: 'parent-123', email: 'parent@example.com' };
 
-    vi.mocked(supabase.rpc).mockResolvedValueOnce({
-      data: { success: true, school_id: 's-1', school_name: 'École A', students_linked: 1 },
-      error: null
-    } as any);
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'get_parent_school_invitation_preview') {
+        return { data: { status: 'PENDING' }, error: null } as any;
+      }
+      if (fnName === 'accept_parent_school_invitation') {
+        return { data: { success: true, school_id: 's-1', school_name: 'École A', students_linked: 1 }, error: null } as any;
+      }
+      return { data: null, error: null } as any;
+    });
 
     render(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
-    fireEvent.click(screen.getByRole('button', { name: /Rejoindre l'établissement/i }));
+    const acceptBtn = await screen.findByRole('button', { name: /Rejoindre l'établissement/i });
+    fireEvent.click(acceptBtn);
 
     await waitFor(() => {
       const parentAppBtn = screen.getByRole('button', { name: /Accéder à mon Espace Parent/i });
@@ -543,18 +602,27 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
 
     const xssPayload = '<img src=x onerror=alert(1)> Établissement SÉCURISÉ';
 
-    vi.mocked(supabase.rpc).mockResolvedValueOnce({
-      data: {
-        success: true,
-        school_id: 'school-456',
-        school_name: xssPayload,
-        students_linked: 1
-      },
-      error: null
-    } as any);
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'get_parent_school_invitation_preview') {
+        return { data: { status: 'PENDING', school_name: xssPayload, student_count: 1 }, error: null } as any;
+      }
+      if (fnName === 'accept_parent_school_invitation') {
+        return {
+          data: {
+            success: true,
+            school_id: 'school-456',
+            school_name: xssPayload,
+            students_linked: 1
+          },
+          error: null
+        } as any;
+      }
+      return { data: null, error: null } as any;
+    });
 
     render(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
-    fireEvent.click(screen.getByRole('button', { name: /Rejoindre l'établissement/i }));
+    const acceptBtn = await screen.findByRole('button', { name: /Rejoindre l'établissement/i });
+    fireEvent.click(acceptBtn);
 
     await waitFor(() => {
       expect(screen.getByText(xssPayload)).toBeInTheDocument();
@@ -563,23 +631,24 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
   });
 
   // 26. accessibilité clavier et lecteurs d’écran
-  it('26. Offre un accès au clavier et des balises ARIA appropriées', () => {
+  it('26. Offre un accès au clavier et des balises ARIA appropriées', async () => {
     schoolInvitationService.saveInvitationToken(SAMPLE_TOKEN);
     mockUser = { id: 'parent-123', email: 'parent@example.com' };
 
     render(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
 
-    const acceptBtn = screen.getByRole('button', { name: /Rejoindre l'établissement/i });
+    const acceptBtn = await screen.findByRole('button', { name: /Rejoindre l'établissement/i });
     expect(acceptBtn).toBeInTheDocument();
     expect(acceptBtn).not.toBeDisabled();
   });
 
   // 27. responsive mobile, tablette et desktop
-  it('27. Contient des classes Tailwind responsive pour mobile et desktop', () => {
+  it('27. Contient des classes Tailwind responsive pour mobile et desktop', async () => {
     schoolInvitationService.saveInvitationToken(SAMPLE_TOKEN);
     mockUser = { id: 'parent-123', email: 'parent@example.com' };
 
     const { container } = render(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
+    await screen.findByRole('button', { name: /Rejoindre l'établissement/i });
     const card = container.querySelector('.max-w-md');
     expect(card).toBeInTheDocument();
   });
@@ -589,22 +658,20 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
     schoolInvitationService.saveInvitationToken(SAMPLE_TOKEN);
     mockUser = { id: 'wrong-user', email: 'wrong@example.com' };
 
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'get_parent_school_invitation_preview') {
+        return { data: { status: 'WRONG_ACCOUNT' }, error: null } as any;
+      }
+      return { data: null, error: null } as any;
+    });
+
     render(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
 
-    vi.mocked(supabase.rpc).mockResolvedValueOnce({
-      data: null,
-      error: { message: 'REJET ACCÈS : L’adresse email du compte connecté ne correspond pas à l’invitation.' }
-    } as any);
-
-    fireEvent.click(screen.getByRole('button', { name: /Rejoindre l'établissement/i }));
-
-    await waitFor(() => {
-      const switchBtn = screen.getByRole('button', { name: /Se déconnecter et changer de compte/i });
-      fireEvent.click(switchBtn);
-      expect(mockSignOutReal).toHaveBeenCalled();
-      const env = schoolInvitationService.getValidInvitationEnvelope();
-      expect(env?.account_switch_pending).toBe(true);
-    });
+    const switchBtn = await screen.findByRole('button', { name: /Se déconnecter et changer de compte/i });
+    fireEvent.click(switchBtn);
+    expect(mockSignOutReal).toHaveBeenCalled();
+    const env = schoolInvitationService.getValidInvitationEnvelope();
+    expect(env?.account_switch_pending).toBe(true);
   });
 
   // 29. conservation temporaire du token lors d’un changement vers le bon compte
@@ -751,10 +818,12 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
 
   // 44. data RPC null géré en erreur UNKNOWN_ERROR
   it('44. Convertit une réponse RPC data=null en une InvitationError de code UNKNOWN_ERROR', async () => {
-    vi.mocked(supabase.rpc).mockResolvedValueOnce({
-      data: null,
-      error: null
-    } as any);
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'accept_parent_school_invitation') {
+        return { data: null, error: null } as any;
+      }
+      return { data: null, error: null } as any;
+    });
 
     await expect(schoolInvitationService.acceptParentSchoolInvitation(SAMPLE_TOKEN)).rejects.toThrow(
       /Le serveur a renvoyé une réponse vide/i
@@ -763,10 +832,12 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
 
   // 45. code d'erreur SQL métier non reconnu géré proprement
   it('45. Gère un code SQL métier inconnu en renvoyant une erreur sécurisée', async () => {
-    vi.mocked(supabase.rpc).mockResolvedValueOnce({
-      data: null,
-      error: { message: 'CUSTOM_DB_ERR : Erreur personnalisée' }
-    } as any);
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'accept_parent_school_invitation') {
+        return { data: null, error: { message: 'CUSTOM_DB_ERR : Erreur personnalisée' } } as any;
+      }
+      return { data: null, error: null } as any;
+    });
 
     try {
       await schoolInvitationService.acceptParentSchoolInvitation(SAMPLE_TOKEN);
@@ -781,16 +852,22 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
     schoolInvitationService.saveInvitationToken(SAMPLE_TOKEN);
     mockUser = { id: 'parent-123', email: 'parent@example.com' };
 
-    vi.mocked(supabase.rpc).mockResolvedValueOnce({
-      data: null,
-      error: { message: 'REJET : Cette invitation a déjà été acceptée.' }
-    } as any);
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'get_parent_school_invitation_preview') {
+        return { data: { status: 'PENDING', school_name: 'École Test', student_count: 1 }, error: null } as any;
+      }
+      if (fnName === 'accept_parent_school_invitation') {
+        return { data: null, error: { message: 'REJET : Cette invitation a déjà été acceptée.' } } as any;
+      }
+      return { data: null, error: null } as any;
+    });
 
     render(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
-    fireEvent.click(screen.getByRole('button', { name: /Rejoindre l'établissement/i }));
+    const acceptBtn = await screen.findByRole('button', { name: /Rejoindre l'établissement/i });
+    fireEvent.click(acceptBtn);
 
     await waitFor(() => {
-      expect(screen.getByText(/Invitation déjà acceptée/i)).toBeInTheDocument();
+      expect(screen.getByText(/invitation a déjà été acceptée/i)).toBeInTheDocument();
       expect(schoolInvitationService.getValidInvitationToken()).toBeNull();
     });
   });
@@ -874,10 +951,12 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
   it('50. Empêche la journalisation brute des objets d’erreur Supabase pouvant contenir les paramètres de la RPC', async () => {
     const consoleErrSpy = vi.spyOn(console, 'error');
 
-    vi.mocked(supabase.rpc).mockResolvedValueOnce({
-      data: null,
-      error: { message: 'REJET ACCÈS : p_token invalide', details: 'rpc parameters' }
-    } as any);
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'accept_parent_school_invitation') {
+        return { data: null, error: { message: 'REJET ACCÈS : p_token invalide', details: 'rpc parameters' } } as any;
+      }
+      return { data: null, error: null } as any;
+    });
 
     try {
       await schoolInvitationService.acceptParentSchoolInvitation(SAMPLE_TOKEN);
@@ -941,6 +1020,112 @@ describe('Lot 2K-A2b-I-F-V — Gate Adversarial Frontend Acceptation Multi-Écol
     expect(schoolInvitationService.sanitizeReturnTo('/auth/set-password')).toBe('/auth/set-password');
     expect(schoolInvitationService.sanitizeReturnTo('/connexion')).toBe('/connexion');
     expect(schoolInvitationService.sanitizeReturnTo('/app/parent')).toBe('/app/parent');
+  });
+
+  // 60. Masquage déterministe de l'adresse email
+  it('60. Masque correctement et de manière déterministe les adresses email', () => {
+    expect(schoolInvitationService.maskEmail('parent.test2@example.com')).toBe('p***2@example.com');
+    expect(schoolInvitationService.maskEmail('john.doe@gmail.com')).toBe('j***e@gmail.com');
+    expect(schoolInvitationService.maskEmail('ab@test.org')).toBe('a***@test.org');
+    expect(schoolInvitationService.maskEmail('a@test.org')).toBe('a***@test.org');
+  });
+
+  // 61. getInvitationPreview appelle get_parent_school_invitation_preview RPC
+  it('61. Appelle la RPC get_parent_school_invitation_preview avec le jeton nettoyé', async () => {
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'get_parent_school_invitation_preview') {
+        return { data: { status: 'PENDING', school_name: 'École A', student_count: 1 }, error: null } as any;
+      }
+      return { data: null, error: null } as any;
+    });
+
+    const res = await schoolInvitationService.getInvitationPreview(SAMPLE_TOKEN);
+    expect(res.status).toBe('PENDING');
+    expect(supabase.rpc).toHaveBeenCalledWith('get_parent_school_invitation_preview', {
+      p_token: SAMPLE_TOKEN
+    });
+  });
+
+  // 62. Invitation déjà acceptée : affiche directement l'état ALREADY_ACCEPTED sans bouton Rejoindre
+  it('62. Affiche l’état déjà acceptée immédiatement lors de la prévisualisation sans afficher le bouton Rejoindre', async () => {
+    schoolInvitationService.saveInvitationToken(SAMPLE_TOKEN);
+    mockUser = { id: 'parent-123', email: 'parent.test2@example.com' };
+
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'get_parent_school_invitation_preview') {
+        return { data: { status: 'ALREADY_ACCEPTED' }, error: null } as any;
+      }
+      return { data: null, error: null } as any;
+    });
+
+    render(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Cette invitation a déjà été acceptée/i)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Rejoindre l'établissement/i })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Accéder à mon Espace Parent/i })).toBeInTheDocument();
+    });
+  });
+
+  // 63. Masquage de l'adresse email de l'utilisateur connecté dans la page
+  it('63. Masque l’adresse email du compte connecté dans l’interface de confirmation', async () => {
+    schoolInvitationService.saveInvitationToken(SAMPLE_TOKEN);
+    mockUser = { id: 'parent-123', email: 'parent.test2@example.com' };
+
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'get_parent_school_invitation_preview') {
+        return { data: { status: 'PENDING', school_name: 'École A', student_count: 2 }, error: null } as any;
+      }
+      return { data: null, error: null } as any;
+    });
+
+    render(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('p***2@example.com')).toBeInTheDocument();
+      expect(screen.queryByText('parent.test2@example.com')).not.toBeInTheDocument();
+    });
+  });
+
+  // 64. Bouton vers Espace Parent pour une invitation déjà acceptée
+  it('64. Redirige vers /app/parent au clic sur Accéder à mon Espace Parent pour une invitation déjà acceptée', async () => {
+    schoolInvitationService.saveInvitationToken(SAMPLE_TOKEN);
+    mockUser = { id: 'parent-123', email: 'parent.test2@example.com' };
+
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'get_parent_school_invitation_preview') {
+        return { data: { status: 'ALREADY_ACCEPTED' }, error: null } as any;
+      }
+      return { data: null, error: null } as any;
+    });
+
+    render(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
+
+    await waitFor(() => {
+      const btn = screen.getByRole('button', { name: /Accéder à mon Espace Parent/i });
+      fireEvent.click(btn);
+      expect(mockNavigate).toHaveBeenCalledWith('/app/parent');
+    });
+  });
+
+  // 65. Erreur 404/PostgREST "function not found" gérée de façon sécurisée sans acceptation implicite
+  it('65. Gère une erreur PostgREST 404 function not found sans acceptation implicite ni état trompeur', async () => {
+    schoolInvitationService.saveInvitationToken(SAMPLE_TOKEN);
+    mockUser = { id: 'parent-123', email: 'parent.test2@example.com' };
+
+    vi.mocked(supabase.rpc as any).mockImplementation(async (fnName: string) => {
+      if (fnName === 'get_parent_school_invitation_preview') {
+        return { data: null, error: { message: 'Could not find the function public.get_parent_school_invitation_preview in the schema cache', code: 'PGRST202' } } as any;
+      }
+      return { data: null, error: null } as any;
+    });
+
+    render(<AcceptSchoolInvitationPage onNavigate={mockNavigate} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Ce lien d’invitation est invalide ou n’est plus disponible/i)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Rejoindre l'établissement/i })).toBeNull();
+    });
   });
 
 });

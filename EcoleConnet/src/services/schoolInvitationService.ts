@@ -7,6 +7,12 @@ export interface AcceptInvitationResult {
   students_linked: number;
 }
 
+export interface InvitationPreviewResult {
+  status: 'PENDING' | 'ALREADY_ACCEPTED' | 'EXPIRED' | 'REVOKED' | 'WRONG_ACCOUNT' | 'INVALID';
+  school_name?: string;
+  student_count?: number;
+}
+
 export type InvitationErrorCode =
   | 'NOT_AUTHENTICATED'
   | 'INVALID_TOKEN'
@@ -248,6 +254,62 @@ export const schoolInvitationService = {
     }
 
     return normalizedPathname + safeQuery;
+  },
+
+  /**
+   * Masque de manière déterministe une adresse e-mail pour préserver la confidentialité.
+   * Ex: parent.test2@example.com -> p***2@example.com
+   */
+  maskEmail(email: string | null | undefined): string {
+    if (!email || typeof email !== 'string') return '';
+    const clean = email.trim();
+    if (!clean.includes('@')) return '';
+    const parts = clean.split('@');
+    const local = parts[0];
+    const domain = parts.slice(1).join('@');
+
+    if (local.length <= 1) {
+      return `${local}***@${domain}`;
+    }
+    if (local.length === 2) {
+      return `${local[0]}***@${domain}`;
+    }
+    return `${local[0]}***${local[local.length - 1]}@${domain}`;
+  },
+
+  /**
+   * Effectue une prévisualisation non-mutante et sécurisée de l'état de l'invitation.
+   */
+  async getInvitationPreview(token: string): Promise<InvitationPreviewResult> {
+    if (!token || typeof token !== 'string' || token.trim() === '') {
+      return { status: 'INVALID' };
+    }
+
+    const cleanToken = token.trim();
+    if (cleanToken.length < 10 || cleanToken.length > 500) {
+      return { status: 'INVALID' };
+    }
+
+    const { data, error } = await supabase.rpc('get_parent_school_invitation_preview', {
+      p_token: cleanToken
+    });
+
+    if (error) {
+      const msg = (error.message || '').toLowerCase();
+      if (msg.includes('authentification requise') || msg.includes('email utilisateur introuvable')) {
+        throw new InvitationError('NOT_AUTHENTICATED', 'Vous devez être connecté pour prévisualiser l’invitation.');
+      }
+      if (msg.includes('fetch') || msg.includes('network') || msg.includes('connection') || msg.includes('failed to fetch')) {
+        throw new InvitationError('NETWORK_ERROR', 'Erreur de connexion réseau. Veuillez vérifier votre connexion.');
+      }
+      return { status: 'INVALID' };
+    }
+
+    if (!data || typeof data !== 'object') {
+      return { status: 'INVALID' };
+    }
+
+    return data as InvitationPreviewResult;
   },
 
   /**
