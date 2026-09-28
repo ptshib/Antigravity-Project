@@ -1024,7 +1024,7 @@ Deno.test('F5: Booleans and numbers SHA-256 hash determinism', async () => {
 });
 
 Deno.test('F6: Unicode characters and escapes SHA-256 hash determinism', async () => {
-  const unicodeText = '{"subject": "ÉCOLECONNECT — 4E-7 ✨ Rappel de paiement", "emoji": "🎯"}';
+  const unicodeText = '{"subject": "ÉCOLELINK — 4E-7 ✨ Rappel de paiement", "emoji": "🎯"}';
   const hash1 = await computeCanonicalPayloadHash(unicodeText);
   const hash2 = await computeCanonicalPayloadHash(unicodeText);
   assertEquals(hash1, hash2);

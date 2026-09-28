@@ -112,7 +112,7 @@ serve(async (req) => {
     const redirectTo = `${appUrl.replace(/\/$/, '')}/auth/set-password`;
 
     // 6. Inviter l'utilisateur Auth via Supabase Admin API
-    // Le rôle est STRICTEMENT forcé à 'school_admin' serveur side et redirigé vers ÉcoleConnect /auth/set-password
+    // Le rôle est STRICTEMENT forcé à 'school_admin' serveur side et redirigé vers ÉcoleLink /auth/set-password
     const { data: authUserData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(cleanEmail, {
       redirectTo,
       data: {

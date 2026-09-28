@@ -262,7 +262,7 @@ serve(async (req) => {
 
     if (emailExists) {
       return new Response(
-        JSON.stringify({ error: 'Cette adresse email est déjà associée à un compte ÉcoleConnect. Vérifiez son identité avant toute association.' }),
+        JSON.stringify({ error: 'Cette adresse email est déjà associée à un compte ÉcoleLink. Vérifiez son identité avant toute association.' }),
         { status: 409, headers: corsHeaders }
       );
     }

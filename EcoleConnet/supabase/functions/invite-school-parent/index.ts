@@ -396,7 +396,7 @@ export async function inviteSchoolParentHandler(req: Request): Promise<Response>
       const resendResult = await resendClient.sendEmail(`inv-${createdInvId}`, {
         from: resendFromEmail,
         to: [cleanEmail],
-        subject: `Invitation à rejoindre ${targetSchool.name} sur ÉcoleConnect`,
+        subject: `Invitation à rejoindre ${targetSchool.name} sur ÉcoleLink`,
         html: `<p>Bonjour ${cleanFirstName},</p><p>Vous avez été invité(e) à rejoindre <strong>${targetSchool.name}</strong> pour vos enfants.</p><p><a href="${acceptLink}">Accepter l'invitation</a></p>`
       });
 

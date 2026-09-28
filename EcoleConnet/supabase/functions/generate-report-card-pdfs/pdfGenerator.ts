@@ -148,10 +148,10 @@ export class ReportCardPdfGenerator {
 
     // Métadonnées explicitement stables : pdf-lib ne doit jamais injecter l'heure courante.
     pdfDoc.setTitle(`Bulletin scolaire officiel - ${reportCard.id}`);
-    pdfDoc.setAuthor('ÉcoleConnect');
+    pdfDoc.setAuthor('ÉcoleLink');
     pdfDoc.setSubject(`Bulletin ${reportCard.id} - révision ${batch.revision_number}`);
-    pdfDoc.setCreator('ÉcoleConnect');
-    pdfDoc.setProducer('ÉcoleConnect PDF Generator');
+    pdfDoc.setCreator('ÉcoleLink');
+    pdfDoc.setProducer('ÉcoleLink PDF Generator');
     pdfDoc.setCreationDate(stableValidatedDate);
     pdfDoc.setModificationDate(stableValidatedDate);
 
