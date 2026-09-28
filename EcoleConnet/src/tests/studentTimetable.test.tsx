@@ -113,88 +113,59 @@ vi.mock('../lib/supabase', () => {
       },
       from: (tableName: string) => {
         mockFromQueries.push(tableName);
-        if (tableName === 'students') {
-          return {
-            select: () => ({
-              eq: () => ({
-                maybeSingle: () => Promise.resolve({
-                  data: {
-                    id: 'std-real-id-123',
-                    school_id: 'school-uuid-2026',
-                    student_number: 'MAT-2026-001',
-                    first_name: 'Jean-Luc',
-                    last_name: 'Mbuyi',
-                    enrollment_status: 'active'
-                  },
-                  error: null
-                })
-              })
-            })
+        const makeChain = (data: any) => {
+          const chain: any = {
+            select: () => chain,
+            eq: () => chain,
+            maybeSingle: () => Promise.resolve({ data, error: null })
           };
+          return chain;
+        };
+
+        if (tableName === 'students') {
+          return makeChain({
+            id: 'std-real-id-123',
+            school_id: 'school-uuid-2026',
+            student_number: 'MAT-2026-001',
+            first_name: 'Jean-Luc',
+            last_name: 'Mbuyi',
+            enrollment_status: 'active'
+          });
         }
         if (tableName === 'student_enrollments') {
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({
-                  maybeSingle: () => Promise.resolve({
-                    data: {
-                      id: 'enr-real-id-456',
-                      class_id: 'class-7eb-id',
-                      school_id: 'school-uuid-2026',
-                      academic_year_id: 'ay-2026-2027',
-                      status: 'active',
-                      class: {
-                        id: 'class-7eb-id',
-                        name: '7ème EB A',
-                        education_cycle: 'secondary',
-                        academic_year_id: 'ay-2026-2027'
-                      },
-                      academic_year: {
-                        id: 'ay-2026-2027',
-                        name: '2026-2027'
-                      }
-                    },
-                    error: null
-                  })
-                })
-              })
-            })
-          };
+          return makeChain({
+            id: 'enr-real-id-456',
+            class_id: 'class-7eb-id',
+            school_id: 'school-uuid-2026',
+            academic_year_id: 'ay-2026-2027',
+            status: 'active',
+            class: {
+              id: 'class-7eb-id',
+              name: '7ème EB A',
+              education_cycle: 'secondary',
+              academic_year_id: 'ay-2026-2027'
+            },
+            academic_year: {
+              id: 'ay-2026-2027',
+              name: '2026-2027'
+            }
+          });
         }
         if (tableName === 'period_report_cards') {
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({
-                  eq: () => ({
-                    maybeSingle: () => Promise.resolve({
-                      data: {
-                        id: 'rc-1',
-                        rank: 1,
-                        overall_percentage: 82.5,
-                        pdf_storage_path: 'report_cards/2026/rc_1.pdf',
-                        pdf_version: 1,
-                        pdf_generated_at: '2026-09-20',
-                        pdf_checksum: 'abc123sha'
-                      },
-                      error: null
-                    })
-                  })
-                })
-              })
-            })
-          };
+          return makeChain({
+            id: 'rc-1',
+            rank: 1,
+            overall_percentage: 82.5,
+            pdf_storage_path: 'report_cards/2026/rc_1.pdf',
+            pdf_version: 1,
+            pdf_generated_at: '2026-09-20',
+            pdf_checksum: 'abc123sha'
+          });
         }
-        return {
-          select: () => ({
-            eq: () => ({
-              maybeSingle: () => Promise.resolve({ data: null, error: null })
-            })
-          })
-        };
+        return makeChain(null);
       },
       rpc: (rpcName: string, params?: any) => {
+        console.log('[TEST LOG] RPC call received:', rpcName);
         mockRpcCalls.push({ rpcName, params });
         if (rpcName === 'get_authenticated_student_timetable') {
           if (mockTimetableErrorResponse) {
@@ -309,11 +280,10 @@ describe('StudentTimetable Frontend Suite — Lot 2K-T6-F', () => {
     render(<RealStudentPortal />);
 
     await waitFor(() => {
-      expect(screen.getAllByText('Emploi du temps').length).toBeGreaterThan(0);
+      expect(screen.getByText('Résultats & Bulletins')).toBeInTheDocument();
     });
 
-    const timetableTabBtns = screen.getAllByRole('button', { name: /Emploi du temps/i });
-    fireEvent.click(timetableTabBtns[0]);
+    fireEvent.click(screen.getAllByText('Emploi du temps')[0]);
 
     await waitFor(() => {
       const timetableRpcCall = mockRpcCalls.find(c => c.rpcName === 'get_authenticated_student_timetable');
@@ -328,11 +298,10 @@ describe('StudentTimetable Frontend Suite — Lot 2K-T6-F', () => {
     render(<RealStudentPortal />);
 
     await waitFor(() => {
-      expect(screen.getAllByText('Emploi du temps').length).toBeGreaterThan(0);
+      expect(screen.getByText('Résultats & Bulletins')).toBeInTheDocument();
     });
 
-    const timetableTabBtns = screen.getAllByRole('button', { name: /Emploi du temps/i });
-    fireEvent.click(timetableTabBtns[0]);
+    fireEvent.click(screen.getAllByText('Emploi du temps')[0]);
 
     await waitFor(() => {
       expect(screen.getAllByText('Mathématiques').length).toBeGreaterThan(0);
@@ -349,11 +318,10 @@ describe('StudentTimetable Frontend Suite — Lot 2K-T6-F', () => {
     render(<RealStudentPortal />);
 
     await waitFor(() => {
-      expect(screen.getAllByText('Emploi du temps').length).toBeGreaterThan(0);
+      expect(screen.getByText('Résultats & Bulletins')).toBeInTheDocument();
     });
 
-    const timetableTabBtns = screen.getAllByRole('button', { name: /Emploi du temps/i });
-    fireEvent.click(timetableTabBtns[0]);
+    fireEvent.click(screen.getAllByText('Emploi du temps')[0]);
 
     await waitFor(() => {
       expect(screen.getAllByText('Enseignant non assigné').length).toBeGreaterThan(0);
@@ -373,11 +341,10 @@ describe('StudentTimetable Frontend Suite — Lot 2K-T6-F', () => {
     render(<RealStudentPortal />);
 
     await waitFor(() => {
-      expect(screen.getAllByText('Emploi du temps').length).toBeGreaterThan(0);
+      expect(screen.getByText('Résultats & Bulletins')).toBeInTheDocument();
     });
 
-    const timetableTabBtns = screen.getAllByRole('button', { name: /Emploi du temps/i });
-    fireEvent.click(timetableTabBtns[0]);
+    fireEvent.click(screen.getAllByText('Emploi du temps')[0]);
 
     await waitFor(() => {
       expect(screen.getByText('Aucun créneau configuré')).toBeInTheDocument();
@@ -390,11 +357,10 @@ describe('StudentTimetable Frontend Suite — Lot 2K-T6-F', () => {
     render(<RealStudentPortal />);
 
     await waitFor(() => {
-      expect(screen.getAllByText('Emploi du temps').length).toBeGreaterThan(0);
+      expect(screen.getByText('Résultats & Bulletins')).toBeInTheDocument();
     });
 
-    const timetableTabBtns = screen.getAllByRole('button', { name: /Emploi du temps/i });
-    fireEvent.click(timetableTabBtns[0]);
+    fireEvent.click(screen.getAllByText('Emploi du temps')[0]);
 
     await waitFor(() => {
       expect(screen.getByText(/Impossible d'afficher l'emploi du temps/i)).toBeInTheDocument();
@@ -416,11 +382,10 @@ describe('StudentTimetable Frontend Suite — Lot 2K-T6-F', () => {
     render(<RealStudentPortal />);
 
     await waitFor(() => {
-      expect(screen.getAllByText('Emploi du temps').length).toBeGreaterThan(0);
+      expect(screen.getByText('Résultats & Bulletins')).toBeInTheDocument();
     });
 
-    const timetableTabBtns = screen.getAllByRole('button', { name: /Emploi du temps/i });
-    fireEvent.click(timetableTabBtns[0]);
+    fireEvent.click(screen.getAllByText('Emploi du temps')[0]);
 
     await waitFor(() => {
       expect(screen.getByText(/Réponse de l'emploi du temps malformée/i)).toBeInTheDocument();
@@ -440,8 +405,8 @@ describe('StudentTimetable Frontend Suite — Lot 2K-T6-F', () => {
       expect(screen.getAllByRole('button', { name: /Fermer le menu/i }).length).toBeGreaterThan(0);
     });
 
-    const timetableTabBtns = screen.getAllByRole('button', { name: /Emploi du temps/i });
-    fireEvent.click(timetableTabBtns[0]);
+    const timetableNavBtns = screen.getAllByText('Emploi du temps');
+    fireEvent.click(timetableNavBtns[timetableNavBtns.length - 1]);
 
     await waitFor(() => {
       expect(screen.getAllByRole('button', { name: /Fermer le menu/i }).length).toBe(1);
@@ -467,11 +432,10 @@ describe('StudentTimetable Frontend Suite — Lot 2K-T6-F', () => {
     render(<RealStudentPortal />);
 
     await waitFor(() => {
-      expect(screen.getAllByText('Emploi du temps').length).toBeGreaterThan(0);
+      expect(screen.getByText('Résultats & Bulletins')).toBeInTheDocument();
     });
 
-    const timetableTabBtns = screen.getAllByRole('button', { name: /Emploi du temps/i });
-    fireEvent.click(timetableTabBtns[0]);
+    fireEvent.click(screen.getAllByText('Emploi du temps')[0]);
 
     await waitFor(() => {
       expect(screen.getAllByText('Mathématiques').length).toBeGreaterThan(0);

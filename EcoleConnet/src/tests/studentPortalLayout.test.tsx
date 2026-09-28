@@ -395,4 +395,21 @@ describe('RealStudentPortal — Lot 2K-T5 (Validation Visuelle & Sécurité Él�
     });
     unmountD();
   });
+
+  it('10. Affiche et permet la navigation vers la troisième rubrique Devoirs & Cahier de texte', async () => {
+    render(<RealStudentPortal />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Résultats & Notes scolaires')).toBeInTheDocument();
+    });
+
+    const devoirsBtn = screen.getByRole('button', { name: /Devoirs & Cahier de texte/i });
+    expect(devoirsBtn).toBeInTheDocument();
+
+    fireEvent.click(devoirsBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /Devoirs & Cahier de texte/i })).toBeInTheDocument();
+    });
+  });
 });

@@ -4,13 +4,14 @@ import { Logo } from '../../common/Logo';
 import {
   Award,
   Calendar,
+  ClipboardCheck,
   GraduationCap,
   RefreshCw,
   LogOut,
   X
 } from 'lucide-react';
 
-export type StudentPortalTab = 'resultats' | 'emploi_du_temps';
+export type StudentPortalTab = 'resultats' | 'emploi_du_temps' | 'devoirs';
 
 export interface StudentPortalSidebarProps {
   activeTab: StudentPortalTab;
@@ -68,7 +69,8 @@ export const StudentPortalSidebar: React.FC<StudentPortalSidebarProps> = ({
     icon: React.ElementType;
   }> = [
     { id: 'resultats', label: 'Résultats & Bulletins', icon: Award },
-    { id: 'emploi_du_temps', label: 'Emploi du temps', icon: Calendar }
+    { id: 'emploi_du_temps', label: 'Emploi du temps', icon: Calendar },
+    { id: 'devoirs', label: 'Devoirs & Cahier de texte', icon: ClipboardCheck }
   ];
 
   const sidebarContent = (
