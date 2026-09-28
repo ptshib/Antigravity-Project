@@ -11,7 +11,7 @@ export const AccountSuspendedPage: React.FC<AccountSuspendedPageProps> = ({
   reason = "Accès restreint par l'administration de l'établissement ou par PaTShi-Digital.",
   onGoToLogin
 }) => {
-  const whatsappUrl = `https://wa.me/${SCHOOL_INFO.whatsapp.replace(/[^0-9]/g, '')}?text=Bonjour%20PaTShi-Digital,%20mon%20compte%20ÉcoleConnect%20est%20temporairement%20suspendu.`;
+  const whatsappUrl = `https://wa.me/${SCHOOL_INFO.whatsapp.replace(/[^0-9]/g, '')}?text=Bonjour%20PaTShi-Digital,%20mon%20compte%20ÉcoleLink%20est%20temporairement%20suspendu.`;
 
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col justify-between p-4 sm:p-6 text-white">
@@ -51,7 +51,7 @@ export const AccountSuspendedPage: React.FC<AccountSuspendedPageProps> = ({
       </div>
 
       <div className="text-center text-xs text-slate-500">
-        ÉcoleConnect — Support PaTShi-Digital : {SCHOOL_INFO.whatsapp}
+        ÉcoleLink — Support PaTShi-Digital : {SCHOOL_INFO.whatsapp}
       </div>
     </div>
   );

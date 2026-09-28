@@ -32,7 +32,7 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onGoToDemo, onDiscover
             </p>
 
             <p className="text-base text-slate-300 max-w-2xl leading-relaxed">
-              ÉcoleConnect est la solution digitale complète développée par{' '}
+              ÉcoleLink est la solution digitale complète développée par{' '}
               <strong className="text-amber-400 font-semibold">PaTShi-Digital</strong> pour moderniser la communication scolaire,
               centraliser le suivi des notes, des présences et des devoirs, et offrir une expérience fluide à toute la communauté éducative.
             </p>

@@ -154,7 +154,7 @@ describe('INCIDENT LOT 2K-T1 — Module d’Invitation Élève & Gestion des Err
         name: 'FunctionsHttpError',
         message: 'Edge Function returned a 409 status code',
         context: {
-          json: async () => ({ error: 'Cette adresse email est déjà associée à un compte ÉcoleConnect. Vérifiez son identité avant toute association.' }),
+          json: async () => ({ error: 'Cette adresse email est déjà associée à un compte ÉcoleLink. Vérifiez son identité avant toute association.' }),
         },
       },
     });

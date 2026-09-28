@@ -657,7 +657,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       <div className="space-y-6 animate-fade-in">
         <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs">
           <h2 className="text-2xl font-bold text-slate-900">Paramètres de l’Établissement</h2>
-          <p className="text-xs text-slate-500">Configuration générale d’ÉcoleConnect pour votre école</p>
+          <p className="text-xs text-slate-500">Configuration générale d’ÉcoleLink pour votre école</p>
         </div>
 
         <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-6 space-y-6">

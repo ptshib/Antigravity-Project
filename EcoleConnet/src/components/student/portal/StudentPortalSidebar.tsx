@@ -95,9 +95,9 @@ export const StudentPortalSidebar: React.FC<StudentPortalSidebarProps> = ({
         <div className="flex items-start justify-between gap-2">
           <p
             className="text-xs font-bold text-amber-400 uppercase tracking-wider line-clamp-2 leading-tight min-w-0"
-            title={schoolName || 'ÉcoleConnect'}
+            title={schoolName || 'ÉcoleLink'}
           >
-            {schoolName || 'ÉcoleConnect'}
+            {schoolName || 'ÉcoleLink'}
           </p>
           <span className="px-2 py-0.5 rounded text-[9px] font-extrabold uppercase bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 shrink-0">
             Espace Élève

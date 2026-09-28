@@ -60,7 +60,7 @@ export const isSupabaseConfigured = validateSupabaseConfig(supabaseUrl, supabase
 
 if (!isSupabaseConfigured) {
   console.warn(
-    '[ÉcoleConnect] Supabase n’est pas configuré. ' +
+    '[ÉcoleLink] Supabase n’est pas configuré. ' +
     'Le mode Démonstration et le site public restent entièrement fonctionnels.'
   );
 }

@@ -64,7 +64,7 @@ VITE_SUPABASE_PUBLISHABLE_KEY=votre-cle-publique`}
       </div>
 
       <div className="text-center text-xs text-slate-500">
-        ÉcoleConnect — Solution développée par PaTShi-Digital
+        ÉcoleLink — Solution développée par PaTShi-Digital
       </div>
     </div>
   );

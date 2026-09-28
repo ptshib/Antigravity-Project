@@ -348,13 +348,13 @@ export const SetPasswordPage: React.FC<SetPasswordPageProps> = ({ onSuccessNavig
       </div>
 
       <div className="w-full max-w-md relative z-10 space-y-6">
-        {/* Header Branding ÉcoleConnect */}
+        {/* Header Branding ÉcoleLink */}
         <div className="text-center space-y-2">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-3xl bg-gradient-to-tr from-rose-600 to-indigo-600 shadow-xl shadow-rose-950/50 mb-2">
             <ShieldCheck className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-2xl font-black tracking-tight text-white">
-            École<span className="text-rose-500">Connect</span>
+            École<span className="text-rose-500">Link</span>
           </h1>
           <p className="text-xs text-slate-400 font-medium">
             Plateforme d'Établissement Scolaire Privé — {getRoleHeading()}
@@ -485,7 +485,7 @@ export const SetPasswordPage: React.FC<SetPasswordPageProps> = ({ onSuccessNavig
 
         {/* Footer info */}
         <p className="text-center text-[11px] text-slate-500">
-          ÉcoleConnect — PaTShi-Digital System Security
+          ÉcoleLink — PaTShi-Digital System Security
         </p>
       </div>
     </div>

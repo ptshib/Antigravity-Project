@@ -90,7 +90,7 @@ export const DemoSelectorPage: React.FC<DemoSelectorPageProps> = ({ onSelectRole
           </h1>
 
           <p className="text-slate-400 text-sm sm:text-base leading-relaxed">
-            Testez l’expérience utilisateur d’<strong>ÉcoleConnect</strong> en vous connectant instantanément sous l’un des quatre profils du <em>Complexe Scolaire Les Horizons</em>.
+            Testez l’expérience utilisateur d’<strong>ÉcoleLink</strong> en vous connectant instantanément sous l’un des quatre profils du <em>Complexe Scolaire Les Horizons</em>.
           </p>
         </div>
 
@@ -136,7 +136,7 @@ export const DemoSelectorPage: React.FC<DemoSelectorPageProps> = ({ onSelectRole
 
       {/* Footer Info */}
       <div className="text-center text-xs text-slate-500 z-10 pt-6">
-        <p>ÉcoleConnect — Une solution développée par PaTShi-Digital (+243 819 883 084 / WhatsApp +420 776 308 018)</p>
+        <p>ÉcoleLink — Une solution développée par PaTShi-Digital (+243 819 883 084 / WhatsApp +420 776 308 018)</p>
       </div>
     </div>
   );

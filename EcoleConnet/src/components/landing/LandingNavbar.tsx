@@ -11,7 +11,7 @@ interface LandingNavbarProps {
 export const LandingNavbar: React.FC<LandingNavbarProps> = ({ onGoToDemo, onGoToLogin }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  const whatsappUrl = `https://wa.me/${SCHOOL_INFO.whatsapp.replace(/[^0-9]/g, '')}?text=Bonjour%20PaTShi-Digital,%20je%20souhaite%20en%20savoir%20plus%20sur%20ÉcoleConnect`;
+  const whatsappUrl = `https://wa.me/${SCHOOL_INFO.whatsapp.replace(/[^0-9]/g, '')}?text=Bonjour%20PaTShi-Digital,%20je%20souhaite%20en%20savoir%20plus%20sur%20ÉcoleLink`;
 
   return (
     <nav className="sticky top-0 z-50 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 text-white">

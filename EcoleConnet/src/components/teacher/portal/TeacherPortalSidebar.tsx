@@ -101,7 +101,7 @@ export const TeacherPortalSidebar: React.FC<TeacherPortalSidebarProps> = ({
           <div className="px-5 py-3 bg-slate-950/60 border-b border-slate-800/60">
             <div className="flex items-center justify-between">
               <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider truncate">
-                {schoolName || 'ÉcoleConnect'}
+                {schoolName || 'ÉcoleLink'}
               </p>
               <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40">
                 Enseignant

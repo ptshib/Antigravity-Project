@@ -32,7 +32,7 @@ export const ParentPortalHeader: React.FC<ParentPortalHeaderProps> = ({
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-sm font-extrabold text-slate-900 truncate">
-              {schoolName || 'ÉcoleConnect'}
+              {schoolName || 'ÉcoleLink'}
             </h1>
             <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-bold">
               <ShieldCheck className="w-3 h-3" />

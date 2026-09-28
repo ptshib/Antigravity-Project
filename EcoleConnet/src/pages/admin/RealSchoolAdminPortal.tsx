@@ -1822,7 +1822,7 @@ export const RealSchoolAdminPortal: React.FC = () => {
       return 'Votre session a expiré. Veuillez vous reconnecter.';
     }
     if (techLower.includes('déjà associée') || techLower.includes('compte existant') || techLower.includes('déjà utilisée')) {
-      return 'Cette adresse email est déjà associée à un compte ÉcoleConnect. Veuillez vérifier l’identité de l’élève.';
+      return 'Cette adresse email est déjà associée à un compte ÉcoleLink. Veuillez vérifier l’identité de l’élève.';
     }
     if (techLower.includes('première invitation refusée') || techLower.includes('statut exact "not_invited"') || techLower.includes('déjà active')) {
       return 'Une invitation est déjà active pour cet élève. Utilisez l’option de renvoi d’invitation si nécessaire.';
@@ -7040,7 +7040,7 @@ export const RealSchoolAdminPortal: React.FC = () => {
 
       {/* Footer */}
       <footer className="p-4 sm:p-6 border-t border-slate-200 bg-white text-center text-xs text-slate-500 mt-auto">
-        ÉcoleConnect — Console d'Administration Établissement ({school?.name})
+        ÉcoleLink — Console d'Administration Établissement ({school?.name})
       </footer>
     </div>
   </div>

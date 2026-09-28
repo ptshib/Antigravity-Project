@@ -259,7 +259,7 @@ export const AcceptSchoolInvitationPage: React.FC<AcceptSchoolInvitationPageProp
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white space-y-4" aria-live="polite">
         <div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
-        <p className="text-xs font-bold text-slate-300">Vérification de l'invitation ÉcoleConnect...</p>
+        <p className="text-xs font-bold text-slate-300">Vérification de l'invitation ÉcoleLink...</p>
       </div>
     );
   }
@@ -375,7 +375,7 @@ export const AcceptSchoolInvitationPage: React.FC<AcceptSchoolInvitationPageProp
               <div className="space-y-1">
                 <h3 className="font-extrabold text-white text-sm">Authentification requise</h3>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  Vous devez vous connecter à votre compte ÉcoleConnect pour accepter cette invitation.
+                  Vous devez vous connecter à votre compte ÉcoleLink pour accepter cette invitation.
                 </p>
               </div>
 
@@ -497,7 +497,7 @@ export const AcceptSchoolInvitationPage: React.FC<AcceptSchoolInvitationPageProp
 
         {/* Footer info */}
         <p className="text-center text-[11px] text-slate-500">
-          ÉcoleConnect — PaTShi-Digital System Security
+          ÉcoleLink — PaTShi-Digital System Security
         </p>
       </div>
     </div>

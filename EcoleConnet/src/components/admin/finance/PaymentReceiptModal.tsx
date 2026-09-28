@@ -58,7 +58,7 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
     >
       <div className="space-y-6">
         <p className="text-xs text-slate-500 font-medium -mt-2">
-          Reçu officiel généré par le système bancaire / caisse d'ÉcoleConnect
+          Reçu officiel généré par le système bancaire / caisse d'ÉcoleLink
         </p>
 
         {isCancelled && (
@@ -177,7 +177,7 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
           <div className="pt-4 border-t border-slate-200 flex justify-between items-end text-[10px] text-slate-400">
             <div className={`flex items-center gap-1 font-bold ${isCancelled ? 'text-rose-700' : 'text-emerald-700'}`}>
               <ShieldCheck className="w-4 h-4" />
-              Document numérique certifié ÉcoleConnect
+              Document numérique certifié ÉcoleLink
             </div>
             <div className="text-right">
               Cachet et Signature de l'Établissement

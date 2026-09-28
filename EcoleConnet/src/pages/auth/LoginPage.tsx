@@ -175,7 +175,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
         {/* Notice Info */}
         <div className="p-4 bg-slate-950/70 rounded-2xl border border-slate-700/80 text-center space-y-1">
           <p className="text-[11px] font-semibold text-slate-200">
-            Les comptes ÉcoleConnect sont fournis par votre établissement scolaire.
+            Les comptes ÉcoleLink sont fournis par votre établissement scolaire.
           </p>
           <p className="text-[10px] text-slate-400">
             Contactez votre administrateur pour obtenir vos identifiants réels.
@@ -185,7 +185,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
       {/* Footer info */}
       <div className="text-center text-xs text-slate-500 space-y-1">
-        <p>ÉcoleConnect — Une solution développée par <strong>PaTShi-Digital</strong></p>
+        <p>ÉcoleLink — Une solution développée par <strong>PaTShi-Digital</strong></p>
         <p>WhatsApp Support : {SCHOOL_INFO.whatsapp}</p>
       </div>
     </div>

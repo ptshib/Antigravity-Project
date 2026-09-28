@@ -87,7 +87,7 @@ export const ParentPortalSidebar: React.FC<ParentPortalSidebarProps> = ({
           {/* School & Parent Context Header */}
           <div className="px-5 py-3 bg-slate-950/50 border-b border-slate-800/60">
             <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider truncate">
-              {schoolName || 'ÉcoleConnect'}
+              {schoolName || 'ÉcoleLink'}
             </p>
             <p className="text-xs font-semibold text-slate-200 truncate mt-0.5">
               {parentName || 'Espace Parent'}

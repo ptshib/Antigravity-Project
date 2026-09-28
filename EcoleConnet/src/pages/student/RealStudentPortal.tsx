@@ -575,8 +575,8 @@ export const RealStudentPortal: React.FC = () => {
             </button>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-                <h1 className="text-sm sm:text-base font-extrabold text-slate-900 truncate" title={school?.name || 'ÉcoleConnect'}>
-                  {school?.name || 'ÉcoleConnect'}
+                <h1 className="text-sm sm:text-base font-extrabold text-slate-900 truncate" title={school?.name || 'ÉcoleLink'}>
+                  {school?.name || 'ÉcoleLink'}
                 </h1>
                 <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-full text-[10px] font-extrabold shrink-0">
                   Espace Élève

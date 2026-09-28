@@ -420,11 +420,11 @@ describe('RealStudentPortal — Lot 2K-T5 (Validation Visuelle & Sécurité Él�
       expect(screen.getByText('Résultats & Notes scolaires')).toBeInTheDocument();
     });
 
-    // 1. Logo ÉcoleConnect non fragmenté & signature
+    // 1. Logo ÉcoleLink non fragmenté & signature
     const logoTexts = screen.getAllByText('École');
     expect(logoTexts.length).toBeGreaterThan(0);
-    const connectTexts = screen.getAllByText('Connect');
-    expect(connectTexts.length).toBeGreaterThan(0);
+    const linkTexts = screen.getAllByText('Link');
+    expect(linkTexts.length).toBeGreaterThan(0);
     expect(screen.getByText('par PaTShi-Digital')).toBeInTheDocument();
 
     // 2. Nom de l'établissement avec attribut title

@@ -13,7 +13,7 @@ export const Footer: React.FC = () => {
           <div className="space-y-4 md:col-span-2">
             <Logo variant="white" size="lg" />
             <p className="text-xs text-slate-400 max-w-sm leading-relaxed">
-              ÉcoleConnect est la solution de gestion et communication scolaire de référence créée pour connecter les directions, enseignants, parents et élèves en toute transparence.
+              ÉcoleLink est la solution de gestion et communication scolaire de référence créée pour connecter les directions, enseignants, parents et élèves en toute transparence.
             </p>
             <div className="pt-2">
               <a
@@ -52,7 +52,7 @@ export const Footer: React.FC = () => {
 
         <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
           <p className="font-semibold text-slate-300">
-            « ÉcoleConnect — Une solution développée par PaTShi-Digital »
+            « ÉcoleLink — Une solution développée par PaTShi-Digital »
           </p>
           <p>© 2026 PaTShi-Digital. Tous droits réservés.</p>
         </div>

@@ -36,7 +36,7 @@ export const ContactSection: React.FC = () => {
       return;
     }
 
-    const messageText = `Bonjour PaTShi-Digital, je souhaite une démonstration d'ÉcoleConnect pour mon établissement :\n\n- École: ${formData.schoolName}\n- Demandeur: ${formData.contactName}\n- Téléphone: ${formData.phone}\n- Email: ${formData.email}\n- Message: ${formData.message}`;
+    const messageText = `Bonjour PaTShi-Digital, je souhaite une démonstration d'ÉcoleLink pour mon établissement :\n\n- École: ${formData.schoolName}\n- Demandeur: ${formData.contactName}\n- Téléphone: ${formData.phone}\n- Email: ${formData.email}\n- Message: ${formData.message}`;
 
     const waLink = `${whatsappBaseUrl}?text=${encodeURIComponent(messageText)}`;
     window.open(waLink, '_blank');
@@ -52,7 +52,7 @@ export const ContactSection: React.FC = () => {
         <div className="bg-gradient-to-r from-blue-900 via-blue-800 to-amber-600 rounded-3xl p-8 lg:p-12 text-white shadow-2xl mb-16 text-center lg:text-left flex flex-col lg:flex-row items-center justify-between gap-8">
           <div className="space-y-3 max-w-2xl">
             <h3 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-              Modernisez la communication de votre établissement avec ÉcoleConnect.
+              Modernisez la communication de votre établissement avec ÉcoleLink.
             </h3>
             <p className="text-blue-100 text-sm leading-relaxed">
               Planifiez dès aujourd’hui une démonstration sur mesure ou demandez une cotation gratuite pour votre école auprès de nos ingénieurs.

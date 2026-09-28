@@ -36,7 +36,7 @@ export const Logo: React.FC<LogoProps> = ({ variant = 'dark', size = 'md', showS
       <div>
         <div className={`font-bold tracking-tight ${textSizes[size]} ${textColor} flex items-center gap-1`}>
           <span>École</span>
-          <span className="text-amber-500 font-extrabold">Connect</span>
+          <span className="text-amber-500 font-extrabold">Link</span>
         </div>
         {showSubtitle && (
           <p className="text-[11px] font-medium text-slate-400 -mt-1 tracking-wide">

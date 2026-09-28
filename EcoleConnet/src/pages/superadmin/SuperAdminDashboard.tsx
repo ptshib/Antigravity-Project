@@ -1171,7 +1171,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({ onSele
 
       {/* Footer */}
       <footer className="p-4 sm:p-6 border-t border-slate-900 text-center text-xs text-slate-500">
-        ÉcoleConnect — Console d'Administration Globale PaTShi-Digital
+        ÉcoleLink — Console d'Administration Globale PaTShi-Digital
       </footer>
     </div>
   );

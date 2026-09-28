@@ -162,7 +162,7 @@ const MainLayout: React.FC = () => {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white space-y-4">
         <div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
-        <p className="text-xs font-bold text-slate-300">Vérification de la session sécurisée ÉcoleConnect...</p>
+        <p className="text-xs font-bold text-slate-300">Vérification de la session sécurisée ÉcoleLink...</p>
       </div>
     );
   }
@@ -249,7 +249,7 @@ const MainLayout: React.FC = () => {
       return (
         <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white space-y-4">
           <div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-xs font-bold text-slate-300">Vérification de la session sécurisée ÉcoleConnect...</p>
+          <p className="text-xs font-bold text-slate-300">Vérification de la session sécurisée ÉcoleLink...</p>
         </div>
       );
     }
@@ -465,7 +465,7 @@ const MainLayout: React.FC = () => {
       <Modal
         isOpen={showMessagingModal}
         onClose={() => setShowMessagingModal(false)}
-        title="Messagerie interne ÉcoleConnect"
+        title="Messagerie interne ÉcoleLink"
         maxWidth="xl"
       >
         <MessagingModule />

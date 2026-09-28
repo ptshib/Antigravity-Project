@@ -22,7 +22,7 @@ export const Header: React.FC<HeaderProps> = ({
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
   const [showNotifMenu, setShowNotifMenu] = useState(false);
 
-  const whatsappUrl = `https://wa.me/${SCHOOL_INFO.whatsapp.replace(/[^0-9]/g, '')}?text=Bonjour%20PaTShi-Digital,%20je%20souhaite%20en%20savoir%20plus%20sur%20ÉcoleConnect`;
+  const whatsappUrl = `https://wa.me/${SCHOOL_INFO.whatsapp.replace(/[^0-9]/g, '')}?text=Bonjour%20PaTShi-Digital,%20je%20souhaite%20en%20savoir%20plus%20sur%20ÉcoleLink`;
 
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-30 px-3 sm:px-8 py-3 flex items-center justify-between shadow-xs max-w-full overflow-hidden">

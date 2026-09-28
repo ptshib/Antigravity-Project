@@ -121,7 +121,7 @@ export const ResetPasswordPage: React.FC<ResetPasswordPageProps> = ({ onGoToLogi
       </div>
 
       <div className="text-center text-xs text-slate-500">
-        ÉcoleConnect — PaTShi-Digital
+        ÉcoleLink — PaTShi-Digital
       </div>
     </div>
   );
