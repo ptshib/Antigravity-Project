@@ -568,36 +568,36 @@ export const RealStudentPortal: React.FC = () => {
             <button
               type="button"
               onClick={() => setIsOpenMobile(true)}
-              className="lg:hidden p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
+              className="lg:hidden p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200 transition-colors cursor-pointer shrink-0"
               aria-label="Ouvrir le menu"
             >
               <Menu className="w-5 h-5" />
             </button>
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-lg font-extrabold text-slate-900 truncate">
+              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                <h1 className="text-sm sm:text-base font-extrabold text-slate-900 truncate" title={school?.name || 'ÉcoleConnect'}>
                   {school?.name || 'ÉcoleConnect'}
                 </h1>
                 <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-full text-[10px] font-extrabold shrink-0">
                   Espace Élève
                 </span>
               </div>
-              <p className="text-xs text-slate-500 font-medium truncate">
-                Élève : <strong className="text-slate-900">{timetableData?.student_name || `${profile?.first_name || ''} ${profile?.last_name || ''}`}</strong>
+              <p className="text-[11px] sm:text-xs text-slate-500 font-medium truncate mt-0.5">
+                Élève : <strong className="text-slate-900">{timetableData?.student_name || `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() || 'Élève'}</strong>
                 {(timetableData?.student_number || studentRecord?.student_number) ? ` • Matricule : ${timetableData?.student_number || studentRecord?.student_number}` : ''}
                 {(timetableData?.class_name || classInfo?.name) ? ` • Classe : ${timetableData?.class_name || classInfo?.name}` : ''}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             <button
               type="button"
               onClick={handleRefreshCurrentTab}
               className="p-2 sm:px-3 sm:py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl border border-slate-200 text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer"
               title="Actualiser les données"
             >
-              <RefreshCw className="w-4 h-4 text-amber-600" />
+              <RefreshCw className="w-4 h-4 text-amber-600 shrink-0" />
               <span className="hidden sm:inline">Actualiser</span>
             </button>
             <button
@@ -606,7 +606,7 @@ export const RealStudentPortal: React.FC = () => {
               className="p-2 sm:px-3 sm:py-2 bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-700 rounded-xl border border-slate-200 text-xs font-bold transition-colors flex items-center gap-2 cursor-pointer"
               title="Se déconnecter"
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut className="w-4 h-4 shrink-0" />
               <span className="hidden sm:inline">Déconnexion</span>
             </button>
           </div>

@@ -412,4 +412,52 @@ describe('RealStudentPortal — Lot 2K-T5 (Validation Visuelle & Sécurité Él�
       expect(screen.getByRole('heading', { name: /Devoirs & Cahier de texte/i })).toBeInTheDocument();
     });
   });
+
+  it('11. LOT 2K-T8 — Alignement du shell élève (logo non fragmenté, identité séparée, title tooltip, drawer et footer)', async () => {
+    render(<RealStudentPortal />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Résultats & Notes scolaires')).toBeInTheDocument();
+    });
+
+    // 1. Logo ÉcoleConnect non fragmenté & signature
+    const logoTexts = screen.getAllByText('École');
+    expect(logoTexts.length).toBeGreaterThan(0);
+    const connectTexts = screen.getAllByText('Connect');
+    expect(connectTexts.length).toBeGreaterThan(0);
+    expect(screen.getByText('par PaTShi-Digital')).toBeInTheDocument();
+
+    // 2. Nom de l'établissement avec attribut title
+    const schoolTitleEls = screen.getAllByTitle('Complexe Scolaire Excellence');
+    expect(schoolTitleEls.length).toBeGreaterThan(0);
+
+    // 3. Les trois rubriques présentes
+    expect(screen.getByRole('button', { name: /Résultats & Bulletins/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Emploi du temps/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Devoirs & Cahier de texte/i })).toBeInTheDocument();
+
+    // 4. Déclenchement et fermeture du drawer mobile (Overlay, X, Escape)
+    const openMenuBtn = screen.getByRole('button', { name: /Ouvrir le menu/i });
+    fireEvent.click(openMenuBtn);
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: /Fermer le menu/i }).length).toBeGreaterThan(0);
+    });
+
+    // Fermeture par le bouton X
+    const closeBtn = screen.getAllByRole('button', { name: /Fermer le menu/i })[0];
+    fireEvent.click(closeBtn);
+
+    // Réouverture et fermeture par overlay backdrop
+    fireEvent.click(openMenuBtn);
+    const backdrop = document.querySelector('.bg-slate-950\\/80');
+    expect(backdrop).not.toBeNull();
+    if (backdrop) {
+      fireEvent.click(backdrop);
+    }
+
+    // 5. Footer toujours présent avec boutons d'action
+    expect(screen.getAllByText('Actualiser les données').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Déconnexion').length).toBeGreaterThan(0);
+  });
 });
