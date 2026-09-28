@@ -1,0 +1,17 @@
+{
+  "name": "ÉcoleLink — Plateforme de gestion scolaire",
+  "short_name": "ÉcoleLink",
+  "description": "ÉcoleLink simplifie la gestion des établissements scolaires, le suivi des élèves et la communication avec les familles.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
