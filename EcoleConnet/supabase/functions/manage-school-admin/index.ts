@@ -3,16 +3,27 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { resolveAppUrl } from '../_shared/cors.ts';
+import { buildCorsHeaders, resolveAppUrl } from '../_shared/cors.ts';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+export async function manageSchoolAdminHandler(req: Request): Promise<Response> {
+  const appUrl = resolveAppUrl();
+  const { isAllowed, headers: corsHeaders } = buildCorsHeaders(req, appUrl);
 
-serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    if (!isAllowed) {
+      return new Response(
+        JSON.stringify({ error: 'Origine CORS non autorisée.' }),
+        { status: 403, headers: corsHeaders }
+      );
+    }
+    return new Response('ok', { status: 200, headers: corsHeaders });
+  }
+
+  if (!isAllowed) {
+    return new Response(
+      JSON.stringify({ error: 'Origine CORS non autorisée.' }),
+      { status: 403, headers: corsHeaders }
+    );
   }
 
   try {
@@ -208,7 +219,6 @@ serve(async (req) => {
         );
       }
 
-      const appUrl = resolveAppUrl();
       const redirectTo = `${appUrl.replace(/\/$/, '')}/auth/set-password`;
 
       const { error: inviteErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(targetEmail, {
@@ -252,4 +262,8 @@ serve(async (req) => {
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
-});
+}
+
+if (import.meta.main) {
+  serve(manageSchoolAdminHandler);
+}

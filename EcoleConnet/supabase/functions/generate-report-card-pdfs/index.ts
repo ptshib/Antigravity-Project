@@ -3,6 +3,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { buildCorsHeaders, resolveAppUrl } from '../_shared/cors.ts';
 import {
   CallerProfile,
   ReportCardBatchRecord,
@@ -17,13 +18,6 @@ import { JobManager } from './jobManager.ts';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Content-Type': 'application/json'
-};
-
 function generateCorrelationId(): string {
   return crypto.randomUUID();
 }
@@ -32,7 +26,8 @@ function buildErrorResponse(
   status: number,
   errorCode: string,
   publicMessage: string,
-  correlationId: string
+  correlationId: string,
+  headers: Record<string, string>
 ): Response {
   return new Response(
     JSON.stringify({
@@ -40,14 +35,36 @@ function buildErrorResponse(
       error_code: errorCode,
       correlation_id: correlationId
     }),
-    { status, headers: corsHeaders }
+    { status, headers }
   );
 }
 
-serve(async (req) => {
+export async function generateReportCardPdfsHandler(req: Request): Promise<Response> {
+  const appUrl = resolveAppUrl();
+  const { isAllowed, headers: corsHeaders } = buildCorsHeaders(req, appUrl);
+
   // 1. Gestion des requêtes OPTIONS (CORS Pre-flight)
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    if (!isAllowed) {
+      return buildErrorResponse(
+        403,
+        'FORBIDDEN_CORS_ORIGIN',
+        'Origine CORS non autorisée.',
+        generateCorrelationId(),
+        corsHeaders
+      );
+    }
+    return new Response('ok', { status: 200, headers: corsHeaders });
+  }
+
+  if (!isAllowed) {
+    return buildErrorResponse(
+      403,
+      'FORBIDDEN_CORS_ORIGIN',
+      'Origine CORS non autorisée.',
+      generateCorrelationId(),
+      corsHeaders
+    );
   }
 
   const correlationId = generateCorrelationId();
@@ -58,7 +75,8 @@ serve(async (req) => {
       405,
       'METHOD_NOT_ALLOWED',
       'Méthode HTTP non autorisée. Seule la méthode POST est acceptée.',
-      correlationId
+      correlationId,
+      corsHeaders
     );
   }
 
@@ -73,7 +91,8 @@ serve(async (req) => {
       500,
       'SERVER_CONFIGURATION_ERROR',
       'Erreur de configuration du serveur. Le service de génération est indisponible.',
-      correlationId
+      correlationId,
+      corsHeaders
     );
   }
 
@@ -98,7 +117,8 @@ serve(async (req) => {
         401,
         'UNAUTHORIZED_MISSING_TOKEN',
         'Jeton d’authentification manquant ou format invalide.',
-        correlationId
+        correlationId,
+        corsHeaders
       );
     }
 
@@ -113,7 +133,8 @@ serve(async (req) => {
         401,
         'UNAUTHORIZED_INVALID_TOKEN',
         'Session utilisateur invalide ou expirée.',
-        correlationId
+        correlationId,
+        corsHeaders
       );
     }
 
@@ -135,7 +156,8 @@ serve(async (req) => {
         403,
         'FORBIDDEN_INACTIVE_PROFILE',
         'Accès refusé : Profil utilisateur inactif ou introuvable.',
-        correlationId
+        correlationId,
+        corsHeaders
       );
     }
 
@@ -144,7 +166,8 @@ serve(async (req) => {
         403,
         'FORBIDDEN_INSUFFICIENT_ROLE',
         'Accès refusé : Seule l’administration de l’établissement est habilitée à générer les PDF officiels.',
-        correlationId
+        correlationId,
+        corsHeaders
       );
     }
 
@@ -157,7 +180,8 @@ serve(async (req) => {
         400,
         'INVALID_JSON_BODY',
         'Corps de requête JSON invalide ou mal formaté.',
-        correlationId
+        correlationId,
+        corsHeaders
       );
     }
 
@@ -166,7 +190,8 @@ serve(async (req) => {
         400,
         'INVALID_PAYLOAD_TYPE',
         'Objet JSON attendu dans le corps de la requête.',
-        correlationId
+        correlationId,
+        corsHeaders
       );
     }
 
@@ -176,7 +201,8 @@ serve(async (req) => {
         400,
         'INVALID_PAYLOAD_EXTRA_KEYS',
         'Format de requête invalide : Seul le champ "batch_id" est accepté.',
-        correlationId
+        correlationId,
+        corsHeaders
       );
     }
 
@@ -186,7 +212,8 @@ serve(async (req) => {
         400,
         'INVALID_BATCH_ID',
         'Identifiant de lot (batch_id) manquant ou format UUID non conforme.',
-        correlationId
+        correlationId,
+        corsHeaders
       );
     }
 
@@ -202,7 +229,8 @@ serve(async (req) => {
         404,
         'BATCH_NOT_FOUND',
         'Lot de bulletins introuvable.',
-        correlationId
+        correlationId,
+        corsHeaders
       );
     }
 
@@ -212,7 +240,8 @@ serve(async (req) => {
         403,
         'FORBIDDEN_SCHOOL_MISMATCH',
         'Accès refusé : Vous n’êtes pas autorisé à administrer cet établissement.',
-        correlationId
+        correlationId,
+        corsHeaders
       );
     }
 
@@ -222,7 +251,8 @@ serve(async (req) => {
         400,
         'INVALID_BATCH_STATUS',
         `Génération impossible : Le lot doit être au statut "validated_by_admin" (statut actuel: "${batch.status}").`,
-        correlationId
+        correlationId,
+        corsHeaders
       );
     }
 
@@ -231,7 +261,8 @@ serve(async (req) => {
         400,
         'MISSING_VALIDATION_TIMESTAMP',
         'Génération bloquée : La date de validation administrative (validated_at) est manquante sur ce lot.',
-        correlationId
+        correlationId,
+        corsHeaders
       );
     }
 
@@ -254,7 +285,8 @@ serve(async (req) => {
         claimErrCode === 'JOB_ALREADY_RUNNING' ? 409 : (claimErrCode === 'JOB_CLAIM_RPC_ERROR' ? 500 : 400),
         claimErrCode,
         claimMsg,
-        correlationId
+        correlationId,
+        corsHeaders
       );
     }
 
@@ -275,7 +307,8 @@ serve(async (req) => {
         400,
         'NO_REPORT_CARDS_IN_BATCH',
         'Validation impossible : Aucun bulletin n’a été trouvé dans ce lot.',
-        correlationId
+        correlationId,
+        corsHeaders
       );
     }
 
@@ -297,7 +330,8 @@ serve(async (req) => {
         500,
         'SUBJECTS_FETCH_ERROR',
         'Erreur lors de la récupération des résultats par matière du lot.',
-        correlationId
+        correlationId,
+        corsHeaders
       );
     }
 
@@ -341,7 +375,8 @@ serve(async (req) => {
           409,
           'JOB_LEASE_LOST',
           'Le bail d’exécution distribué a expiré. Le traitement a été interrompu.',
-          correlationId
+          correlationId,
+          corsHeaders
         );
       }
 
@@ -428,7 +463,8 @@ serve(async (req) => {
               409,
               'JOB_LEASE_LOST',
               'Le bail de génération a expiré lors de l’écriture des métadonnées.',
-              correlationId
+              correlationId,
+              corsHeaders
             );
           }
           throw { code: metaRes.error_code || 'METADATA_RPC_ERROR' };
@@ -518,7 +554,12 @@ serve(async (req) => {
       500,
       'INTERNAL_SERVER_ERROR',
       'Une erreur inattendue est survenue lors de la génération des PDF.',
-      correlationId
+      correlationId,
+      corsHeaders
     );
   }
-});
+}
+
+if (import.meta.main) {
+  serve(generateReportCardPdfsHandler);
+}
