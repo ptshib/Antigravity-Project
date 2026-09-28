@@ -3,6 +3,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { resolveAppUrl } from '../_shared/cors.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -207,7 +208,7 @@ serve(async (req) => {
         );
       }
 
-      const appUrl = Deno.env.get('ECOLECONNECT_APP_URL') ?? Deno.env.get('SITE_URL') ?? 'http://localhost:5178';
+      const appUrl = resolveAppUrl();
       const redirectTo = `${appUrl.replace(/\/$/, '')}/auth/set-password`;
 
       const { error: inviteErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(targetEmail, {

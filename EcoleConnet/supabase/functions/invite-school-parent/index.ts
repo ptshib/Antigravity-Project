@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { buildCorsHeaders } from '../_shared/cors.ts';
+import { buildCorsHeaders, resolveAppUrl } from '../_shared/cors.ts';
 import { ResendClient } from '../_shared/resend-client.ts';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -125,8 +125,9 @@ async function generateSecureToken(): Promise<{ rawToken: string; tokenHashHex: 
 }
 
 export async function inviteSchoolParentHandler(req: Request): Promise<Response> {
-  const ecoleconnectAppUrl = Deno.env.get('ECOLECONNECT_APP_URL');
-  const { isAllowed, headers: corsHeaders } = buildCorsHeaders(req, ecoleconnectAppUrl);
+  // Resolves appUrl using priority: ECOLELINK_APP_URL -> ECOLECONNECT_APP_URL -> SITE_URL -> https://ecolelink.com
+  const appUrl = resolveAppUrl();
+  const { isAllowed, headers: corsHeaders } = buildCorsHeaders(req, appUrl);
 
   if (req.method === 'OPTIONS') {
     if (!isAllowed) {
@@ -268,7 +269,7 @@ export async function inviteSchoolParentHandler(req: Request): Promise<Response>
     const cleanFirstName = first_name.trim();
     const cleanLastName = last_name.trim();
     const fullName = `${cleanFirstName} ${cleanLastName}`;
-    const targetOrigin = corsHeaders['Access-Control-Allow-Origin'] || 'https://ecolelink.com';
+    const targetOrigin = corsHeaders['Access-Control-Allow-Origin'] || resolveAppUrl();
 
     const canonicalRelationship = typeof relationship === 'string' && (relationship.trim() === 'Mère' || relationship.trim() === 'mother')
       ? 'mother'

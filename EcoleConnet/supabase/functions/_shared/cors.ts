@@ -9,18 +9,55 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'http://127.0.0.1:3000',
 ];
 
-export function getAllowedOrigins(ecoleconnectAppUrl?: string | null): Set<string> {
-  const allowed = new Set<string>(DEFAULT_ALLOWED_ORIGINS);
-  if (ecoleconnectAppUrl) {
+/**
+ * Resolves the application URL and origin with strict brand priority:
+ * 1. ECOLELINK_APP_URL (environment variable - highest priority)
+ * 2. ecoleconnectAppUrl (optional historical argument passed by caller)
+ * 3. ECOLECONNECT_APP_URL (temporary environment fallback)
+ * 4. SITE_URL (global Supabase environment variable)
+ * 5. https://ecolelink.com (final production fallback)
+ */
+export function resolveAppUrl(ecoleconnectAppUrl?: string | null): string {
+  const getEnv = (key: string): string | undefined => {
     try {
-      const parsed = new URL(ecoleconnectAppUrl);
-      const isLocal = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
-      if (isLocal || parsed.protocol === 'https:') {
-        allowed.add(parsed.origin);
+      if (typeof Deno !== 'undefined' && Deno.env && typeof Deno.env.get === 'function') {
+        return Deno.env.get(key);
       }
     } catch {
-      // Ignore invalid app URL
+      // Ignore environment lookup failures
     }
+    return undefined;
+  };
+
+  const candidates: Array<string | undefined | null> = [
+    getEnv('ECOLELINK_APP_URL'),
+    ecoleconnectAppUrl,
+    getEnv('ECOLECONNECT_APP_URL'),
+    getEnv('SITE_URL'),
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+    const trimmed = candidate.trim();
+    if (!trimmed) continue;
+    try {
+      const parsed = new URL(trimmed);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        return parsed.origin;
+      }
+    } catch {
+      // Invalid URL syntax, proceed safely to next fallback
+    }
+  }
+
+  return 'https://ecolelink.com';
+}
+
+export function getAllowedOrigins(ecoleconnectAppUrl?: string | null): Set<string> {
+  const allowed = new Set<string>(DEFAULT_ALLOWED_ORIGINS);
+  const resolvedOrigin = resolveAppUrl(ecoleconnectAppUrl);
+  if (resolvedOrigin) {
+    allowed.add(resolvedOrigin);
   }
   return allowed;
 }
@@ -43,11 +80,11 @@ export function buildCorsHeaders(req: Request, ecoleconnectAppUrl?: string | nul
       allowOriginHeader = origin;
       isAllowed = true;
     } else {
-      allowOriginHeader = Array.from(allowedSet)[0]; // fallback domain https://ecolelink.com
+      allowOriginHeader = resolveAppUrl(ecoleconnectAppUrl);
       isAllowed = false;
     }
   } else {
-    allowOriginHeader = Array.from(allowedSet)[0];
+    allowOriginHeader = resolveAppUrl(ecoleconnectAppUrl);
     isAllowed = true;
   }
 

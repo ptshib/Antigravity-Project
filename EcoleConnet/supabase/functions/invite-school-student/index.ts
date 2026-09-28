@@ -1,14 +1,14 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { buildCorsHeaders } from '../_shared/cors.ts';
+import { buildCorsHeaders, resolveAppUrl } from '../_shared/cors.ts';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
 serve(async (req) => {
   // 1. Initialisation des en-têtes CORS universels
-  const ecoleconnectAppUrl = Deno.env.get('ECOLECONNECT_APP_URL');
-  const { isAllowed, headers: corsHeaders } = buildCorsHeaders(req, ecoleconnectAppUrl);
+  const appUrl = resolveAppUrl();
+  const { isAllowed, headers: corsHeaders } = buildCorsHeaders(req, appUrl);
 
   // 2. Traitement immédiat des requêtes OPTIONS (Preflight)
   if (req.method === 'OPTIONS') {

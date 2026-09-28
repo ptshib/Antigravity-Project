@@ -14,8 +14,8 @@ export async function handleParentDownloadRequest(req: Request, deps: ParentDown
   const getEnv = deps.getEnv ?? ((key: string) => Deno.env.get(key));
   const createClientFn = deps.createClientFn ?? createClient;
 
-  const ecoleconnectAppUrl = getEnv('ECOLECONNECT_APP_URL') ?? getEnv('SITE_URL') ?? null;
-  const { isAllowed, headers: corsHeaders } = buildCorsHeaders(req, ecoleconnectAppUrl);
+  const appUrl = getEnv('ECOLELINK_APP_URL') ?? getEnv('ECOLECONNECT_APP_URL') ?? getEnv('SITE_URL') ?? null;
+  const { isAllowed, headers: corsHeaders } = buildCorsHeaders(req, appUrl);
 
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
