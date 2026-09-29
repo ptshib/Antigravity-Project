@@ -22,9 +22,9 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ onGoToDemo, onDiscover
               <span>Plateforme Éducative Nouvelle Génération</span>
             </div>
 
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-tight">
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-tight" aria-label="ÉcoleLink">
               <span className="text-white">École</span>
-              <span className="text-amber-500">Connect</span>
+              <span className="text-amber-500">Link</span>
             </h1>
 
             <p className="text-xl sm:text-2xl font-medium text-blue-200 tracking-wide">

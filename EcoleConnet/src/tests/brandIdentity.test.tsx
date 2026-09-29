@@ -8,6 +8,7 @@ import { ParentPortalSidebar } from '../components/parent/portal/ParentPortalSid
 import { StudentPortalSidebar } from '../components/student/portal/StudentPortalSidebar';
 import { PaymentReceiptModal } from '../components/admin/finance/PaymentReceiptModal';
 import { Logo } from '../components/common/Logo';
+import { HeroSection } from '../components/landing/HeroSection';
 
 // Mocks for contexts/services where needed
 vi.mock('../contexts/RealAuthContext', () => ({
@@ -157,5 +158,22 @@ describe('Suite de Validation de l’Identité de Marque — ÉcoleLink', () => 
     );
     expect(screen.getByText('Complexe Scolaire Saint-Joseph')).toBeInTheDocument();
     expect(screen.queryByText('ÉcoleLink')).not.toBeInTheDocument();
+  });
+
+  it('11. HeroSection rend la marque officielle ÉcoleLink et n’affiche pas ÉcoleConnect', () => {
+    const { container } = render(<HeroSection onGoToDemo={() => {}} onDiscover={() => {}} />);
+
+    // Check main heading role and text
+    const heading = screen.getByRole('heading', { level: 1 });
+    expect(heading).toHaveAccessibleName('ÉcoleLink');
+    expect(heading.textContent).toContain('École');
+    expect(heading.textContent).toContain('Link');
+    expect(heading.textContent).not.toContain('Connect');
+
+    // Check DOM text
+    expect(container.textContent).toContain('ÉcoleLink');
+    expect(container.textContent).toContain('PaTShi-Digital');
+    expect(container.textContent).not.toContain('ÉcoleConnect');
+    expect(container.textContent).not.toContain('EcoleConnect');
   });
 });
