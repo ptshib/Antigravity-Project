@@ -9,6 +9,7 @@ import type {
   RecordPaymentParams,
   RecordPaymentResult,
   ParentStudentFinancesResult,
+  ParentFinanceReceipt,
   TeacherClassFinanceOverviewResult,
   StudentFinanceDossierAdminResult,
   InvoiceStatus,
@@ -289,7 +290,7 @@ function validateCancelPaymentResponse(data: unknown): unknown {
   throw new FinanceServiceError('La RPC cancel_student_payment a renvoyé une réponse invalide.');
 }
 
-function validateParentStudentFinances(data: unknown): ParentStudentFinancesResult {
+export function validateParentStudentFinances(data: unknown): ParentStudentFinancesResult {
   if (!isObject(data)) {
     throw new FinanceServiceError('Format de réponse invalide pour get_parent_student_finances.');
   }
@@ -300,6 +301,8 @@ function validateParentStudentFinances(data: unknown): ParentStudentFinancesResu
   const student_number = (studentObj ? getStringProperty(studentObj, 'student_number') : null) || getStringProperty(data, 'student_number');
   const student_name = (studentObj ? (getStringProperty(studentObj, 'student_full_name') || getStringProperty(studentObj, 'student_name')) : null) || getStringProperty(data, 'student_name');
   const class_name = (studentObj ? getStringProperty(studentObj, 'class_name') : null) || getStringProperty(data, 'class_name') || '';
+
+  const school_name = (studentObj ? getStringProperty(studentObj, 'school_name') : null) || getStringProperty(data, 'school_name') || undefined;
 
   // Extract totals from summary_by_currency, summary or flat properties
   const summaryObj = isObject(data['summary_by_currency'])
@@ -366,16 +369,90 @@ function validateParentStudentFinances(data: unknown): ParentStudentFinancesResu
     };
   });
 
+  const rawReceipts = data['receipts'];
+  let validatedReceipts: ParentFinanceReceipt[] = [];
+
+  if (rawReceipts === undefined || rawReceipts === null) {
+    validatedReceipts = [];
+  } else if (!Array.isArray(rawReceipts)) {
+    throw new FinanceServiceError('Le champ receipts dans get_parent_student_finances doit être un tableau.');
+  } else {
+    validatedReceipts = rawReceipts.map((rec: unknown) => {
+      if (!isObject(rec)) {
+        throw new FinanceServiceError('Élément de reçu invalide dans get_parent_student_finances.');
+      }
+
+      const receipt_number = getStringProperty(rec, 'receipt_number');
+      if (!receipt_number || receipt_number === 'null' || receipt_number === 'undefined') {
+        throw new FinanceServiceError('Numéro de reçu absent ou invalide dans get_parent_student_finances.');
+      }
+
+      const invoice_number = getStringProperty(rec, 'invoice_number');
+      if (!invoice_number || invoice_number === 'null' || invoice_number === 'undefined') {
+        throw new FinanceServiceError('Numéro de facture absent ou invalide dans un reçu.');
+      }
+
+      const receipt_date = getStringProperty(rec, 'receipt_date');
+      if (
+        !receipt_date ||
+        receipt_date === 'null' ||
+        receipt_date === 'undefined' ||
+        receipt_date === 'Invalid Date' ||
+        isNaN(Date.parse(receipt_date))
+      ) {
+        throw new FinanceServiceError('Date de reçu absente ou invalide.');
+      }
+
+      const rawAmount = rec['amount'];
+      if (typeof rawAmount !== 'number' || !isFinite(rawAmount)) {
+        throw new FinanceServiceError('Montant de reçu invalide ou non numérique.');
+      }
+
+      const rawBalance = rec['balance_after_payment'];
+      if (typeof rawBalance !== 'number' || !isFinite(rawBalance)) {
+        throw new FinanceServiceError('Solde après paiement invalide ou non numérique.');
+      }
+
+      const rawIsCancelled = rec['is_cancelled'];
+      if (typeof rawIsCancelled !== 'boolean') {
+        throw new FinanceServiceError('Statut d’annulation (is_cancelled) doit être un booléen strict.');
+      }
+
+      const rawCurrency = getStringProperty(rec, 'currency');
+      if (!rawCurrency) {
+        throw new FinanceServiceError('Devise du reçu absente.');
+      }
+
+      const rawPaymentMethod = getStringProperty(rec, 'payment_method');
+      if (!rawPaymentMethod) {
+        throw new FinanceServiceError('Mode de paiement du reçu absent.');
+      }
+
+      return {
+        receipt_number,
+        receipt_date,
+        amount: rawAmount,
+        currency: rawCurrency as Currency,
+        payment_method: rawPaymentMethod as PaymentMethod,
+        invoice_number,
+        balance_after_payment: rawBalance,
+        is_cancelled: rawIsCancelled
+      };
+    });
+  }
+
   return {
     student_id,
     student_number,
     student_name,
     class_name,
+    school_name,
     total_invoiced,
     total_paid,
     total_remaining,
     currency,
-    invoices: validatedInvoices
+    invoices: validatedInvoices,
+    receipts: validatedReceipts
   };
 }
 

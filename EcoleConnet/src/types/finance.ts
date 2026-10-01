@@ -211,12 +211,24 @@ export interface RecordPaymentResult {
   is_idempotent_replay: boolean;
 }
 
+export interface ParentFinanceReceipt {
+  receipt_number: string;
+  receipt_date: string;
+  amount: number;
+  currency: Currency;
+  payment_method: PaymentMethod;
+  invoice_number: string;
+  balance_after_payment: number;
+  is_cancelled: boolean;
+}
+
 // Résultats RPC parent, enseignant et dossier admin
 export interface ParentStudentFinancesResult {
   student_id: string;
   student_number: string;
   student_name: string;
   class_name: string;
+  school_name?: string;
   total_invoiced: number;
   total_paid: number;
   total_remaining: number;
@@ -233,6 +245,7 @@ export interface ParentStudentFinancesResult {
     currency: Currency;
     items_summary: string;
   }>;
+  receipts: ParentFinanceReceipt[];
 }
 
 export interface TeacherClassFinanceOverviewResult {

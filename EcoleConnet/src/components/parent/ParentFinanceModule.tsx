@@ -1,25 +1,44 @@
-// Fichier : src/components/parent/ParentFinanceModule.tsx
-// Module de consultation financière des enfants rattachés pour le Portail Parent (RPC get_parent_student_finances)
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { getParentStudentFinances } from '../../services/financeService';
-import type { ParentStudentFinancesResult } from '../../types/finance';
+import type { ParentStudentFinancesResult, ParentFinanceReceipt } from '../../types/finance';
 import { FormattedAmount, InvoiceStatusBadge } from '../common/CurrencyBadge';
-import { ShieldAlert, FileText, AlertTriangle, RefreshCw } from 'lucide-react';
+import { ShieldAlert, FileText, AlertTriangle, RefreshCw, Receipt, Eye, CheckCircle2, XCircle } from 'lucide-react';
+import { PaymentReceiptModal, type PaymentReceiptData } from '../admin/finance/PaymentReceiptModal';
 
 interface ParentFinanceModuleProps {
   studentId: string;
 }
 
+const translatePaymentMethod = (method: string): string => {
+  switch (method) {
+    case 'cash':
+      return 'Espèces';
+    case 'bank_transfer':
+      return 'Virement bancaire';
+    case 'mobile_money':
+      return 'Mobile Money';
+    case 'card':
+      return 'Carte';
+    default:
+      return method || 'Espèces';
+  }
+};
+
 export const ParentFinanceModule: React.FC<ParentFinanceModuleProps> = ({ studentId }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [finances, setFinances] = useState<ParentStudentFinancesResult | null>(null);
   const [errorState, setErrorState] = useState<{ message: string; isPermissionDenied: boolean } | null>(null);
+  const [selectedReceipt, setSelectedReceipt] = useState<PaymentReceiptData | null>(null);
+  const [isReceiptModalOpen, setIsReceiptModalOpen] = useState<boolean>(false);
 
   const fetchFinances = useCallback(async () => {
     if (!studentId) return;
     setLoading(true);
     setErrorState(null);
+    setFinances(null);
+    setSelectedReceipt(null);
+    setIsReceiptModalOpen(false);
+
     try {
       const { finances: data, error } = await getParentStudentFinances(studentId);
       if (error) {
@@ -47,6 +66,24 @@ export const ParentFinanceModule: React.FC<ParentFinanceModuleProps> = ({ studen
   useEffect(() => {
     fetchFinances();
   }, [fetchFinances]);
+
+  const handleViewReceipt = (rec: ParentFinanceReceipt) => {
+    if (!finances) return;
+    setSelectedReceipt({
+      receipt_number: rec.receipt_number,
+      invoice_number: rec.invoice_number,
+      student_name: finances.student_name,
+      student_number: finances.student_number,
+      class_name: finances.class_name,
+      amount: rec.amount,
+      currency: rec.currency,
+      payment_date: rec.receipt_date,
+      payment_method: rec.payment_method,
+      balance_after_payment: rec.balance_after_payment,
+      is_cancelled: rec.is_cancelled
+    });
+    setIsReceiptModalOpen(true);
+  };
 
   if (loading) {
     return (
@@ -101,6 +138,12 @@ export const ParentFinanceModule: React.FC<ParentFinanceModuleProps> = ({ studen
   }
 
   if (!finances) return null;
+
+  const sortedReceipts = [...(finances.receipts || [])].sort((a, b) => {
+    const dateComp = (b.receipt_date || '').localeCompare(a.receipt_date || '');
+    if (dateComp !== 0) return dateComp;
+    return (b.receipt_number || '').localeCompare(a.receipt_number || '');
+  });
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -194,6 +237,84 @@ export const ParentFinanceModule: React.FC<ParentFinanceModuleProps> = ({ studen
           </div>
         )}
       </div>
+
+      {/* Receipts & Payments List for Parent */}
+      <div className="space-y-3">
+        <h4 className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-2">
+          <Receipt className="w-4 h-4 text-emerald-400" />
+          Paiements & Reçus ({sortedReceipts.length})
+        </h4>
+
+        {sortedReceipts.length === 0 ? (
+          <div className="p-8 text-center bg-slate-900 rounded-3xl border border-slate-800 text-xs text-slate-400">
+            Aucun paiement ou reçu enregistré pour cet élève.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {sortedReceipts.map((rec) => (
+              <div
+                key={rec.receipt_number}
+                className={`p-4 bg-slate-900 border rounded-2xl space-y-3 transition ${
+                  rec.is_cancelled ? 'border-rose-900/50 bg-rose-950/10' : 'border-slate-800 hover:border-slate-700'
+                }`}
+              >
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <strong className="text-sm font-mono font-bold text-amber-400">{rec.receipt_number}</strong>
+                      {rec.is_cancelled ? (
+                        <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-rose-500/20 text-rose-300 border border-rose-500/30 flex items-center gap-1">
+                          <XCircle className="w-3 h-3 text-rose-400" />
+                          Annulé
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 text-[10px] font-bold rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                          Actif
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-300">
+                      Facture : <strong className="font-mono text-slate-200">{rec.invoice_number}</strong> • Mode : <strong className="text-slate-200">{translatePaymentMethod(rec.payment_method)}</strong>
+                    </p>
+                    <p className="text-[11px] text-slate-400">
+                      Date de paiement : {rec.receipt_date}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col sm:items-end justify-between w-full sm:w-auto gap-2">
+                    <div className="text-left sm:text-right">
+                      <span className={`text-base font-black block ${rec.is_cancelled ? 'line-through text-slate-500' : 'text-emerald-400'}`}>
+                        <FormattedAmount amount={rec.amount} currency={rec.currency} />
+                      </span>
+                      <span className="text-[11px] text-slate-400 block font-mono">
+                        Solde après paiement : <FormattedAmount amount={rec.balance_after_payment} currency={rec.currency} />
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleViewReceipt(rec)}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 self-start sm:self-auto border border-slate-700"
+                    >
+                      <Eye className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Voir le reçu</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Modal de Reçu Officiel pour le Portail Parent */}
+      <PaymentReceiptModal
+        isOpen={isReceiptModalOpen}
+        onClose={() => setIsReceiptModalOpen(false)}
+        receipt={selectedReceipt}
+        schoolName={finances.school_name || 'ÉTABLISSEMENT SCOLAIRE'}
+      />
     </div>
   );
 };

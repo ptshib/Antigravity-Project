@@ -10,7 +10,7 @@ import { Printer, ShieldCheck, CheckCircle2, XCircle } from 'lucide-react';
 
 export interface PaymentReceiptData {
   receipt_number: string;
-  payment_number: string;
+  payment_number?: string;
   invoice_number: string;
   student_name: string;
   student_number: string;
@@ -19,6 +19,7 @@ export interface PaymentReceiptData {
   currency: Currency;
   payment_date: string;
   payment_method: PaymentMethod;
+  balance_after_payment?: number;
   recorded_by_name?: string;
   is_idempotent_replay?: boolean;
   is_cancelled?: boolean;
@@ -103,10 +104,12 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
 
           {/* Details Grid */}
           <div className="grid grid-cols-2 gap-3 text-xs py-2">
-            <div>
-              <span className="block text-[10px] text-slate-400 font-bold uppercase">N° Paiement</span>
-              <strong className="font-mono text-slate-800">{receipt.payment_number}</strong>
-            </div>
+            {receipt.payment_number && (
+              <div>
+                <span className="block text-[10px] text-slate-400 font-bold uppercase">N° Paiement</span>
+                <strong className="font-mono text-slate-800">{receipt.payment_number}</strong>
+              </div>
+            )}
 
             <div>
               <span className="block text-[10px] text-slate-400 font-bold uppercase">N° Facture liée</span>
@@ -149,28 +152,38 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
           </div>
 
           {/* Amount Box */}
-          <div className={`p-4 rounded-xl flex justify-between items-center ${isCancelled ? 'bg-rose-100/60 border border-rose-300 text-rose-950' : 'bg-emerald-50 border border-emerald-200 text-emerald-950'}`}>
-            <div>
-              <span className={`block text-[10px] font-extrabold uppercase ${isCancelled ? 'text-rose-700' : 'text-emerald-700'}`}>
-                {isCancelled ? 'Montant Annulé :' : 'Montant Reçu :'}
-              </span>
-              <span className={`text-xl font-black ${isCancelled ? 'line-through text-rose-700' : ''}`}>
-                <FormattedAmount amount={receipt.amount} currency={receipt.currency} />
-              </span>
+          <div className={`p-4 rounded-xl space-y-2 ${isCancelled ? 'bg-rose-100/60 border border-rose-300 text-rose-950' : 'bg-emerald-50 border border-emerald-200 text-emerald-950'}`}>
+            <div className="flex justify-between items-center">
+              <div>
+                <span className={`block text-[10px] font-extrabold uppercase ${isCancelled ? 'text-rose-700' : 'text-emerald-700'}`}>
+                  {isCancelled ? 'Montant Annulé :' : 'Montant Reçu :'}
+                </span>
+                <span className={`text-xl font-black ${isCancelled ? 'line-through text-rose-700' : ''}`}>
+                  <FormattedAmount amount={receipt.amount} currency={receipt.currency} />
+                </span>
+              </div>
+              <div className={`flex items-center gap-1 text-xs font-bold px-3 py-1 rounded-full ${isCancelled ? 'bg-rose-200 text-rose-800' : 'bg-emerald-100 text-emerald-700'}`}>
+                {isCancelled ? (
+                  <>
+                    <XCircle className="w-4 h-4 text-rose-700" />
+                    Paiement Annulé
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 text-emerald-700" />
+                    Paiement Validé
+                  </>
+                )}
+              </div>
             </div>
-            <div className={`flex items-center gap-1 text-xs font-bold px-3 py-1 rounded-full ${isCancelled ? 'bg-rose-200 text-rose-800' : 'bg-emerald-100 text-emerald-700'}`}>
-              {isCancelled ? (
-                <>
-                  <XCircle className="w-4 h-4 text-rose-700" />
-                  Paiement Annulé
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-4 h-4 text-emerald-700" />
-                  Paiement Validé
-                </>
-              )}
-            </div>
+            {typeof receipt.balance_after_payment === 'number' && isFinite(receipt.balance_after_payment) && (
+              <div className={`text-[11px] font-semibold border-t pt-2 ${ isCancelled ? 'border-rose-300 text-rose-700' : 'border-emerald-200 text-emerald-700'}`}>
+                <span className="font-bold uppercase text-[10px]">Solde après ce paiement :</span>{' '}
+                <span className="font-mono font-black">
+                  <FormattedAmount amount={receipt.balance_after_payment} currency={receipt.currency} />
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Ticket Footer Stamp */}
@@ -201,7 +214,7 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
             className="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer flex items-center gap-1.5"
           >
             <Printer className="w-4 h-4" />
-            Imprimer le reçu (PDF)
+            Imprimer le reçu
           </button>
         </div>
       </div>
