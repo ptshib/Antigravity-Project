@@ -7,8 +7,9 @@ import { useNotifications } from '../../../context/NotificationContext';
 import { issueStudentInvoice } from '../../../services/financeService';
 import type { StudentInvoice, RecordPaymentResult } from '../../../types/finance';
 import { FormattedAmount, InvoiceStatusBadge } from '../../common/CurrencyBadge';
-import { Search, Plus, Send, CreditCard, FolderOpen } from 'lucide-react';
+import { Search, Plus, Send, CreditCard, FolderOpen, Users } from 'lucide-react';
 import { CreateDraftInvoiceModal } from './CreateDraftInvoiceModal';
+import { CreateBulkInvoiceModal } from './CreateBulkInvoiceModal';
 import { CancelDraftInvoiceModal } from './CancelDraftInvoiceModal';
 import { PaymentEntryModal } from './PaymentEntryModal';
 import { PaymentReceiptModal } from './PaymentReceiptModal';
@@ -32,6 +33,7 @@ export const StudentInvoicesModule: React.FC<StudentInvoicesModuleProps> = ({ sc
 
   // Modals
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
+  const [showBulkCreateModal, setShowBulkCreateModal] = useState<boolean>(false);
   const [cancelDraftInvoice, setCancelDraftInvoice] = useState<StudentInvoice | null>(null);
   const [paymentInvoice, setPaymentInvoice] = useState<StudentInvoice | null>(null);
   const [activeReceipt, setActiveReceipt] = useState<PaymentReceiptData | null>(null);
@@ -204,13 +206,23 @@ export const StudentInvoicesModule: React.FC<StudentInvoicesModuleProps> = ({ sc
           </select>
         </div>
 
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center gap-1.5 cursor-pointer shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Créer une Facture Brouillon</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            onClick={() => setShowBulkCreateModal(true)}
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center gap-1.5 cursor-pointer"
+          >
+            <Users className="w-4 h-4" />
+            <span>Facturation groupée</span>
+          </button>
+
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center gap-1.5 cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Créer une Facture Brouillon</span>
+          </button>
+        </div>
       </div>
 
       {/* Invoices Table */}
@@ -332,6 +344,13 @@ export const StudentInvoicesModule: React.FC<StudentInvoicesModuleProps> = ({ sc
       )}
 
       {/* Modals */}
+      <CreateBulkInvoiceModal
+        isOpen={showBulkCreateModal}
+        onClose={() => setShowBulkCreateModal(false)}
+        schoolId={schoolId}
+        onSuccess={() => fetchInvoices()}
+      />
+
       <CreateDraftInvoiceModal
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}

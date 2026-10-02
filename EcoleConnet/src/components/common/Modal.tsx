@@ -59,6 +59,7 @@ export const Modal: React.FC<ModalProps> = ({
           <button
             type="button"
             onClick={onClose}
+            aria-label="Fermer"
             className={`p-1.5 rounded-xl transition-colors cursor-pointer ${
               darkMode
                 ? 'text-slate-400 hover:text-white hover:bg-slate-800'

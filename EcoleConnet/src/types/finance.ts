@@ -937,3 +937,110 @@ export interface RealEmailDeliveryJobsResponse {
   has_more: boolean;
   next_cursor: RealEmailDeliveryJobsCursor | null;
 }
+
+// ---------------------------------------------------------------------------
+// FACTURATION GROUPÉE (LOT 2K-FIN-BULK-F)
+// ---------------------------------------------------------------------------
+
+export type BulkInvoiceScopeType = 'fee_target' | 'classes' | 'students';
+export type BulkInvoiceScope = BulkInvoiceScopeType;
+
+export interface BulkInvoiceScopeParams {
+  scope_type: BulkInvoiceScopeType;
+  class_ids?: string[] | null;
+  student_ids?: string[] | null;
+}
+
+export interface BulkInvoiceStudent {
+  student_id: string;
+  first_name: string;
+  last_name: string;
+  class_name?: string;
+  student_number?: string;
+  student_full_name?: string;
+}
+
+export interface BulkInvoiceExcludedStudent {
+  student_id: string;
+  first_name: string;
+  last_name: string;
+  reason_code: 'already_invoiced' | 'inactive_student' | 'inactive_profile' | 'inactive_enrollment' | 'wrong_academic_year' | 'wrong_class' | 'cross_school' | 'invalid_selection' | string;
+  reason_label: string;
+  reason_description?: string;
+  student_number?: string;
+  student_full_name?: string;
+}
+
+export interface BulkInvoiceFeeSummary {
+  fee_id: string;
+  title: string;
+  amount: number;
+  currency: Currency;
+  due_date: string;
+  academic_year_name: string;
+  target: 'school' | 'class';
+}
+
+export interface BulkInvoicePreviewSummary {
+  selected: number;
+  eligible: number;
+  already_invoiced: number;
+  inactive_or_unenrolled: number;
+  estimated_total: number;
+  currency: Currency;
+}
+
+export interface BulkInvoicePreviewResult {
+  fee: BulkInvoiceFeeSummary;
+  scope: BulkInvoiceScopeType;
+  summary: BulkInvoicePreviewSummary;
+  eligible_students: BulkInvoiceStudent[];
+  excluded_students: BulkInvoiceExcludedStudent[];
+}
+
+export interface BulkInvoiceCreationSummary {
+  selected: number;
+  created: number;
+  existing: number;
+  skipped: number;
+}
+
+export interface BulkCreatedInvoice {
+  invoice_id: string;
+  invoice_number?: string | null;
+  student_id: string;
+  amount: number;
+  student_number?: string;
+  student_full_name?: string;
+  currency?: Currency;
+  status?: string;
+}
+
+export interface BulkExistingInvoice {
+  invoice_id: string;
+  invoice_number?: string | null;
+  student_id: string;
+  amount?: number;
+  student_number?: string;
+  student_full_name?: string;
+  status?: string;
+}
+
+export interface BulkSkippedStudent {
+  student_id: string;
+  reason_code: string;
+  reason_label: string;
+  reason_description?: string;
+  student_number?: string;
+  student_full_name?: string;
+}
+
+export interface BulkInvoiceCreationResult {
+  batch_key: string;
+  fee_title: string;
+  currency: Currency;
+  summary: BulkInvoiceCreationSummary;
+  created_invoices: BulkCreatedInvoice[];
+  existing_invoices: BulkExistingInvoice[];
+  skipped_students: BulkSkippedStudent[];
+}

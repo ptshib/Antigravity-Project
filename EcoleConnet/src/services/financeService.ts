@@ -68,7 +68,15 @@ import type {
   CreateRealEmailCampaignResponse,
   ScheduleRealEmailCampaignRequest,
   ScheduleRealEmailCampaignResponse,
-  CampaignPriority
+  CampaignPriority,
+  BulkInvoiceScope,
+  BulkInvoiceStudent,
+  BulkInvoiceExcludedStudent,
+  BulkInvoicePreviewResult,
+  BulkCreatedInvoice,
+  BulkExistingInvoice,
+  BulkSkippedStudent,
+  BulkInvoiceCreationResult
 } from '../types/finance';
 
 /**
@@ -118,12 +126,12 @@ function mapPostgresError(error: unknown): Error {
   if (error instanceof FinanceServiceError) {
     return error;
   }
-  if (!isObject(error)) {
+  if (!isObject(error) && !(error instanceof Error)) {
     return new FinanceServiceError('Une erreur est survenue lors du traitement financier. Veuillez réessayer.');
   }
 
-  const code = getStringProperty(error, 'code') || '';
-  const msg = getStringProperty(error, 'message') || '';
+  const code = isObject(error) ? getStringProperty(error, 'code') || '' : '';
+  const msg = error instanceof Error ? error.message : (isObject(error) ? getStringProperty(error, 'message') || '' : '');
 
   // 1. Accès non autorisé (SQLSTATE 42501)
   if (code === '42501' || msg.includes('42501') || msg.includes('non autorisée') || msg.includes('VIOLATION SÉCURITÉ') || msg.includes('REJET ACCÈS')) {
@@ -136,7 +144,7 @@ function mapPostgresError(error: unknown): Error {
   // 2. Surpaiement / Invalide (SQLSTATE 22023)
   if (code === '22023' || msg.includes('22023') || msg.includes('dépasse le solde') || msg.includes('Surpaiement')) {
     return new FinanceServiceError(
-      'Surpaiement non autorisé : Le montant saisi dépasse le solde restant dû de la facture.',
+      msg || 'Surpaiement non autorisé : Le montant saisi dépasse le solde restant dû de la facture.',
       '22023'
     );
   }
@@ -144,9 +152,13 @@ function mapPostgresError(error: unknown): Error {
   // 3. Conflits / Idempotence connus
   if (msg.includes('idempotent') || msg.includes('déjà enregistré')) {
     return new FinanceServiceError(
-      'Un paiement avec cette référence ou clé d’idempotence a déjà été enregistré.',
+      msg || 'Un paiement avec cette référence ou clé d’idempotence a déjà été enregistré.',
       '409'
     );
+  }
+
+  if (msg && !msg.includes('CONTEXT:') && !msg.includes('PL/pgSQL') && !msg.includes('relation "')) {
+    return new FinanceServiceError(msg);
   }
 
   // 4. Erreur inconnue / technique -> Message générique sécurisé (sans fuite CONTEXT, HINT, nom de fonction, table ou contrainte)
@@ -616,6 +628,340 @@ export async function voidDraftStudentInvoice(params: VoidDraftInvoiceParams): P
     return { success: false, error: mapPostgresError(err) };
   }
 }
+
+// ---------------------------------------------------------------------------
+// FACTURATION GROUPÉE (LOT 2K-FIN-BULK-F) — VALIDATEURS ET METHODES RPC
+// ---------------------------------------------------------------------------
+
+export function validateBulkInvoicePreviewResult(data: unknown): BulkInvoicePreviewResult {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Format de réponse invalide pour preview_bulk_student_invoice_drafts (non-objet).');
+  }
+
+  const feeObj = data['fee'];
+  if (!isObject(feeObj)) {
+    throw new FinanceServiceError('Objet "fee" manquant ou invalide dans la prévisualisation.');
+  }
+
+  const fee_id = getStringProperty(feeObj, 'fee_id');
+  if (!fee_id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fee_id)) {
+    throw new FinanceServiceError('Propriété obligatoire "fee_id" manquante ou format UUID invalide dans fee.');
+  }
+
+  const title = getStringProperty(feeObj, 'title');
+  if (!title || title.trim() === '') {
+    throw new FinanceServiceError('Titre du tarif manquant ou vide dans fee.');
+  }
+
+  const amount = getNumberProperty(feeObj, 'amount');
+  if (amount === null || !isFinite(amount) || amount <= 0) {
+    throw new FinanceServiceError('Montant invalide ou non strictement positif dans fee.');
+  }
+
+  const currencyStr = getStringProperty(feeObj, 'currency');
+  if (currencyStr !== 'USD' && currencyStr !== 'CDF') {
+    throw new FinanceServiceError(`Devise invalide dans fee: ${currencyStr}`);
+  }
+
+  const due_date = getStringProperty(feeObj, 'due_date');
+  if (!due_date || due_date.trim() === '') {
+    throw new FinanceServiceError('Date d’échéance manquante ou vide dans fee.');
+  }
+
+  const academic_year_name = getStringProperty(feeObj, 'academic_year_name') ?? '';
+  const targetStr = getStringProperty(feeObj, 'target');
+  if (targetStr !== 'school' && targetStr !== 'class') {
+    throw new FinanceServiceError(`Cible invalide dans fee: ${targetStr}`);
+  }
+
+  const scopeStr = getStringProperty(data, 'scope');
+  if (scopeStr !== 'fee_target' && scopeStr !== 'classes' && scopeStr !== 'students') {
+    throw new FinanceServiceError(`Scope invalide dans la prévisualisation: ${scopeStr}`);
+  }
+
+  const summaryObj = data['summary'];
+  if (!isObject(summaryObj)) {
+    throw new FinanceServiceError('Objet "summary" manquant ou invalide dans la prévisualisation.');
+  }
+
+  const selected = getNumberProperty(summaryObj, 'selected');
+  const eligible = getNumberProperty(summaryObj, 'eligible');
+  const already_invoiced = getNumberProperty(summaryObj, 'already_invoiced');
+  const inactive_or_unenrolled = getNumberProperty(summaryObj, 'inactive_or_unenrolled');
+  const estimated_total = getNumberProperty(summaryObj, 'estimated_total');
+
+  if (
+    selected === null || !isFinite(selected) || selected < 0 ||
+    eligible === null || !isFinite(eligible) || eligible < 0 ||
+    already_invoiced === null || !isFinite(already_invoiced) || already_invoiced < 0 ||
+    inactive_or_unenrolled === null || !isFinite(inactive_or_unenrolled) || inactive_or_unenrolled < 0 ||
+    estimated_total === null || !isFinite(estimated_total) || estimated_total < 0
+  ) {
+    throw new FinanceServiceError('Compteurs financiers invalides ou non-finis dans summary.');
+  }
+
+  if (selected !== eligible + already_invoiced + inactive_or_unenrolled) {
+    throw new FinanceServiceError(
+      `Invariant de prévisualisation rompu: selected (${selected}) != eligible (${eligible}) + already_invoiced (${already_invoiced}) + inactive_or_unenrolled (${inactive_or_unenrolled})`
+    );
+  }
+
+  const eligible_raw = data['eligible_students'];
+  if (!Array.isArray(eligible_raw)) {
+    throw new FinanceServiceError('Liste "eligible_students" manquante ou non-tableau.');
+  }
+
+  const eligible_students: BulkInvoiceStudent[] = eligible_raw.map((item, idx) => {
+    if (!isObject(item)) {
+      throw new FinanceServiceError(`Élément invalide dans eligible_students à l'index ${idx}.`);
+    }
+    const student_id = getStringProperty(item, 'student_id') ?? '';
+    const first_name = getStringProperty(item, 'first_name') ?? 'Élève';
+    const last_name = getStringProperty(item, 'last_name') ?? 'Sans Nom';
+    const class_name = getStringProperty(item, 'class_name') ?? 'Non assignée';
+
+    return { student_id, first_name, last_name, class_name };
+  });
+
+  const excluded_raw = data['excluded_students'];
+  if (!Array.isArray(excluded_raw)) {
+    throw new FinanceServiceError('Liste "excluded_students" manquante ou non-tableau.');
+  }
+
+  const excluded_students: BulkInvoiceExcludedStudent[] = excluded_raw.map((item, idx) => {
+    if (!isObject(item)) {
+      throw new FinanceServiceError(`Élément invalide dans excluded_students à l'index ${idx}.`);
+    }
+    const student_id = getStringProperty(item, 'student_id') ?? '';
+    const first_name = getStringProperty(item, 'first_name') ?? 'Élève';
+    const last_name = getStringProperty(item, 'last_name') ?? 'Sans Nom';
+    const reason_code = getStringProperty(item, 'reason_code') ?? 'unknown';
+    const reason_label = getStringProperty(item, 'reason_label') ?? 'Raison inconnue';
+
+    return { student_id, first_name, last_name, reason_code, reason_label };
+  });
+
+  return {
+    fee: {
+      fee_id,
+      title,
+      amount,
+      currency: currencyStr as Currency,
+      due_date,
+      academic_year_name,
+      target: targetStr
+    },
+    scope: scopeStr as BulkInvoiceScope,
+    summary: {
+      selected,
+      eligible,
+      already_invoiced,
+      inactive_or_unenrolled,
+      estimated_total,
+      currency: currencyStr as Currency
+    },
+    eligible_students,
+    excluded_students
+  };
+}
+
+export function validateBulkInvoiceCreationResult(data: unknown): BulkInvoiceCreationResult {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Format de réponse invalide pour create_bulk_student_invoice_drafts (non-objet).');
+  }
+
+  const batch_key = getStringProperty(data, 'batch_key');
+  if (!batch_key || !/^[a-zA-Z0-9_\-\.:]{1,128}$/.test(batch_key)) {
+    throw new FinanceServiceError('Propriété "batch_key" manquante ou format invalide.');
+  }
+
+  const fee_title = getStringProperty(data, 'fee_title') ?? 'Tarif';
+  const currencyStr = getStringProperty(data, 'currency');
+  if (currencyStr !== 'USD' && currencyStr !== 'CDF') {
+    throw new FinanceServiceError(`Devise invalide dans le résultat de création: ${currencyStr}`);
+  }
+
+  const summaryObj = data['summary'];
+  if (!isObject(summaryObj)) {
+    throw new FinanceServiceError('Objet "summary" manquant ou invalide dans le résultat de création.');
+  }
+
+  const selected = getNumberProperty(summaryObj, 'selected');
+  const created = getNumberProperty(summaryObj, 'created');
+  const existing = getNumberProperty(summaryObj, 'existing');
+  const skipped = getNumberProperty(summaryObj, 'skipped');
+
+  if (
+    selected === null || !isFinite(selected) || selected < 0 ||
+    created === null || !isFinite(created) || created < 0 ||
+    existing === null || !isFinite(existing) || existing < 0 ||
+    skipped === null || !isFinite(skipped) || skipped < 0
+  ) {
+    throw new FinanceServiceError('Compteurs financiers invalides dans summary de création.');
+  }
+
+  if (selected !== created + existing + skipped) {
+    throw new FinanceServiceError(
+      `Invariant de création rompu: selected (${selected}) != created (${created}) + existing (${existing}) + skipped (${skipped})`
+    );
+  }
+
+  const created_raw = data['created_invoices'];
+  if (!Array.isArray(created_raw)) {
+    throw new FinanceServiceError('Liste "created_invoices" manquante ou non-tableau.');
+  }
+
+  const created_invoices: BulkCreatedInvoice[] = created_raw.map((item, idx) => {
+    if (!isObject(item)) {
+      throw new FinanceServiceError(`Élément invalide dans created_invoices à l'index ${idx}.`);
+    }
+    const invoice_id = getStringProperty(item, 'invoice_id') ?? '';
+    const invoice_number = getStringProperty(item, 'invoice_number');
+    const student_id = getStringProperty(item, 'student_id') ?? '';
+    const amount = getNumberProperty(item, 'amount') ?? 0;
+    const student_number = getStringProperty(item, 'student_number') ?? undefined;
+    const student_full_name = getStringProperty(item, 'student_full_name') ?? undefined;
+
+    return {
+      invoice_id,
+      invoice_number,
+      student_id,
+      amount,
+      ...(student_number ? { student_number } : {}),
+      ...(student_full_name ? { student_full_name } : {})
+    };
+  });
+
+  const existing_raw = data['existing_invoices'];
+  if (!Array.isArray(existing_raw)) {
+    throw new FinanceServiceError('Liste "existing_invoices" manquante ou non-tableau.');
+  }
+
+  const existing_invoices: BulkExistingInvoice[] = existing_raw.map((item, idx) => {
+    if (!isObject(item)) {
+      throw new FinanceServiceError(`Élément invalide dans existing_invoices à l'index ${idx}.`);
+    }
+    const invoice_id = getStringProperty(item, 'invoice_id') ?? '';
+    const invoice_number = getStringProperty(item, 'invoice_number');
+    const student_id = getStringProperty(item, 'student_id') ?? '';
+    const amount = getNumberProperty(item, 'amount') ?? 0;
+    const student_number = getStringProperty(item, 'student_number') ?? undefined;
+    const student_full_name = getStringProperty(item, 'student_full_name') ?? undefined;
+
+    return {
+      invoice_id,
+      invoice_number,
+      student_id,
+      amount,
+      ...(student_number ? { student_number } : {}),
+      ...(student_full_name ? { student_full_name } : {})
+    };
+  });
+
+  const skipped_raw = data['skipped_students'];
+  if (!Array.isArray(skipped_raw)) {
+    throw new FinanceServiceError('Liste "skipped_students" manquante ou non-tableau.');
+  }
+
+  const skipped_students: BulkSkippedStudent[] = skipped_raw.map((item, idx) => {
+    if (!isObject(item)) {
+      throw new FinanceServiceError(`Élément invalide dans skipped_students à l'index ${idx}.`);
+    }
+    const student_id = getStringProperty(item, 'student_id') ?? '';
+    const reason_code = getStringProperty(item, 'reason_code') ?? 'unknown';
+    const reason_label = getStringProperty(item, 'reason_label') ?? 'Raison inconnue';
+    const student_number = getStringProperty(item, 'student_number') ?? undefined;
+    const student_full_name = getStringProperty(item, 'student_full_name') ?? undefined;
+    const reason_description = getStringProperty(item, 'reason_description') ?? undefined;
+
+    return {
+      student_id,
+      reason_code,
+      reason_label,
+      ...(student_number ? { student_number } : {}),
+      ...(student_full_name ? { student_full_name } : {}),
+      ...(reason_description ? { reason_description } : {})
+    };
+  });
+
+  return {
+    batch_key,
+    fee_title,
+    currency: currencyStr as Currency,
+    summary: {
+      selected,
+      created,
+      existing,
+      skipped
+    },
+    created_invoices,
+    existing_invoices,
+    skipped_students
+  };
+}
+
+export async function previewBulkStudentInvoiceDrafts(params: {
+  p_fee_id: string;
+  p_scope?: BulkInvoiceScope;
+  p_class_ids?: string[] | null;
+  p_student_ids?: string[] | null;
+}): Promise<{ result: BulkInvoicePreviewResult | null; error: Error | null }> {
+  try {
+    const scope = params.p_scope || 'fee_target';
+    const classIds = scope === 'classes' && Array.isArray(params.p_class_ids) && params.p_class_ids.length > 0
+      ? Array.from(new Set(params.p_class_ids))
+      : null;
+    const studentIds = scope === 'students' && Array.isArray(params.p_student_ids) && params.p_student_ids.length > 0
+      ? Array.from(new Set(params.p_student_ids))
+      : null;
+
+    const { data, error } = await supabase.rpc('preview_bulk_student_invoice_drafts', {
+      p_fee_id: params.p_fee_id,
+      p_scope: scope,
+      p_class_ids: classIds,
+      p_student_ids: studentIds
+    });
+
+    if (error) return { result: null, error: mapPostgresError(error) };
+    const result = validateBulkInvoicePreviewResult(data);
+    return { result, error: null };
+  } catch (err: unknown) {
+    return { result: null, error: mapPostgresError(err) };
+  }
+}
+
+export async function createBulkStudentInvoiceDrafts(params: {
+  p_fee_id: string;
+  p_scope?: BulkInvoiceScope;
+  p_class_ids?: string[] | null;
+  p_student_ids?: string[] | null;
+  p_batch_idempotency_key?: string | null;
+}): Promise<{ result: BulkInvoiceCreationResult | null; error: Error | null }> {
+  try {
+    const scope = params.p_scope || 'fee_target';
+    const classIds = scope === 'classes' && Array.isArray(params.p_class_ids) && params.p_class_ids.length > 0
+      ? Array.from(new Set(params.p_class_ids))
+      : null;
+    const studentIds = scope === 'students' && Array.isArray(params.p_student_ids) && params.p_student_ids.length > 0
+      ? Array.from(new Set(params.p_student_ids))
+      : null;
+
+    const { data, error } = await supabase.rpc('create_bulk_student_invoice_drafts', {
+      p_fee_id: params.p_fee_id,
+      p_scope: scope,
+      p_class_ids: classIds,
+      p_student_ids: studentIds,
+      p_batch_idempotency_key: params.p_batch_idempotency_key || null
+    });
+
+    if (error) return { result: null, error: mapPostgresError(error) };
+    const result = validateBulkInvoiceCreationResult(data);
+    return { result, error: null };
+  } catch (err: unknown) {
+    return { result: null, error: mapPostgresError(err) };
+  }
+}
+
 
 /**
  * 2. RPC issue_student_invoice
