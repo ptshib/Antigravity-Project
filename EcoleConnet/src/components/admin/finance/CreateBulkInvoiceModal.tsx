@@ -62,6 +62,7 @@ export interface CreateBulkInvoiceModalProps {
   onClose: () => void;
   schoolId: string;
   onSuccess: () => void;
+  onOpenBulkIssueModal?: (sourceBatchKey: string) => void;
   // Optional test & harness props
   fees?: FeeOption[];
   classes?: ClassOption[];
@@ -80,6 +81,7 @@ export const CreateBulkInvoiceModal: React.FC<CreateBulkInvoiceModalProps> = ({
   onClose,
   schoolId,
   onSuccess,
+  onOpenBulkIssueModal,
   fees: propFees,
   classes: propClasses,
   studentsSource: propStudentsSource,
@@ -1046,14 +1048,15 @@ export const CreateBulkInvoiceModal: React.FC<CreateBulkInvoiceModalProps> = ({
               Traitement groupé terminé.
             </div>
 
-            <div className="pt-4 border-t border-slate-200 flex justify-center gap-3">
+            <div className="pt-4 border-t border-slate-200 flex flex-wrap justify-center gap-3">
               <button
                 type="button"
                 onClick={handleModalClose}
-                className="px-5 py-2.5 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-bold transition cursor-pointer"
+                className="px-4 py-2.5 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-bold transition cursor-pointer"
               >
                 Fermer
               </button>
+
               <button
                 type="button"
                 onClick={() => {
@@ -1061,10 +1064,28 @@ export const CreateBulkInvoiceModal: React.FC<CreateBulkInvoiceModalProps> = ({
                   onSuccess();
                   onClose();
                 }}
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-sm cursor-pointer"
+                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold transition cursor-pointer"
               >
                 Voir les factures
               </button>
+
+              {onOpenBulkIssueModal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const keyToPass = creationResult?.batch_key || batchKeyRef.current;
+                    onSuccess();
+                    onClose();
+                    if (keyToPass) {
+                      onOpenBulkIssueModal(keyToPass);
+                    }
+                  }}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm cursor-pointer flex items-center gap-1.5"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Examiner et émettre les brouillons</span>
+                </button>
+              )}
             </div>
           </div>
         )}

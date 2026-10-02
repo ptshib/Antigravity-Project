@@ -1044,3 +1044,122 @@ export interface BulkInvoiceCreationResult {
   existing_invoices: BulkExistingInvoice[];
   skipped_students: BulkSkippedStudent[];
 }
+
+// ---------------------------------------------------------------------------
+// ÉMISSION GROUPÉE DES FACTURES (LOT 2K-FIN-BULK-ISSUE-F)
+// ---------------------------------------------------------------------------
+
+export type BulkIssueSelectorType = 'source_batch_key' | 'fee_id' | 'invoice_ids';
+
+export interface BulkIssueSelectorInfo {
+  type: BulkIssueSelectorType;
+  label: string;
+}
+
+export interface BulkIssuePreviewSummary {
+  selected: number;
+  eligible: number;
+  already_issued: number;
+  invalid: number;
+  estimated_total: number;
+  currency: Currency;
+}
+
+export interface BulkIssueEligibleInvoice {
+  invoice_id: string;
+  student_number: string;
+  student_name: string;
+  class_name: string;
+  amount: number;
+  currency: Currency;
+  due_date: string | null;
+}
+
+export type KnownBulkIssueReasonCode = 'already_issued' | 'invalid_total';
+
+export function isKnownBulkIssueReasonCode(code: string): code is KnownBulkIssueReasonCode {
+  return code === 'already_issued' || code === 'invalid_total';
+}
+
+export interface BulkIssueExcludedInvoice {
+  invoice_id: string;
+  student_number?: string;
+  student_name?: string;
+  reason_code: string;
+  reason_label: string;
+}
+
+export interface BulkIssuePreviewResult {
+  selector: BulkIssueSelectorInfo;
+  summary: BulkIssuePreviewSummary;
+  eligible_invoices: BulkIssueEligibleInvoice[];
+  excluded_invoices: BulkIssueExcludedInvoice[];
+}
+
+export interface BulkIssueExecutionSummary {
+  selected: number;
+  issued: number;
+  existing: number;
+  skipped: number;
+}
+
+export interface BulkIssuedInvoice {
+  invoice_id: string;
+  invoice_number: string;
+  student_number: string;
+  student_name: string;
+  amount: number;
+  currency: Currency;
+  status: 'issued' | string;
+}
+
+export type BulkIssueExistingInvoiceStatus = 'issued' | 'partially_paid' | 'paid';
+
+export interface BulkIssueExistingInvoice {
+  invoice_id: string;
+  invoice_number?: string;
+  student_number?: string;
+  student_name?: string;
+  amount?: number;
+  currency?: Currency;
+  status: BulkIssueExistingInvoiceStatus;
+}
+
+export interface BulkIssueSkippedInvoice {
+  invoice_id: string;
+  student_number?: string;
+  student_name?: string;
+  reason_code: string;
+  reason_label: string;
+}
+
+export interface BulkIssueExecutionResult {
+  success: boolean;
+  is_idempotent_replay: boolean;
+  summary: BulkIssueExecutionSummary;
+  issued_invoices: BulkIssuedInvoice[];
+  existing_invoices: BulkIssueExistingInvoice[];
+  skipped_invoices: BulkIssueSkippedInvoice[];
+}
+
+export type SegmentStatus = 'pending' | 'in_progress' | 'completed' | 'failed_ambiguous' | 'failed_definitive';
+
+export interface BulkIssueSegmentProgress {
+  segment_index: number;
+  total_segments: number;
+  invoice_ids: string[];
+  idempotency_key: string;
+  status: SegmentStatus;
+  error_message?: string | null;
+  error_type?: 'ambiguous' | 'definitive' | null;
+  result?: BulkIssueExecutionResult | null;
+}
+
+export interface SegmentedBulkIssueState {
+  overall_status: 'idle' | 'previewing' | 'confirming' | 'executing' | 'completed' | 'partially_failed' | 'abandoned';
+  total_invoices: number;
+  total_segments: number;
+  completed_segments_count: number;
+  issued_count_total: number;
+  segments: BulkIssueSegmentProgress[];
+}

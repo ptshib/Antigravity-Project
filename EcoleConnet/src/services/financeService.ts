@@ -76,7 +76,16 @@ import type {
   BulkCreatedInvoice,
   BulkExistingInvoice,
   BulkSkippedStudent,
-  BulkInvoiceCreationResult
+  BulkInvoiceCreationResult,
+  BulkIssueSelectorType,
+  BulkIssueEligibleInvoice,
+  BulkIssueExcludedInvoice,
+  BulkIssuePreviewResult,
+  BulkIssuedInvoice,
+  BulkIssueExistingInvoice,
+  BulkIssueExistingInvoiceStatus,
+  BulkIssueSkippedInvoice,
+  BulkIssueExecutionResult
 } from '../types/finance';
 
 /**
@@ -959,6 +968,356 @@ export async function createBulkStudentInvoiceDrafts(params: {
     return { result, error: null };
   } catch (err: unknown) {
     return { result: null, error: mapPostgresError(err) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ÉMISSION GROUPÉE SÉCURISÉE (LOT 2K-FIN-BULK-ISSUE-F) — VALIDATEURS ET RPCs
+// ---------------------------------------------------------------------------
+
+export function validateBulkIssuePreviewResult(data: unknown): BulkIssuePreviewResult {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Format de réponse invalide pour preview_bulk_issue_student_invoices (non-objet).', '22023');
+  }
+
+  const selectorObj = data['selector'];
+  if (!isObject(selectorObj)) {
+    throw new FinanceServiceError('Propriété "selector" manquante ou non-objet dans preview_bulk_issue_student_invoices.', '22023');
+  }
+  const selectorType = getStringProperty(selectorObj, 'type');
+  const selectorLabel = getStringProperty(selectorObj, 'label');
+  if (!selectorType || !['source_batch_key', 'fee_id', 'invoice_ids'].includes(selectorType) || !selectorLabel) {
+    throw new FinanceServiceError('Sélecteur invalide dans la prévisualisation d’émission groupée.', '22023');
+  }
+
+  const summaryObj = data['summary'];
+  if (!isObject(summaryObj)) {
+    throw new FinanceServiceError('Propriété "summary" manquante ou non-objet dans preview_bulk_issue_student_invoices.', '22023');
+  }
+
+  const selected = getNumberProperty(summaryObj, 'selected');
+  const eligible = getNumberProperty(summaryObj, 'eligible');
+  const already_issued = getNumberProperty(summaryObj, 'already_issued');
+  const invalid = getNumberProperty(summaryObj, 'invalid');
+  const estimated_total = getNumberProperty(summaryObj, 'estimated_total');
+  const currency = getStringProperty(summaryObj, 'currency') as Currency | null;
+
+  if (
+    selected === null || !Number.isInteger(selected) || selected < 0 ||
+    eligible === null || !Number.isInteger(eligible) || eligible < 0 ||
+    already_issued === null || !Number.isInteger(already_issued) || already_issued < 0 ||
+    invalid === null || !Number.isInteger(invalid) || invalid < 0 ||
+    estimated_total === null || !Number.isFinite(estimated_total) || estimated_total < 0 ||
+    !currency || !['USD', 'CDF'].includes(currency)
+  ) {
+    throw new FinanceServiceError('Résumé financier ou compteurs invalides dans la prévisualisation.', '22023');
+  }
+
+  if (selected !== eligible + already_issued + invalid) {
+    throw new FinanceServiceError('Invariant de somme des compteurs violé dans le résumé de prévisualisation (selected !== eligible + already_issued + invalid).', '22023');
+  }
+
+  if (!Array.isArray(data['eligible_invoices'])) {
+    throw new FinanceServiceError('Propriété "eligible_invoices" manquante ou non-tableau.', '22023');
+  }
+
+  const eligible_invoices: BulkIssueEligibleInvoice[] = data['eligible_invoices'].map((raw, idx) => {
+    if (!isObject(raw)) {
+      throw new FinanceServiceError(`Facture éligible #${idx + 1} non-objet.`, '22023');
+    }
+    const invId = getStringProperty(raw, 'invoice_id');
+    const stNum = getStringProperty(raw, 'student_number');
+    const stName = getStringProperty(raw, 'student_name');
+    const clsName = getStringProperty(raw, 'class_name');
+    const amt = getNumberProperty(raw, 'amount');
+    const curr = getStringProperty(raw, 'currency') as Currency | null;
+    const dueDateRaw = raw['due_date'];
+
+    if (!invId || !UUID_REGEX.test(invId)) {
+      throw new FinanceServiceError(`invoice_id invalide ou non-UUID dans la facture éligible #${idx + 1}.`, '22023');
+    }
+    if (!stNum || !stName || !clsName || amt === null || !Number.isFinite(amt) || amt <= 0 || !curr || !['USD', 'CDF'].includes(curr)) {
+      throw new FinanceServiceError(`Champs obligatoires invalides dans la facture éligible #${idx + 1}.`, '22023');
+    }
+
+    let dueDate: string | null = null;
+    if (dueDateRaw !== null && dueDateRaw !== undefined) {
+      if (
+        typeof dueDateRaw !== 'string' ||
+        dueDateRaw.trim() === '' ||
+        !/^\d{4}-\d{2}-\d{2}/.test(dueDateRaw) ||
+        isNaN(Date.parse(dueDateRaw))
+      ) {
+        throw new FinanceServiceError(`Date d’échéance due_date invalide dans la facture éligible #${idx + 1}.`, '22023');
+      }
+      dueDate = dueDateRaw;
+    }
+
+    return {
+      invoice_id: invId,
+      student_number: stNum,
+      student_name: stName,
+      class_name: clsName,
+      amount: amt,
+      currency: curr,
+      due_date: dueDate
+    };
+  });
+
+  if (!Array.isArray(data['excluded_invoices'])) {
+    throw new FinanceServiceError('Propriété "excluded_invoices" manquante ou non-tableau.', '22023');
+  }
+
+  const excluded_invoices: BulkIssueExcludedInvoice[] = data['excluded_invoices'].map((raw, idx) => {
+    if (!isObject(raw)) {
+      throw new FinanceServiceError(`Facture exclue #${idx + 1} non-objet.`, '22023');
+    }
+    const invId = getStringProperty(raw, 'invoice_id');
+    const stNum = getStringProperty(raw, 'student_number') || 'N/A';
+    const stName = getStringProperty(raw, 'student_name') || 'Élève inconnu';
+    const reasonCode = getStringProperty(raw, 'reason_code');
+    const reasonLabel = getStringProperty(raw, 'reason_label') || 'Raison d’exclusion non spécifiée';
+
+    if (!invId || !UUID_REGEX.test(invId)) {
+      throw new FinanceServiceError(`invoice_id invalide ou non-UUID dans la facture exclue #${idx + 1}.`, '22023');
+    }
+    if (!reasonCode || reasonCode.trim() === '') {
+      throw new FinanceServiceError(`reason_code obligatoire non vide dans la facture exclue #${idx + 1}.`, '22023');
+    }
+
+    return {
+      invoice_id: invId,
+      student_number: stNum,
+      student_name: stName,
+      reason_code: reasonCode,
+      reason_label: reasonLabel
+    };
+  });
+
+  return {
+    selector: {
+      type: selectorType as BulkIssueSelectorType,
+      label: selectorLabel
+    },
+    summary: {
+      selected,
+      eligible,
+      already_issued,
+      invalid,
+      estimated_total,
+      currency
+    },
+    eligible_invoices,
+    excluded_invoices
+  };
+}
+
+export function validateBulkIssueExecutionResult(data: unknown): BulkIssueExecutionResult {
+  if (!isObject(data)) {
+    throw new FinanceServiceError('Format de réponse invalide pour issue_bulk_student_invoices (non-objet).', '22023');
+  }
+
+  if (typeof data['success'] !== 'boolean' || data['success'] !== true) {
+    throw new FinanceServiceError('Propriété "success" boolean = true requise dans la réponse d’émission groupée.', '22023');
+  }
+
+  if (typeof data['is_idempotent_replay'] !== 'boolean') {
+    throw new FinanceServiceError('Propriété "is_idempotent_replay" boolean requise dans la réponse d’émission groupée.', '22023');
+  }
+
+  const summaryObj = data['summary'];
+  if (!isObject(summaryObj)) {
+    throw new FinanceServiceError('Propriété "summary" manquante ou non-objet dans la réponse d’émission groupée.', '22023');
+  }
+
+  const selected = getNumberProperty(summaryObj, 'selected');
+  const issued = getNumberProperty(summaryObj, 'issued');
+  const existing = getNumberProperty(summaryObj, 'existing');
+  const skipped = getNumberProperty(summaryObj, 'skipped');
+
+  if (
+    selected === null || !Number.isInteger(selected) || selected < 0 ||
+    issued === null || !Number.isInteger(issued) || issued < 0 ||
+    existing === null || !Number.isInteger(existing) || existing < 0 ||
+    skipped === null || !Number.isInteger(skipped) || skipped < 0
+  ) {
+    throw new FinanceServiceError('Compteurs du résumé d’émission invalides.', '22023');
+  }
+
+  if (selected !== issued + existing + skipped) {
+    throw new FinanceServiceError('Invariant de somme des compteurs violé dans le résumé d’émission (selected !== issued + existing + skipped).', '22023');
+  }
+
+  if (!Array.isArray(data['issued_invoices'])) {
+    throw new FinanceServiceError('Propriété "issued_invoices" manquante ou non-tableau.', '22023');
+  }
+
+  const issued_invoices: BulkIssuedInvoice[] = data['issued_invoices'].map((raw, idx) => {
+    if (!isObject(raw)) throw new FinanceServiceError(`Facture émise #${idx + 1} non-objet.`, '22023');
+    const invId = getStringProperty(raw, 'invoice_id');
+    const invNum = getStringProperty(raw, 'invoice_number');
+    const stNum = getStringProperty(raw, 'student_number');
+    const stName = getStringProperty(raw, 'student_name');
+    const amt = getNumberProperty(raw, 'amount');
+    const curr = getStringProperty(raw, 'currency') as Currency | null;
+    const status = getStringProperty(raw, 'status');
+
+    if (!invId || !UUID_REGEX.test(invId) || !invNum || !stNum || !stName || amt === null || amt <= 0 || !curr || status !== 'issued') {
+      throw new FinanceServiceError(`Données invalides dans la facture émise #${idx + 1}.`, '22023');
+    }
+
+    return {
+      invoice_id: invId,
+      invoice_number: invNum,
+      student_number: stNum,
+      student_name: stName,
+      amount: amt,
+      currency: curr,
+      status: 'issued'
+    };
+  });
+
+  const existing_invoices: BulkIssueExistingInvoice[] = Array.isArray(data['existing_invoices'])
+    ? data['existing_invoices'].map((raw, idx) => {
+        if (!isObject(raw)) throw new FinanceServiceError(`Facture existante #${idx + 1} non-objet.`, '22023');
+        const invId = getStringProperty(raw, 'invoice_id');
+        const statusRaw = getStringProperty(raw, 'status');
+
+        if (!invId || !UUID_REGEX.test(invId)) {
+          throw new FinanceServiceError(`invoice_id invalide dans la facture existante #${idx + 1}.`, '22023');
+        }
+        if (!statusRaw || !['issued', 'partially_paid', 'paid'].includes(statusRaw)) {
+          throw new FinanceServiceError(`Statut invalide dans la facture existante #${idx + 1} : attendu "issued", "partially_paid" ou "paid", reçu "${statusRaw}".`, '22023');
+        }
+
+        return {
+          invoice_id: invId,
+          invoice_number: getStringProperty(raw, 'invoice_number') || undefined,
+          student_number: getStringProperty(raw, 'student_number') || undefined,
+          student_name: getStringProperty(raw, 'student_name') || undefined,
+          amount: getNumberProperty(raw, 'amount') || undefined,
+          currency: (getStringProperty(raw, 'currency') as Currency) || undefined,
+          status: statusRaw as BulkIssueExistingInvoiceStatus
+        };
+      })
+    : [];
+
+  const skipped_invoices: BulkIssueSkippedInvoice[] = Array.isArray(data['skipped_invoices'])
+    ? data['skipped_invoices'].map((raw, idx) => {
+        if (!isObject(raw)) throw new FinanceServiceError(`Facture ignorée #${idx + 1} non-objet.`, '22023');
+        const invId = getStringProperty(raw, 'invoice_id');
+        const reasonCode = getStringProperty(raw, 'reason_code');
+        const reasonLabel = getStringProperty(raw, 'reason_label') || 'Facture ignorée';
+
+        if (!invId || !UUID_REGEX.test(invId)) {
+          throw new FinanceServiceError(`invoice_id invalide dans la facture ignorée #${idx + 1}.`, '22023');
+        }
+        if (!reasonCode || reasonCode.trim() === '') {
+          throw new FinanceServiceError(`reason_code obligatoire non vide dans la facture ignorée #${idx + 1}.`, '22023');
+        }
+
+        return {
+          invoice_id: invId,
+          student_number: getStringProperty(raw, 'student_number') || 'N/A',
+          student_name: getStringProperty(raw, 'student_name') || 'Élève inconnu',
+          reason_code: reasonCode,
+          reason_label: reasonLabel
+        };
+      })
+    : [];
+
+  return {
+    success: Boolean(data['success']),
+    is_idempotent_replay: Boolean(data['is_idempotent_replay']),
+    summary: { selected, issued, existing, skipped },
+    issued_invoices,
+    existing_invoices,
+    skipped_invoices
+  };
+}
+
+export async function previewBulkIssueStudentInvoices(params: {
+  p_source_batch_key?: string | null;
+  p_fee_id?: string | null;
+  p_invoice_ids?: string[] | null;
+}): Promise<{ result: BulkIssuePreviewResult | null; error: Error | null }> {
+  const p_source_batch_key = params.p_source_batch_key || null;
+  const p_fee_id = params.p_fee_id || null;
+  const p_invoice_ids = params.p_invoice_ids && params.p_invoice_ids.length > 0 ? params.p_invoice_ids : null;
+
+  const count = (p_source_batch_key ? 1 : 0) + (p_fee_id ? 1 : 0) + (p_invoice_ids ? 1 : 0);
+  if (count !== 1) {
+    return {
+      result: null,
+      error: new FinanceServiceError('Vous devez fournir exactement un seul sélecteur pour la prévisualisation.', '22023')
+    };
+  }
+
+  try {
+    const { data, error } = await supabase.rpc('preview_bulk_issue_student_invoices', {
+      p_source_batch_key,
+      p_fee_id,
+      p_invoice_ids
+    });
+
+    if (error) {
+      return { result: null, error: mapPostgresError(error) };
+    }
+
+    const parsed = validateBulkIssuePreviewResult(data);
+    return { result: parsed, error: null };
+  } catch (err: unknown) {
+    return { result: null, error: mapPostgresError(err) };
+  }
+}
+
+export async function issueBulkStudentInvoices(params: {
+  p_invoice_ids: string[];
+  p_batch_issue_idempotency_key: string;
+}): Promise<{ result: BulkIssueExecutionResult | null; error: (Error & { error_type?: 'ambiguous' | 'definitive' }) | null }> {
+  const { p_invoice_ids, p_batch_issue_idempotency_key } = params;
+
+  if (!p_invoice_ids || p_invoice_ids.length === 0 || p_invoice_ids.length > 500) {
+    const err = new FinanceServiceError('Le tableau d’identifiants de factures à émettre doit contenir entre 1 et 500 éléments.', '22023') as Error & { error_type?: 'ambiguous' | 'definitive' };
+    err.error_type = 'definitive';
+    return { result: null, error: err };
+  }
+
+  const keyPattern = /^bulk-issue-\d{8}-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+  if (!p_batch_issue_idempotency_key || !keyPattern.test(p_batch_issue_idempotency_key)) {
+    const err = new FinanceServiceError('La clé d’idempotence d’émission est invalide. Format attendu : bulk-issue-YYYYMMDD-<uuid>.', '22023') as Error & { error_type?: 'ambiguous' | 'definitive' };
+    err.error_type = 'definitive';
+    return { result: null, error: err };
+  }
+
+  try {
+    const { data, error } = await supabase.rpc('issue_bulk_student_invoices', {
+      p_invoice_ids,
+      p_batch_issue_idempotency_key
+    });
+
+    if (error) {
+      const mapped = mapPostgresError(error) as Error & { error_type?: 'ambiguous' | 'definitive' };
+      const msg = mapped.message.toLowerCase();
+      if (msg.includes('504') || msg.includes('timeout') || msg.includes('délai') || msg.includes('réseau') || msg.includes('network') || msg.includes('fetch')) {
+        mapped.error_type = 'ambiguous';
+      } else {
+        mapped.error_type = 'definitive';
+      }
+      return { result: null, error: mapped };
+    }
+
+    const parsed = validateBulkIssueExecutionResult(data);
+    return { result: parsed, error: null };
+  } catch (err: unknown) {
+    const mapped = mapPostgresError(err) as Error & { error_type?: 'ambiguous' | 'definitive' };
+    const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+    if (msg.includes('504') || msg.includes('timeout') || msg.includes('délai') || msg.includes('réseau') || msg.includes('network') || msg.includes('fetch')) {
+      mapped.error_type = 'ambiguous';
+    } else {
+      mapped.error_type = 'definitive';
+    }
+    return { result: null, error: mapped };
   }
 }
 

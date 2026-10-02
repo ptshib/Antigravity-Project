@@ -10,6 +10,7 @@ import { FormattedAmount, InvoiceStatusBadge } from '../../common/CurrencyBadge'
 import { Search, Plus, Send, CreditCard, FolderOpen, Users } from 'lucide-react';
 import { CreateDraftInvoiceModal } from './CreateDraftInvoiceModal';
 import { CreateBulkInvoiceModal } from './CreateBulkInvoiceModal';
+import { BulkIssueInvoiceModal } from './BulkIssueInvoiceModal';
 import { CancelDraftInvoiceModal } from './CancelDraftInvoiceModal';
 import { PaymentEntryModal } from './PaymentEntryModal';
 import { PaymentReceiptModal } from './PaymentReceiptModal';
@@ -34,6 +35,9 @@ export const StudentInvoicesModule: React.FC<StudentInvoicesModuleProps> = ({ sc
   // Modals
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
   const [showBulkCreateModal, setShowBulkCreateModal] = useState<boolean>(false);
+  const [showBulkIssueModal, setShowBulkIssueModal] = useState<boolean>(false);
+  const [bulkIssueSourceBatchKey, setBulkIssueSourceBatchKey] = useState<string | null>(null);
+  const [bulkIssueInvoiceIds, setBulkIssueInvoiceIds] = useState<string[] | null>(null);
   const [cancelDraftInvoice, setCancelDraftInvoice] = useState<StudentInvoice | null>(null);
   const [paymentInvoice, setPaymentInvoice] = useState<StudentInvoice | null>(null);
   const [activeReceipt, setActiveReceipt] = useState<PaymentReceiptData | null>(null);
@@ -216,6 +220,18 @@ export const StudentInvoicesModule: React.FC<StudentInvoicesModuleProps> = ({ sc
           </button>
 
           <button
+            onClick={() => {
+              setBulkIssueSourceBatchKey(null);
+              setBulkIssueInvoiceIds(null);
+              setShowBulkIssueModal(true);
+            }}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center gap-1.5 cursor-pointer"
+          >
+            <Send className="w-4 h-4" />
+            <span>Émettre des brouillons</span>
+          </button>
+
+          <button
             onClick={() => setShowCreateModal(true)}
             className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold shadow-md transition flex items-center gap-1.5 cursor-pointer"
           >
@@ -348,6 +364,23 @@ export const StudentInvoicesModule: React.FC<StudentInvoicesModuleProps> = ({ sc
         isOpen={showBulkCreateModal}
         onClose={() => setShowBulkCreateModal(false)}
         schoolId={schoolId}
+        onSuccess={() => fetchInvoices()}
+        onOpenBulkIssueModal={(batchKey) => {
+          setBulkIssueSourceBatchKey(batchKey);
+          setBulkIssueInvoiceIds(null);
+          setShowBulkIssueModal(true);
+        }}
+      />
+
+      <BulkIssueInvoiceModal
+        isOpen={showBulkIssueModal}
+        onClose={() => {
+          setShowBulkIssueModal(false);
+          setBulkIssueSourceBatchKey(null);
+          setBulkIssueInvoiceIds(null);
+        }}
+        sourceBatchKey={bulkIssueSourceBatchKey}
+        invoiceIds={bulkIssueInvoiceIds}
         onSuccess={() => fetchInvoices()}
       />
 
