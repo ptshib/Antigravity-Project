@@ -136,11 +136,14 @@ function mapPostgresError(error: unknown): Error {
     return error;
   }
   if (!isObject(error) && !(error instanceof Error)) {
-    return new FinanceServiceError('Une erreur est survenue lors du traitement financier. Veuillez réessayer.');
+    return new FinanceServiceError('Une erreur technique est survenue lors de la prévisualisation. Veuillez réessayer ou contacter le support.');
   }
 
   const code = isObject(error) ? getStringProperty(error, 'code') || '' : '';
   const msg = error instanceof Error ? error.message : (isObject(error) ? getStringProperty(error, 'message') || '' : '');
+
+  // Log détaillé réservé aux outils développeur (console.error) sans secret ni jeton
+  console.error('[FinanceService] Detail SQL error:', { code, message: msg });
 
   // 1. Accès non autorisé (SQLSTATE 42501)
   if (code === '42501' || msg.includes('42501') || msg.includes('non autorisée') || msg.includes('VIOLATION SÉCURITÉ') || msg.includes('REJET ACCÈS')) {
@@ -166,12 +169,31 @@ function mapPostgresError(error: unknown): Error {
     );
   }
 
-  if (msg && !msg.includes('CONTEXT:') && !msg.includes('PL/pgSQL') && !msg.includes('relation "')) {
+  // 4. Filtrage strict des erreurs SQL brutes, colonnes/tables inexistantes, PGRST, SQLSTATE, 42703
+  const isRawSqlError =
+    code === '42703' ||
+    msg.includes('42703') ||
+    msg.includes('column') ||
+    msg.includes('does not exist') ||
+    msg.includes('PGRST') ||
+    msg.includes('SQLSTATE') ||
+    msg.includes('se.is_active') ||
+    msg.includes('relation') ||
+    msg.includes('PL/pgSQL') ||
+    msg.includes('CONTEXT:');
+
+  if (isRawSqlError) {
+    return new FinanceServiceError(
+      'Une erreur technique est survenue lors de la prévisualisation. Veuillez réessayer ou contacter le support.'
+    );
+  }
+
+  if (msg && !msg.includes('CONTEXT:') && !msg.includes('PL/pgSQL') && !msg.includes('relation "') && !msg.includes('does not exist')) {
     return new FinanceServiceError(msg);
   }
 
-  // 4. Erreur inconnue / technique -> Message générique sécurisé (sans fuite CONTEXT, HINT, nom de fonction, table ou contrainte)
-  return new FinanceServiceError('Une erreur est survenue lors du traitement financier. Veuillez réessayer.');
+  // 5. Erreur inconnue / technique -> Message générique sécurisé sans fuite d'information
+  return new FinanceServiceError('Une erreur technique est survenue lors de la prévisualisation. Veuillez réessayer ou contacter le support.');
 }
 
 // ---------------------------------------------------------------------------

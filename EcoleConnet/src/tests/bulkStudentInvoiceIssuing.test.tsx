@@ -2103,5 +2103,102 @@ describe('LOT 2K-FIN-BULK-ISSUE-F — Suite de 60 Tests Ciblés Émission Group�
         expect(selectEl?.textContent).toContain('TEST MANUEL — Facturation groupée — 03 octobre 2026');
       });
     });
+
+    it('97. Sanitize les erreurs SQL brutes (42703, column se.is_active does not exist) et les masque totalement du DOM', async () => {
+      vi.spyOn(supabase, 'rpc').mockResolvedValueOnce({
+        data: null,
+        error: {
+          code: '42703',
+          message: 'column se.is_active does not exist',
+          details: 'Error: column se.is_active does not exist at position 208',
+          hint: 'Use status = active'
+        },
+        count: null,
+        status: 400,
+        statusText: 'Bad Request'
+      } as any);
+
+      render(
+        <BulkIssueInvoiceModal
+          isOpen={true}
+          onClose={vi.fn()}
+          feeId="fee-123"
+          initialStep={1}
+        />
+      );
+
+      await waitFor(() => {
+        const html = document.body.innerHTML;
+        expect(html).not.toContain('42703');
+        expect(html).not.toContain('se.is_active');
+        expect(html).not.toContain('does not exist');
+        expect(html).not.toContain('PGRST');
+        expect(html).not.toContain('SQLSTATE');
+        expect(screen.getByText(/Une erreur technique est survenue lors de la prévisualisation/i)).toBeInTheDocument();
+      });
+    });
+
+    it('98. Masque les préfixes d’erreurs PostgREST (PGRST...) et SQLSTATE du DOM', async () => {
+      vi.spyOn(supabase, 'rpc').mockResolvedValueOnce({
+        data: null,
+        error: {
+          code: 'PGRST200',
+          message: 'PGRST200: Could not find relationship in schema',
+          details: 'SQLSTATE 42703 detail text'
+        },
+        count: null,
+        status: 400,
+        statusText: 'Bad Request'
+      } as any);
+
+      render(
+        <BulkIssueInvoiceModal
+          isOpen={true}
+          onClose={vi.fn()}
+          feeId="fee-123"
+          initialStep={1}
+        />
+      );
+
+      await waitFor(() => {
+        const html = document.body.innerHTML;
+        expect(html).not.toContain('PGRST200');
+        expect(html).not.toContain('SQLSTATE');
+        expect(screen.getByText(/Une erreur technique est survenue/i)).toBeInTheDocument();
+      });
+    });
+
+    it('99. Conserve le détail technique de l’erreur SQL uniquement dans console.error', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      vi.spyOn(supabase, 'rpc').mockResolvedValueOnce({
+        data: null,
+        error: {
+          code: '42703',
+          message: 'column se.is_active does not exist'
+        },
+        count: null,
+        status: 400,
+        statusText: 'Bad Request'
+      } as any);
+
+      render(
+        <BulkIssueInvoiceModal
+          isOpen={true}
+          onClose={vi.fn()}
+          feeId="fee-123"
+          initialStep={1}
+        />
+      );
+
+      await waitFor(() => {
+        expect(consoleSpy).toHaveBeenCalledWith(
+          expect.stringContaining('[FinanceService]'),
+          expect.objectContaining({ code: '42703', message: 'column se.is_active does not exist' })
+        );
+      });
+
+      consoleSpy.mockRestore();
+    });
   });
 });
