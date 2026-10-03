@@ -26,7 +26,8 @@ import {
   Loader2,
   Building2,
   School,
-  HelpCircle
+  HelpCircle,
+  RefreshCw
 } from 'lucide-react';
 
 interface FeeOption {
@@ -48,6 +49,13 @@ interface ClassOption {
   name: string;
 }
 
+interface StudentEnrollmentRaw {
+  class_id?: string | null;
+  class_name?: string | null;
+  academic_year_id?: string | null;
+  status: string;
+}
+
 interface StudentOption {
   id: string;
   student_number: string;
@@ -55,6 +63,7 @@ interface StudentOption {
   last_name: string;
   class_id?: string | null;
   class_name?: string | null;
+  rawEnrollments?: StudentEnrollmentRaw[];
 }
 
 export interface CreateBulkInvoiceModalProps {
@@ -111,6 +120,7 @@ export const CreateBulkInvoiceModal: React.FC<CreateBulkInvoiceModalProps> = ({
   const [classes, setClasses] = useState<ClassOption[]>(propClasses || []);
   const [students, setStudents] = useState<StudentOption[]>(propStudentsSource || []);
   const [loadingMasterData, setLoadingMasterData] = useState<boolean>(false);
+  const [masterDataError, setMasterDataError] = useState<string | null>(null);
 
   // Step 1: Selected Fee
   const [selectedFeeId, setSelectedFeeId] = useState<string>(propInitialFee ? propInitialFee.id : '');
@@ -141,101 +151,175 @@ export const CreateBulkInvoiceModal: React.FC<CreateBulkInvoiceModalProps> = ({
   const isSubmittingRef = useRef<boolean>(false);
   const batchKeyRef = useRef<string | null>(null);
 
-  // Load master fees, classes, and students when modal opens
+  const resolveStudentEnrollment = (
+    rawEnrollments: StudentEnrollmentRaw[] = [],
+    targetAcademicYearId?: string | null
+  ): StudentEnrollmentRaw | null => {
+    const activeEnrs = rawEnrollments.filter((e) => e.status === 'active');
+    if (activeEnrs.length === 0) return null;
+    if (targetAcademicYearId) {
+      const yearMatch = activeEnrs.find((e) => e.academic_year_id === targetAcademicYearId);
+      if (yearMatch) return yearMatch;
+    }
+    return activeEnrs[0];
+  };
+
+  const previousSchoolIdRef = useRef<string>(schoolId);
+
+  const loadMasterData = async () => {
+    if (!schoolId) return;
+    setLoadingMasterData(true);
+    setMasterDataError(null);
+    try {
+      // 1. Fetch fees
+      const { data: feesData, error: feesErr } = await supabase
+        .from('school_fees')
+        .select(`
+          id, name, fee_type, amount, currency, due_date, academic_year_id, class_id, is_active,
+          academic_year:academic_years(name),
+          class:classes(name)
+        `)
+        .eq('school_id', schoolId)
+        .eq('is_active', true)
+        .order('name', { ascending: true });
+
+      if (feesErr) {
+        console.error('[CreateBulkInvoiceModal] Erreur chargement des tarifs:', feesErr.message);
+      }
+      if (feesData) {
+        const parsedFees: FeeOption[] = feesData.map((f) => {
+          const fObj = f as Record<string, unknown>;
+          const ayObj = fObj.academic_year as Record<string, unknown> | undefined;
+          const clsObj = fObj.class as Record<string, unknown> | undefined;
+          return {
+            id: String(fObj.id),
+            name: String(fObj.name || ''),
+            fee_type: String(fObj.fee_type || 'autre'),
+            amount: Number(fObj.amount) || 0,
+            currency: (fObj.currency === 'CDF' ? 'CDF' : 'USD') as Currency,
+            due_date: String(fObj.due_date || ''),
+            academic_year_id: String(fObj.academic_year_id || ''),
+            academic_year_name: String(ayObj?.name || ''),
+            class_id: (fObj.class_id as string) || null,
+            class_name: String(clsObj?.name || ''),
+            is_active: Boolean(fObj.is_active)
+          };
+        });
+        setFees(parsedFees);
+      }
+
+      // 2. Fetch classes
+      const { data: classesData, error: classesErr } = await supabase
+        .from('classes')
+        .select('id, name')
+        .eq('school_id', schoolId)
+        .order('name', { ascending: true });
+
+      if (classesErr) {
+        console.error('[CreateBulkInvoiceModal] Erreur chargement des classes:', classesErr.message);
+      }
+      if (classesData) {
+        setClasses(classesData as ClassOption[]);
+      }
+
+      // 3. Fetch active students directly using students.first_name and students.last_name
+      const { data: studentsData, error: studentsErr } = await supabase
+        .from('students')
+        .select(`
+          id, first_name, last_name, student_number,
+          enrollments:student_enrollments(
+            status,
+            academic_year_id,
+            class_id,
+            class:classes(id, name)
+          )
+        `)
+        .eq('school_id', schoolId);
+
+      if (studentsErr) {
+        console.error('[CreateBulkInvoiceModal] Erreur chargement des élèves:', studentsErr.message);
+        setMasterDataError('Impossible de charger les élèves de l’établissement. Veuillez réessayer.');
+        setStudents([]);
+      } else if (studentsData) {
+        const uniqueMap = new Map<string, StudentOption>();
+        studentsData.forEach((st) => {
+          const stObj = st as Record<string, unknown>;
+          const stId = String(stObj.id);
+
+          const enrRawList = (stObj.enrollments as Array<Record<string, unknown>>) || [];
+          const rawEnrollments: StudentEnrollmentRaw[] = enrRawList.map((e) => {
+            const clsObj = e.class as Record<string, unknown> | undefined;
+            return {
+              class_id: (clsObj?.id as string) || (e.class_id as string) || null,
+              class_name: String(clsObj?.name || ''),
+              academic_year_id: (e.academic_year_id as string) || null,
+              status: String(e.status || '')
+            };
+          });
+
+          const activeEnr = resolveStudentEnrollment(rawEnrollments, null);
+
+          if (!uniqueMap.has(stId)) {
+            uniqueMap.set(stId, {
+              id: stId,
+              student_number: String(stObj.student_number || ''),
+              first_name: String(stObj.first_name || ''),
+              last_name: String(stObj.last_name || ''),
+              class_id: activeEnr?.class_id || null,
+              class_name: activeEnr?.class_name || null,
+              rawEnrollments
+            });
+          }
+        });
+
+        const parsedStudents = Array.from(uniqueMap.values());
+        // Deterministic sorting by last_name, first_name, student_number
+        parsedStudents.sort((a, b) => {
+          const lastCompare = (a.last_name || '').localeCompare(b.last_name || '', 'fr', { sensitivity: 'base' });
+          if (lastCompare !== 0) return lastCompare;
+          const firstCompare = (a.first_name || '').localeCompare(b.first_name || '', 'fr', { sensitivity: 'base' });
+          if (firstCompare !== 0) return firstCompare;
+          return (a.student_number || '').localeCompare(b.student_number || '', 'fr', { sensitivity: 'base' });
+        });
+
+        setStudents(parsedStudents);
+      }
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : 'Erreur inattendue';
+      console.error('[CreateBulkInvoiceModal] Erreur globale master data:', errMsg);
+      setMasterDataError('Impossible de charger les élèves de l’établissement. Veuillez réessayer.');
+      setStudents([]);
+    } finally {
+      setLoadingMasterData(false);
+    }
+  };
+
+  // Load master fees, classes, and students when modal opens or schoolId changes
   useEffect(() => {
-    if (!isOpen || !schoolId) return;
+    if (!isOpen || !schoolId) {
+      setMasterDataError(null);
+      return;
+    }
+
+    if (previousSchoolIdRef.current !== schoolId) {
+      previousSchoolIdRef.current = schoolId;
+      setSelectedFeeId('');
+      setSelectedClassIds([]);
+      setSelectedStudentIds([]);
+      setPreviewResult(null);
+      setPreviewError(null);
+      setIsConfirmed(false);
+      batchKeyRef.current = null;
+    }
 
     if (propFees !== undefined || propClasses !== undefined || propStudentsSource !== undefined) {
       if (propFees !== undefined) setFees(propFees);
       if (propClasses !== undefined) setClasses(propClasses);
       if (propStudentsSource !== undefined) setStudents(propStudentsSource);
       setLoadingMasterData(false);
+      setMasterDataError(null);
       return;
     }
-
-    const loadMasterData = async () => {
-      setLoadingMasterData(true);
-      try {
-        // 1. Fetch fees
-        const { data: feesData } = await supabase
-          .from('school_fees')
-          .select(`
-            id, name, fee_type, amount, currency, due_date, academic_year_id, class_id, is_active,
-            academic_year:academic_years(name),
-            class:classes(name)
-          `)
-          .eq('school_id', schoolId)
-          .eq('is_active', true)
-          .order('name', { ascending: true });
-
-        if (feesData) {
-          const parsedFees: FeeOption[] = feesData.map((f) => {
-            const fObj = f as Record<string, unknown>;
-            const ayObj = fObj.academic_year as Record<string, unknown> | undefined;
-            const clsObj = fObj.class as Record<string, unknown> | undefined;
-            return {
-              id: String(fObj.id),
-              name: String(fObj.name || ''),
-              fee_type: String(fObj.fee_type || 'autre'),
-              amount: Number(fObj.amount) || 0,
-              currency: (fObj.currency === 'CDF' ? 'CDF' : 'USD') as Currency,
-              due_date: String(fObj.due_date || ''),
-              academic_year_id: String(fObj.academic_year_id || ''),
-              academic_year_name: String(ayObj?.name || ''),
-              class_id: (fObj.class_id as string) || null,
-              class_name: String(clsObj?.name || ''),
-              is_active: Boolean(fObj.is_active)
-            };
-          });
-          setFees(parsedFees);
-        }
-
-        // 2. Fetch classes
-        const { data: classesData } = await supabase
-          .from('classes')
-          .select('id, name')
-          .eq('school_id', schoolId)
-          .order('name', { ascending: true });
-
-        if (classesData) {
-          setClasses(classesData as ClassOption[]);
-        }
-
-        // 3. Fetch active students from administration records
-        const { data: studentsData } = await supabase
-          .from('students')
-          .select(`
-            id, student_number,
-            profile:profiles!fk_students_profile(first_name, last_name),
-            enrollments:student_enrollments(class:classes(id, name), status)
-          `)
-          .eq('school_id', schoolId);
-
-        if (studentsData) {
-          const parsedStudents: StudentOption[] = studentsData.map((st) => {
-            const stObj = st as Record<string, unknown>;
-            const profObj = stObj.profile as Record<string, unknown> | undefined;
-            const enrList = (stObj.enrollments as Array<Record<string, unknown>>) || [];
-            const activeEnr = enrList.find((e) => e.status === 'active') || enrList[0];
-            const clsObj = activeEnr?.class as Record<string, unknown> | undefined;
-
-            return {
-              id: String(stObj.id),
-              student_number: String(stObj.student_number || ''),
-              first_name: String(profObj?.first_name || 'Élève'),
-              last_name: String(profObj?.last_name || 'Sans Nom'),
-              class_id: (clsObj?.id as string) || null,
-              class_name: String(clsObj?.name || '')
-            };
-          });
-          setStudents(parsedStudents);
-        }
-      } catch (err) {
-        console.error('Erreur chargement données de facturation groupée:', err);
-      } finally {
-        setLoadingMasterData(false);
-      }
-    };
 
     loadMasterData();
   }, [isOpen, schoolId]);
@@ -261,17 +345,37 @@ export const CreateBulkInvoiceModal: React.FC<CreateBulkInvoiceModalProps> = ({
 
   // Filtered students for Step 2
   const filteredStudents = useMemo(() => {
-    return students.filter((s) => {
-      // If fee is restricted to a class, filter only students of that class
-      if (selectedFee?.class_id && s.class_id !== selectedFee.class_id) {
-        return false;
-      }
-      const matchesSearch =
-        `${s.first_name} ${s.last_name}`.toLowerCase().includes(studentSearch.toLowerCase()) ||
-        s.student_number.toLowerCase().includes(studentSearch.toLowerCase());
-      const matchesClass = studentClassFilter === 'all' || s.class_id === studentClassFilter;
-      return matchesSearch && matchesClass;
-    });
+    const targetAcademicYearId = selectedFee?.academic_year_id || null;
+
+    return students
+      .map((s) => {
+        if (s.rawEnrollments && s.rawEnrollments.length > 0) {
+          const activeEnr = resolveStudentEnrollment(s.rawEnrollments, targetAcademicYearId);
+          return {
+            ...s,
+            effectiveClassId: activeEnr?.class_id || null,
+            effectiveClassName: activeEnr?.class_name || null
+          };
+        }
+        return {
+          ...s,
+          effectiveClassId: s.class_id || null,
+          effectiveClassName: s.class_name || null
+        };
+      })
+      .filter((s) => {
+        // If fee is restricted to a class, filter only students of that class
+        if (selectedFee?.class_id && s.effectiveClassId !== selectedFee.class_id) {
+          return false;
+        }
+        const searchLower = studentSearch.trim().toLowerCase();
+        const matchesSearch =
+          !searchLower ||
+          `${s.first_name} ${s.last_name}`.toLowerCase().includes(searchLower) ||
+          s.student_number.toLowerCase().includes(searchLower);
+        const matchesClass = studentClassFilter === 'all' || s.effectiveClassId === studentClassFilter;
+        return matchesSearch && matchesClass;
+      });
   }, [students, selectedFee, studentSearch, studentClassFilter]);
 
   // Handle select all visible students
@@ -429,10 +533,10 @@ export const CreateBulkInvoiceModal: React.FC<CreateBulkInvoiceModalProps> = ({
                       key={fee.id}
                       onClick={() => {
                         setSelectedFeeId(fee.id);
-                        // If fee is restricted to a class, reset scope to fee_target
+                        setSelectedClassIds([]);
+                        setSelectedStudentIds([]);
                         if (fee.class_id) {
                           setScope('fee_target');
-                          setSelectedClassIds([]);
                         }
                         handleScopeOrSelectionChange();
                       }}
@@ -617,14 +721,16 @@ export const CreateBulkInvoiceModal: React.FC<CreateBulkInvoiceModalProps> = ({
                     <button
                       type="button"
                       onClick={handleSelectAllVisibleStudents}
-                      className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-[11px] font-semibold transition"
+                      disabled={loadingMasterData || masterDataError !== null || filteredStudents.length === 0}
+                      className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-50 text-indigo-700 rounded-lg text-[11px] font-semibold transition"
                     >
                       Tout sélectionner ({filteredStudents.length})
                     </button>
                     <button
                       type="button"
                       onClick={handleDeselectAllStudents}
-                      className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-semibold transition"
+                      disabled={selectedStudentIds.length === 0}
+                      className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 rounded-lg text-[11px] font-semibold transition"
                     >
                       Tout désélectionner
                     </button>
@@ -661,11 +767,33 @@ export const CreateBulkInvoiceModal: React.FC<CreateBulkInvoiceModalProps> = ({
 
                 {/* Student Selection Table / List */}
                 <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-xl bg-white divide-y divide-slate-100">
-                  {filteredStudents.length === 0 ? (
-                    <div className="p-4 text-center text-xs text-slate-500">Aucun élève correspondant trouvé.</div>
+                  {loadingMasterData ? (
+                    <div className="p-4 text-center text-xs text-slate-500 flex justify-center items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+                      <span>Chargement des élèves...</span>
+                    </div>
+                  ) : masterDataError ? (
+                    <div className="p-4 bg-red-50 text-center space-y-2">
+                      <div className="text-xs text-red-700 font-semibold">{masterDataError}</div>
+                      <button
+                        type="button"
+                        onClick={loadMasterData}
+                        className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span>Réessayer</span>
+                      </button>
+                    </div>
+                  ) : filteredStudents.length === 0 ? (
+                    <div className="p-4 text-center text-xs text-slate-500">
+                      {students.length === 0
+                        ? 'Aucun élève trouvé dans cet établissement.'
+                        : 'Aucun élève correspondant trouvé.'}
+                    </div>
                   ) : (
                     filteredStudents.map((st) => {
                       const isChecked = selectedStudentIds.includes(st.id);
+                      const classNameToDisplay = st.effectiveClassName || st.class_name || 'Sans classe';
                       return (
                         <label
                           key={st.id}
@@ -691,11 +819,13 @@ export const CreateBulkInvoiceModal: React.FC<CreateBulkInvoiceModalProps> = ({
                               <span className="font-bold text-slate-900">
                                 {st.first_name} {st.last_name}
                               </span>
-                              <span className="ml-2 text-[10px] font-mono text-slate-500">({st.student_number})</span>
+                              {st.student_number && (
+                                <span className="ml-2 text-[10px] font-mono text-slate-500">({st.student_number})</span>
+                              )}
                             </div>
                           </div>
                           <span className="text-[10px] font-semibold px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md">
-                            {st.class_name || 'Sans classe'}
+                            {classNameToDisplay}
                           </span>
                         </label>
                       );
@@ -720,7 +850,8 @@ export const CreateBulkInvoiceModal: React.FC<CreateBulkInvoiceModalProps> = ({
                 disabled={
                   (scope === 'classes' && selectedClassIds.length === 0) ||
                   (scope === 'students' && selectedStudentIds.length === 0) ||
-                  loadingPreview
+                  loadingPreview ||
+                  masterDataError !== null
                 }
                 onClick={handleRunPreview}
                 className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-sm cursor-pointer"

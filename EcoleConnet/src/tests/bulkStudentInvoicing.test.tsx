@@ -1339,4 +1339,641 @@ describe('LOT 2K-FIN-BULK-F-V — Suite de 45 Tests Adversariaux Frontend Factur
     // Audit static sanity check confirming scratch files are outside src directory
     expect(true).toBe(true);
   });
+
+  // ---------------------------------------------------------------------------
+  // TESTS DE NON-RÉGRESSION SÉLECTEUR ÉLÈVES (LOT 2K-FIN-BULK-STUDENT-SELECTOR-F)
+  // ---------------------------------------------------------------------------
+
+  it('52. la requête n’utilise plus fk_students_profile et les noms proviennent directement de students.first_name/last_name', async () => {
+    const schoolId = 's1000000-0000-4000-a000-000000000001';
+    const feeId = 'f1000000-0000-4000-a000-000000000001';
+    const ayId2026 = 'ay2026-0000-4000-a000-000000000001';
+    const class1AId = 'c1a00000-0000-4000-a000-000000000001';
+
+    const fromSpy = vi.spyOn(supabase, 'from').mockImplementation((table: string) => {
+      if (table === 'school_fees') {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                order: () => Promise.resolve({ data: [{ id: feeId, name: 'Frais T1', amount: 10, currency: 'USD', due_date: '2026-10-10', academic_year_id: ayId2026, is_active: true }], error: null })
+              })
+            })
+          })
+        } as any;
+      }
+      if (table === 'classes') {
+        return {
+          select: () => ({
+            eq: () => ({
+              order: () => Promise.resolve({ data: [{ id: class1AId, name: '1A' }], error: null })
+            })
+          })
+        } as any;
+      }
+      if (table === 'students') {
+        return {
+          select: (queryStr: string) => {
+            expect(queryStr).not.toContain('fk_students_profile');
+            expect(queryStr).not.toContain('profiles');
+            expect(queryStr).toContain('first_name');
+            expect(queryStr).toContain('last_name');
+            return {
+              eq: (col: string, val: string) => {
+                expect(col).toBe('school_id');
+                expect(val).toBe(schoolId);
+                return Promise.resolve({
+                  data: [
+                    {
+                      id: 'st-daniel-id-12345',
+                      first_name: 'Daniel',
+                      last_name: 'Banza',
+                      student_number: 'ELV-2026-010',
+                      enrollments: [
+                        { status: 'active', academic_year_id: ayId2026, class_id: class1AId, class: { id: class1AId, name: '1A' } }
+                      ]
+                    }
+                  ],
+                  error: null
+                });
+              }
+            } as any;
+          }
+        } as any;
+      }
+      return { select: () => Promise.resolve({ data: [], error: null }) } as any;
+    });
+
+    render(
+      <NotificationProvider>
+        <CreateBulkInvoiceModal
+          isOpen={true}
+          onClose={vi.fn()}
+          schoolId={schoolId}
+          onSuccess={vi.fn()}
+          initialStep={2}
+          initialScopeType="students"
+        />
+      </NotificationProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Daniel Banza/)).toBeInTheDocument();
+      expect(screen.getByText(/(ELV-2026-010)/)).toBeInTheDocument();
+      expect(screen.getAllByText('1A').length).toBeGreaterThanOrEqual(1);
+    });
+
+    expect(fromSpy).toHaveBeenCalledWith('students');
+  });
+
+  it('53. un school_admin voit les élèves de son établissement et Daniel Banza apparaît', async () => {
+    const schoolId = 's1000000-0000-4000-a000-000000000001';
+    vi.spyOn(supabase, 'from').mockImplementation((table: string) => {
+      if (table === 'students') {
+        return {
+          select: () => ({
+            eq: () => Promise.resolve({
+              data: [
+                {
+                  id: 'st-daniel',
+                  first_name: 'Daniel',
+                  last_name: 'Banza',
+                  student_number: 'ELV-2026-010',
+                  enrollments: [{ status: 'active', academic_year_id: 'ay1', class_id: 'c1', class: { name: '1A' } }]
+                }
+              ],
+              error: null
+            })
+          })
+        } as any;
+      }
+      return { select: () => ({ eq: () => ({ eq: () => ({ order: () => Promise.resolve({ data: [], error: null }) }), order: () => Promise.resolve({ data: [], error: null }) }) }) } as any;
+    });
+
+    render(
+      <NotificationProvider>
+        <CreateBulkInvoiceModal
+          isOpen={true}
+          onClose={vi.fn()}
+          schoolId={schoolId}
+          onSuccess={vi.fn()}
+          initialStep={2}
+          initialScopeType="students"
+        />
+      </NotificationProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Daniel Banza')).toBeInTheDocument();
+    });
+  });
+
+  it('54. recherche par "Daniel", par "Banza" et par matricule "ELV-2026-010"', async () => {
+    const schoolId = 's1000000-0000-4000-a000-000000000001';
+    render(
+      <NotificationProvider>
+        <CreateBulkInvoiceModal
+          isOpen={true}
+          onClose={vi.fn()}
+          schoolId={schoolId}
+          onSuccess={vi.fn()}
+          initialStep={2}
+          initialScopeType="students"
+          fees={[{ id: 'f1', name: 'Minerval', amount: 10, currency: 'USD', due_date: '2026-10-10', academic_year_id: 'ay1', fee_type: 'minerval', is_active: true }]}
+          classes={[{ id: 'c1', name: '1A' }]}
+          studentsSource={[
+            { id: 'st-daniel', first_name: 'Daniel', last_name: 'Banza', student_number: 'ELV-2026-010', class_id: 'c1', class_name: '1A' },
+            { id: 'st-autre', first_name: 'Marie', last_name: 'Kasa', student_number: 'ELV-2026-020', class_id: 'c1', class_name: '1A' }
+          ]}
+        />
+      </NotificationProvider>
+    );
+
+    const searchInput = screen.getByPlaceholderText('Nom, prénom ou matricule...');
+
+    // Search Daniel
+    fireEvent.change(searchInput, { target: { value: 'Daniel' } });
+    expect(screen.getByText('Daniel Banza')).toBeInTheDocument();
+    expect(screen.queryByText('Marie Kasa')).not.toBeInTheDocument();
+
+    // Search Banza
+    fireEvent.change(searchInput, { target: { value: 'Banza' } });
+    expect(screen.getByText('Daniel Banza')).toBeInTheDocument();
+    expect(screen.queryByText('Marie Kasa')).not.toBeInTheDocument();
+
+    // Search ELV-2026-010
+    fireEvent.change(searchInput, { target: { value: 'ELV-2026-010' } });
+    expect(screen.getByText('Daniel Banza')).toBeInTheDocument();
+    expect(screen.queryByText('Marie Kasa')).not.toBeInTheDocument();
+  });
+
+  it('55. filtre par classe "1A"', async () => {
+    const schoolId = 's1000000-0000-4000-a000-000000000001';
+    render(
+      <NotificationProvider>
+        <CreateBulkInvoiceModal
+          isOpen={true}
+          onClose={vi.fn()}
+          schoolId={schoolId}
+          onSuccess={vi.fn()}
+          initialStep={2}
+          initialScopeType="students"
+          fees={[{ id: 'f1', name: 'Minerval', amount: 10, currency: 'USD', due_date: '2026-10-10', academic_year_id: 'ay1', fee_type: 'minerval', is_active: true }]}
+          classes={[{ id: 'c1', name: '1A' }, { id: 'c2', name: '2B' }]}
+          studentsSource={[
+            { id: 'st-daniel', first_name: 'Daniel', last_name: 'Banza', student_number: 'ELV-2026-010', class_id: 'c1', class_name: '1A' },
+            { id: 'st-paul', first_name: 'Paul', last_name: 'Kabuya', student_number: 'ELV-2026-030', class_id: 'c2', class_name: '2B' }
+          ]}
+        />
+      </NotificationProvider>
+    );
+
+    const selectClass = screen.getByRole('combobox');
+    fireEvent.change(selectClass, { target: { value: 'c1' } });
+
+    expect(screen.getByText('Daniel Banza')).toBeInTheDocument();
+    expect(screen.queryByText('Paul Kabuya')).not.toBeInTheDocument();
+  });
+
+  it('56. privilégie l’inscription active de l’année du tarif et ignore l’inscription inactive', async () => {
+    const schoolId = 's1000000-0000-4000-a000-000000000001';
+    const feeId = 'f1000000-0000-4000-a000-000000000001';
+    const ayTarget = 'ay2026';
+
+    vi.spyOn(supabase, 'from').mockImplementation((table: string) => {
+      if (table === 'school_fees') {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                order: () => Promise.resolve({
+                  data: [{ id: feeId, name: 'Minerval', amount: 10, currency: 'USD', due_date: '2026-10-10', academic_year_id: ayTarget, is_active: true }],
+                  error: null
+                })
+              })
+            })
+          })
+        } as any;
+      }
+      if (table === 'classes') {
+        return {
+          select: () => ({
+            eq: () => ({
+              order: () => Promise.resolve({ data: [{ id: 'c-target', name: '1A Prioritaire' }], error: null })
+            })
+          })
+        } as any;
+      }
+      if (table === 'students') {
+        return {
+          select: () => ({
+            eq: () => Promise.resolve({
+              data: [
+                {
+                  id: 'st-multi',
+                  first_name: 'Alain',
+                  last_name: 'Mukendi',
+                  student_number: 'ELV-999',
+                  enrollments: [
+                    { status: 'inactive', academic_year_id: 'old-year', class_id: 'c-old', class: { name: 'Ancienne Classe' } },
+                    { status: 'active', academic_year_id: 'other-year', class_id: 'c-other', class: { name: 'Autre Classe' } },
+                    { status: 'active', academic_year_id: ayTarget, class_id: 'c-target', class: { name: '1A Prioritaire' } }
+                  ]
+                }
+              ],
+              error: null
+            })
+          })
+        } as any;
+      }
+      return { select: () => Promise.resolve({ data: [], error: null }) } as any;
+    });
+
+    render(
+      <NotificationProvider>
+        <CreateBulkInvoiceModal
+          isOpen={true}
+          onClose={vi.fn()}
+          schoolId={schoolId}
+          onSuccess={vi.fn()}
+          initialStep={2}
+          initialScopeType="students"
+        />
+      </NotificationProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('1A Prioritaire')).toBeInTheDocument();
+      expect(screen.queryByText('Ancienne Classe')).not.toBeInTheDocument();
+    });
+  });
+
+  it('57. élève d’un autre établissement absent car la requête filtre par school_id', async () => {
+    const schoolId = 's1000000-0000-4000-a000-000000000001';
+    const eqSpy = vi.fn();
+    vi.spyOn(supabase, 'from').mockImplementation((table: string) => {
+      if (table === 'students') {
+        return {
+          select: () => ({
+            eq: eqSpy.mockImplementation((col, val) => {
+              expect(col).toBe('school_id');
+              expect(val).toBe(schoolId);
+              return Promise.resolve({ data: [], error: null });
+            })
+          })
+        } as any;
+      }
+      return { select: () => ({ eq: () => ({ eq: () => ({ order: () => Promise.resolve({ data: [], error: null }) }), order: () => Promise.resolve({ data: [], error: null }) }) }) } as any;
+    });
+
+    render(
+      <NotificationProvider>
+        <CreateBulkInvoiceModal
+          isOpen={true}
+          onClose={vi.fn()}
+          schoolId={schoolId}
+          onSuccess={vi.fn()}
+          initialStep={2}
+          initialScopeType="students"
+        />
+      </NotificationProvider>
+    );
+
+    await waitFor(() => {
+      expect(eqSpy).toHaveBeenCalledWith('school_id', schoolId);
+    });
+  });
+
+  it('58. réponse Supabase vide affiche le véritable état vide "Aucun élève trouvé dans cet établissement."', async () => {
+    const schoolId = 's1000000-0000-4000-a000-000000000001';
+    vi.spyOn(supabase, 'from').mockImplementation((table: string) => {
+      if (table === 'students') {
+        return {
+          select: () => ({
+            eq: () => Promise.resolve({ data: [], error: null })
+          })
+        } as any;
+      }
+      return { select: () => ({ eq: () => ({ eq: () => ({ order: () => Promise.resolve({ data: [], error: null }) }), order: () => Promise.resolve({ data: [], error: null }) }) }) } as any;
+    });
+
+    render(
+      <NotificationProvider>
+        <CreateBulkInvoiceModal
+          isOpen={true}
+          onClose={vi.fn()}
+          schoolId={schoolId}
+          onSuccess={vi.fn()}
+          initialStep={2}
+          initialScopeType="students"
+        />
+      </NotificationProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Aucun élève trouvé dans cet établissement.')).toBeInTheDocument();
+    });
+  });
+
+  it('59. erreur PGRST200 affiche un message d’erreur explicitement avec un bouton Réessayer', async () => {
+    const schoolId = 's1000000-0000-4000-a000-000000000001';
+    vi.spyOn(supabase, 'from').mockImplementation((table: string) => {
+      if (table === 'students') {
+        return {
+          select: () => ({
+            eq: () => Promise.resolve({
+              data: null,
+              error: { code: 'PGRST200', message: 'Could not find a relationship between students and profiles' }
+            })
+          })
+        } as any;
+      }
+      return { select: () => ({ eq: () => ({ eq: () => ({ order: () => Promise.resolve({ data: [], error: null }) }), order: () => Promise.resolve({ data: [], error: null }) }) }) } as any;
+    });
+
+    render(
+      <NotificationProvider>
+        <CreateBulkInvoiceModal
+          isOpen={true}
+          onClose={vi.fn()}
+          schoolId={schoolId}
+          onSuccess={vi.fn()}
+          initialStep={2}
+          initialScopeType="students"
+        />
+      </NotificationProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Impossible de charger les élèves de l’établissement. Veuillez réessayer.')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Réessayer/i })).toBeInTheDocument();
+      expect(screen.queryByText('Aucun élève correspondant trouvé.')).not.toBeInTheDocument();
+      expect(screen.queryByText(/PGRST200/)).not.toBeInTheDocument();
+    });
+  });
+
+  it('60. le bouton Réessayer relance le chargement des élèves', async () => {
+    const schoolId = 's1000000-0000-4000-a000-000000000001';
+    let callCount = 0;
+    vi.spyOn(supabase, 'from').mockImplementation((table: string) => {
+      if (table === 'students') {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            select: () => ({
+              eq: () => Promise.resolve({ data: null, error: { message: 'Network error' } })
+            })
+          } as any;
+        } else {
+          return {
+            select: () => ({
+              eq: () => Promise.resolve({
+                data: [{ id: 'st-daniel', first_name: 'Daniel', last_name: 'Banza', student_number: 'ELV-010' }],
+                error: null
+              })
+            })
+          } as any;
+        }
+      }
+      return { select: () => ({ eq: () => ({ eq: () => ({ order: () => Promise.resolve({ data: [], error: null }) }), order: () => Promise.resolve({ data: [], error: null }) }) }) } as any;
+    });
+
+    render(
+      <NotificationProvider>
+        <CreateBulkInvoiceModal
+          isOpen={true}
+          onClose={vi.fn()}
+          schoolId={schoolId}
+          onSuccess={vi.fn()}
+          initialStep={2}
+          initialScopeType="students"
+        />
+      </NotificationProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Impossible de charger les élèves de l’établissement. Veuillez réessayer.')).toBeInTheDocument();
+    });
+
+    const retryBtn = screen.getByRole('button', { name: /Réessayer/i });
+    fireEvent.click(retryBtn);
+
+    await waitFor(() => {
+      expect(callCount).toBe(2);
+      expect(screen.getByText('Daniel Banza')).toBeInTheDocument();
+    });
+  });
+
+  it('61. arrivée tardive de schoolId déclenche le chargement', async () => {
+    const schoolId = 's1000000-0000-4000-a000-000000000001';
+    const studentFetchSpy = vi.fn();
+    vi.spyOn(supabase, 'from').mockImplementation((table: string) => {
+      if (table === 'students') {
+        return {
+          select: () => ({
+            eq: studentFetchSpy.mockImplementation((_col, _val) => {
+              return Promise.resolve({
+                data: [{ id: 'st-1', first_name: 'Grace', last_name: 'Kabeya', student_number: 'ELV-001' }],
+                error: null
+              });
+            })
+          })
+        } as any;
+      }
+      return { select: () => ({ eq: () => ({ eq: () => ({ order: () => Promise.resolve({ data: [], error: null }) }), order: () => Promise.resolve({ data: [], error: null }) }) }) } as any;
+    });
+
+    const { rerender } = render(
+      <NotificationProvider>
+        <CreateBulkInvoiceModal
+          isOpen={true}
+          onClose={vi.fn()}
+          schoolId=""
+          onSuccess={vi.fn()}
+          initialStep={2}
+          initialScopeType="students"
+        />
+      </NotificationProvider>
+    );
+
+    expect(studentFetchSpy).not.toHaveBeenCalled();
+
+    rerender(
+      <NotificationProvider>
+        <CreateBulkInvoiceModal
+          isOpen={true}
+          onClose={vi.fn()}
+          schoolId={schoolId}
+          onSuccess={vi.fn()}
+          initialStep={2}
+          initialScopeType="students"
+        />
+      </NotificationProvider>
+    );
+
+    await waitFor(() => {
+      expect(studentFetchSpy).toHaveBeenCalledWith('school_id', schoolId);
+      expect(screen.getByText('Grace Kabeya')).toBeInTheDocument();
+    });
+  });
+
+  it('62. aucun UUID n’est visible dans le DOM lors de la sélection d’élèves', async () => {
+    const schoolId = 's1000000-0000-4000-a000-000000000001';
+    const uuidId = '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3d4b5d';
+    render(
+      <NotificationProvider>
+        <CreateBulkInvoiceModal
+          isOpen={true}
+          onClose={vi.fn()}
+          schoolId={schoolId}
+          onSuccess={vi.fn()}
+          initialStep={2}
+          initialScopeType="students"
+          fees={[{ id: 'f1', name: 'Minerval', amount: 10, currency: 'USD', due_date: '2026-10-10', academic_year_id: 'ay1', fee_type: 'minerval', is_active: true }]}
+          classes={[{ id: 'c1', name: '1A' }]}
+          studentsSource={[
+            { id: uuidId, first_name: 'Daniel', last_name: 'Banza', student_number: 'ELV-2026-010', class_id: 'c1', class_name: '1A' }
+          ]}
+        />
+      </NotificationProvider>
+    );
+
+    expect(screen.queryByText(uuidId)).not.toBeInTheDocument();
+  });
+
+  it('63. sélection d’un seul élève et prévisualisation avec selected = 1', async () => {
+    const schoolId = 's1000000-0000-4000-a000-000000000001';
+    const feeId = 'f1000000-0000-4000-a000-000000000001';
+    const mockFee = { id: feeId, name: 'Frais T1 2026', amount: 10, currency: 'USD' as const, due_date: '2026-10-31', academic_year_id: 'ay1', fee_type: 'minerval', is_active: true };
+
+    const rpcSpy = vi.spyOn(supabase, 'rpc').mockResolvedValue({
+      data: {
+        fee: { fee_id: feeId, title: 'Frais T1 2026', amount: 10, currency: 'USD', due_date: '2026-10-31', target: 'school' },
+        scope: 'students',
+        summary: { selected: 1, eligible: 1, already_invoiced: 0, inactive_or_unenrolled: 0, estimated_total: 10, currency: 'USD' },
+        eligible_students: [{ student_id: 'st-daniel', first_name: 'Daniel', last_name: 'Banza', class_name: '1A' }],
+        excluded_students: []
+      },
+      error: null
+    } as any);
+
+    render(
+      <NotificationProvider>
+        <CreateBulkInvoiceModal
+          isOpen={true}
+          onClose={vi.fn()}
+          schoolId={schoolId}
+          onSuccess={vi.fn()}
+          initialStep={2}
+          initialScopeType="students"
+          fees={[mockFee]}
+          initialFee={mockFee}
+          classes={[{ id: 'c1', name: '1A' }]}
+          studentsSource={[
+            { id: 'st-daniel', first_name: 'Daniel', last_name: 'Banza', student_number: 'ELV-2026-010', class_id: 'c1', class_name: '1A' }
+          ]}
+        />
+      </NotificationProvider>
+    );
+
+    const checkbox = screen.getByRole('checkbox');
+    fireEvent.click(checkbox);
+
+    expect(screen.getByText(/1 sélectionné\(s\)/)).toBeInTheDocument();
+
+    const previewBtn = screen.getByRole('button', { name: /Prévisualiser l'impact/i });
+    expect(previewBtn).not.toBeDisabled();
+    fireEvent.click(previewBtn);
+
+    await waitFor(() => {
+      expect(rpcSpy).toHaveBeenCalledWith('preview_bulk_student_invoice_drafts', {
+        p_fee_id: feeId,
+        p_scope: 'students',
+        p_class_ids: null,
+        p_student_ids: ['st-daniel']
+      });
+    });
+  });
+
+  it('64. changement de tarif invalide la sélection et l’aperçu', () => {
+    const schoolId = 's1000000-0000-4000-a000-000000000001';
+    const mockFee1 = { id: 'f1', name: 'Tarif A', amount: 10, currency: 'USD' as const, due_date: '2026-10-31', academic_year_id: 'ay1', fee_type: 'minerval', is_active: true };
+    const mockFee2 = { id: 'f2', name: 'Tarif B', amount: 20, currency: 'USD' as const, due_date: '2026-10-31', academic_year_id: 'ay1', fee_type: 'minerval', is_active: true };
+
+    render(
+      <NotificationProvider>
+        <CreateBulkInvoiceModal
+          isOpen={true}
+          onClose={vi.fn()}
+          schoolId={schoolId}
+          onSuccess={vi.fn()}
+          initialStep={2}
+          initialScopeType="students"
+          fees={[mockFee1, mockFee2]}
+          classes={[{ id: 'c1', name: '1A' }]}
+          studentsSource={[
+            { id: 'st-daniel', first_name: 'Daniel', last_name: 'Banza', student_number: 'ELV-2026-010', class_id: 'c1', class_name: '1A' }
+          ]}
+        />
+      </NotificationProvider>
+    );
+
+    fireEvent.click(screen.getByRole('checkbox'));
+    expect(screen.getByText(/1 sélectionné\(s\)/)).toBeInTheDocument();
+
+    // Go back to fee selection and pick another fee
+    fireEvent.click(screen.getByRole('button', { name: /Précédent/i }));
+    fireEvent.click(screen.getByText('Tarif B'));
+    fireEvent.click(screen.getByRole('button', { name: /Continuer vers les destinataires/i }));
+
+    expect(screen.getByText(/0 sélectionné\(s\)/)).toBeInTheDocument();
+  });
+
+  it('65. absence de régression sur les modes Population du tarif et Classes sélectionnées', async () => {
+    const schoolId = 's1000000-0000-4000-a000-000000000001';
+    const feeId = 'f1000000-0000-4000-a000-000000000001';
+    const mockFee = { id: feeId, name: 'Minerval', amount: 10, currency: 'USD' as const, due_date: '2026-10-31', academic_year_id: 'ay1', fee_type: 'minerval', is_active: true };
+
+    const rpcSpy = vi.spyOn(supabase, 'rpc').mockResolvedValue({
+      data: {
+        fee: { fee_id: feeId, title: 'Minerval', amount: 10, currency: 'USD', due_date: '2026-10-31', target: 'school' },
+        scope: 'classes',
+        summary: { selected: 5, eligible: 5, already_invoiced: 0, inactive_or_unenrolled: 0, estimated_total: 50, currency: 'USD' },
+        eligible_students: [],
+        excluded_students: []
+      },
+      error: null
+    } as any);
+
+    render(
+      <NotificationProvider>
+        <CreateBulkInvoiceModal
+          isOpen={true}
+          onClose={vi.fn()}
+          schoolId={schoolId}
+          onSuccess={vi.fn()}
+          initialStep={2}
+          initialScopeType="classes"
+          fees={[mockFee]}
+          initialFee={mockFee}
+          classes={[{ id: 'c1', name: '1A' }]}
+        />
+      </NotificationProvider>
+    );
+
+    const checkbox1A = screen.getByLabelText('1A');
+    fireEvent.click(checkbox1A);
+
+    const previewBtn = screen.getByRole('button', { name: /Prévisualiser l'impact/i });
+    fireEvent.click(previewBtn);
+
+    await waitFor(() => {
+      expect(rpcSpy).toHaveBeenCalledWith('preview_bulk_student_invoice_drafts', {
+        p_fee_id: feeId,
+        p_scope: 'classes',
+        p_class_ids: ['c1'],
+        p_student_ids: null
+      });
+    });
+  });
 });
