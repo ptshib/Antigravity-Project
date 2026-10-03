@@ -1,9 +1,10 @@
 // Fichier : src/components/admin/finance/BulkIssueInvoiceModal.tsx
 // Composant Modal d'émission groupée sécurisée et segmentée des factures (Lot 2K-FIN-BULK-ISSUE-F-V2)
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Modal } from '../../common/Modal';
 import { useNotifications } from '../../../context/NotificationContext';
+import { supabase } from '../../../lib/supabase';
 import {
   previewBulkIssueStudentInvoices,
   issueBulkStudentInvoices
@@ -46,6 +47,7 @@ export interface BulkIssueInvoiceModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: () => void;
+  schoolId?: string;
   // Options d'entrée en mémoire
   sourceBatchKey?: string | null;
   feeId?: string | null;
@@ -87,10 +89,11 @@ export const BulkIssueInvoiceModal: React.FC<BulkIssueInvoiceModalProps> = ({
   isOpen,
   onClose,
   onSuccess,
+  schoolId,
   sourceBatchKey: propSourceBatchKey,
   feeId: propFeeId,
   invoiceIds: propInvoiceIds,
-  fees: propFees = [],
+  fees: propFees,
   initialStep = 1,
   initialPreview = null,
   initialExecutionState = null
@@ -100,9 +103,12 @@ export const BulkIssueInvoiceModal: React.FC<BulkIssueInvoiceModalProps> = ({
   // Étape courante (1: Sélection, 2: Prévisualisation, 3: Confirmation, 4: Progression, 5: Résultat)
   const [step, setStep] = useState<BulkIssueStep>(initialStep as BulkIssueStep);
 
-  // État de sélection
+  // État de sélection et de tarifs
   const [selectedFeeId, setSelectedFeeId] = useState<string>(propFeeId || '');
   const [manualInvoiceIds, setManualInvoiceIds] = useState<string[]>(propInvoiceIds || []);
+  const [availableFees, setAvailableFees] = useState<BulkIssueFeeOption[]>(propFees || []);
+  const [isLoadingFees, setIsLoadingFees] = useState<boolean>(false);
+  const [feesError, setFeesError] = useState<string | null>(null);
   const [inMemoryBatchKey, setInMemoryBatchKey] = useState<string | null>(propSourceBatchKey || null);
 
   // Chargement et prévisualisation
@@ -198,6 +204,65 @@ export const BulkIssueInvoiceModal: React.FC<BulkIssueInvoiceModalProps> = ({
       }
     }
   }, [isOpen, propSourceBatchKey, propFeeId, propInvoiceIds, initialPreview, initialStep, initialExecutionState]);
+
+  // Chargement dynamique des tarifs actifs
+  const fetchSchoolFees = useCallback(async () => {
+    setIsLoadingFees(true);
+    setFeesError(null);
+
+    try {
+      let query = supabase
+        .from('school_fees')
+        .select('id, name, amount, currency, due_date')
+        .eq('is_active', true);
+
+      if (schoolId) {
+        query = query.eq('school_id', schoolId);
+      }
+
+      const { data, error } = await query.order('name', { ascending: true });
+
+      if (!isMountedRef.current) return;
+
+      if (error) {
+        console.error('[BulkIssueInvoiceModal] Erreur chargement tarifs:', error.message);
+        setFeesError('Impossible de charger la liste des tarifs.');
+        showToast('Impossible de charger la liste des tarifs.', 'urgent');
+        setAvailableFees([]);
+      } else if (data) {
+        const parsedFees: BulkIssueFeeOption[] = data.map((f: Record<string, unknown>) => ({
+          id: String(f.id || ''),
+          name: String(f.name || ''),
+          amount: Number(f.amount) || 0,
+          currency: (f.currency === 'CDF' ? 'CDF' : 'USD') as Currency,
+          due_date: f.due_date ? String(f.due_date) : undefined
+        }));
+        setAvailableFees(parsedFees);
+      }
+    } catch (err: unknown) {
+      if (!isMountedRef.current) return;
+      const msg = 'Erreur lors du chargement des tarifs.';
+      setFeesError(msg);
+      showToast(msg, 'urgent');
+      setAvailableFees([]);
+    } finally {
+      if (isMountedRef.current) {
+        setIsLoadingFees(false);
+      }
+    }
+  }, [schoolId, showToast]);
+
+  useEffect(() => {
+    if (isOpen && step === 1 && !inMemoryBatchKey) {
+      if (propFees !== undefined && propFees !== null) {
+        setAvailableFees(propFees);
+        setIsLoadingFees(false);
+        setFeesError(null);
+      } else {
+        fetchSchoolFees();
+      }
+    }
+  }, [isOpen, step, inMemoryBatchKey, propFees, fetchSchoolFees]);
 
   // Lancement de la prévisualisation RPC
   const handleLoadPreview = async (
@@ -653,30 +718,66 @@ export const BulkIssueInvoiceModal: React.FC<BulkIssueInvoiceModalProps> = ({
                 <label className="block text-sm font-semibold text-slate-800">
                   Sélectionner un tarif de référence
                 </label>
-                <select
-                  value={selectedFeeId}
-                  onChange={(e) => handleFeeSelectionChange(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                >
-                  <option value="">-- Choisir un tarif --</option>
-                  {propFees.map(fee => (
-                    <option key={fee.id} value={fee.id}>
-                      {fee.name} — {fee.amount} {fee.currency}
-                    </option>
-                  ))}
-                </select>
 
-                <div className="flex justify-end pt-4">
-                  <button
-                    type="button"
-                    onClick={() => handleLoadPreview(null, selectedFeeId, null)}
-                    disabled={!selectedFeeId || isLoadingPreview}
-                    className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 transition-colors disabled:opacity-50"
-                  >
-                    {isLoadingPreview ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
-                    Prévisualiser l’émission
-                  </button>
-                </div>
+                {isLoadingFees ? (
+                  <div className="flex items-center space-x-3 py-3 text-slate-600">
+                    <Loader2 className="h-5 w-5 animate-spin text-indigo-600" />
+                    <span className="text-sm font-medium">Chargement des tarifs en cours...</span>
+                  </div>
+                ) : feesError ? (
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 space-y-3">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="h-5 w-5 text-rose-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-semibold text-rose-900">Erreur de chargement des tarifs</p>
+                        <p className="text-xs text-rose-700 mt-0.5">{feesError}</p>
+                      </div>
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => fetchSchoolFees()}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-semibold text-rose-800 hover:bg-rose-50 transition-colors"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" />
+                        Réessayer
+                      </button>
+                    </div>
+                  </div>
+                ) : availableFees.length === 0 ? (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-center space-y-1">
+                    <AlertTriangle className="mx-auto h-6 w-6 text-amber-500" />
+                    <p className="text-sm font-medium text-slate-700">Aucun tarif actif trouvé</p>
+                    <p className="text-xs text-slate-500">Aucun tarif actif n'est actuellement disponible pour cet établissement.</p>
+                  </div>
+                ) : (
+                  <>
+                    <select
+                      value={selectedFeeId}
+                      onChange={(e) => handleFeeSelectionChange(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    >
+                      <option value="">-- Choisir un tarif --</option>
+                      {availableFees.map(fee => (
+                        <option key={fee.id} value={fee.id}>
+                          {fee.name} — {fee.amount} {fee.currency}
+                        </option>
+                      ))}
+                    </select>
+
+                    <div className="flex justify-end pt-4">
+                      <button
+                        type="button"
+                        onClick={() => handleLoadPreview(null, selectedFeeId, null)}
+                        disabled={!selectedFeeId || isLoadingPreview}
+                        className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                      >
+                        {isLoadingPreview ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
+                        Prévisualiser l’émission
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             )}
 

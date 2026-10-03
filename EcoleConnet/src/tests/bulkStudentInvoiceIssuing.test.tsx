@@ -2,7 +2,7 @@
 // Suite de 60+ tests réels pour l'émission groupée des factures (Lot 2K-FIN-BULK-ISSUE-F)
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import {
   validateBulkIssuePreviewResult,
   validateBulkIssueExecutionResult,
@@ -26,10 +26,11 @@ vi.mock('../context/NotificationContext', () => ({
   })
 }));
 
-// Mock Supabase RPC
+// Mock Supabase RPC & Queries
 vi.mock('../lib/supabase', () => ({
   supabase: {
-    rpc: vi.fn()
+    rpc: vi.fn(),
+    from: vi.fn()
   }
 }));
 
@@ -1949,6 +1950,158 @@ describe('LOT 2K-FIN-BULK-ISSUE-F — Suite de 60 Tests Ciblés Émission Group�
         segments: []
       };
       expect(state.overall_status).toBe('abandoned');
+    });
+  });
+
+  describe('89-94. Tests du sélecteur de tarifs dans BulkIssueInvoiceModal (Lot 2K-FIN-BULK-ISSUE-FEE-SELECTOR-F)', () => {
+    it('89. Affiche un état de chargement pendant la récupération des tarifs', async () => {
+      let resolvePromise: (val: any) => void = () => {};
+      const promise = new Promise((resolve) => { resolvePromise = resolve; });
+      const mock: any = {};
+      mock.select = vi.fn().mockReturnValue(mock);
+      mock.eq = vi.fn().mockReturnValue(mock);
+      mock.order = vi.fn().mockImplementation(() => promise);
+      vi.mocked(supabase.from).mockReturnValueOnce(mock);
+
+      render(<BulkIssueInvoiceModal isOpen={true} onClose={vi.fn()} schoolId="school-123" />);
+      expect(screen.getByText(/Chargement des tarifs en cours.../i)).toBeInTheDocument();
+      await act(async () => {
+        resolvePromise({ data: [], error: null });
+        await promise;
+      });
+    });
+
+    it('90. Affiche un état d’erreur explicite avec bouton Réessayer si Supabase échoue', async () => {
+      const mockQuery: any = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        order: vi.fn().mockResolvedValue({ data: null, error: { message: 'RLS Permission Denied' } })
+      };
+      vi.mocked(supabase.from).mockReturnValueOnce(mockQuery);
+
+      render(<BulkIssueInvoiceModal isOpen={true} onClose={vi.fn()} schoolId="school-123" />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/Erreur de chargement des tarifs/i)).toBeInTheDocument();
+        expect(screen.getByText(/Impossible de charger la liste des tarifs./i)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /Réessayer/i })).toBeInTheDocument();
+      });
+    });
+
+    it('91. Affiche un état liste vide si aucun tarif actif n’est trouvé', async () => {
+      const mockQuery: any = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        order: vi.fn().mockResolvedValue({ data: [], error: null })
+      };
+      vi.mocked(supabase.from).mockReturnValueOnce(mockQuery);
+
+      render(<BulkIssueInvoiceModal isOpen={true} onClose={vi.fn()} schoolId="school-123" />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/Aucun tarif actif trouvé/i)).toBeInTheDocument();
+      });
+    });
+
+    it('92. Charge et affiche la liste des tarifs actifs avec leur nom, montant et devise', async () => {
+      const mockQuery: any = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        order: vi.fn().mockResolvedValue({
+          data: [
+            { id: 'fee-001', name: 'TEST MANUEL — Facturation groupée — 03 octobre 2026', amount: 5, currency: 'USD', due_date: '2026-10-31' },
+            { id: 'fee-002', name: 'Frais de Minerval T1', amount: 150, currency: 'USD', due_date: null }
+          ],
+          error: null
+        })
+      };
+      vi.mocked(supabase.from).mockReturnValueOnce(mockQuery);
+
+      const { container } = render(<BulkIssueInvoiceModal isOpen={true} onClose={vi.fn()} schoolId="school-123" />);
+
+      await waitFor(() => {
+        const selectEl = container.querySelector('select');
+        expect(selectEl).toBeInTheDocument();
+        expect(selectEl?.textContent).toContain('TEST MANUEL — Facturation groupée — 03 octobre 2026');
+        expect(selectEl?.textContent).toContain('Frais de Minerval T1');
+      });
+    });
+
+    it('93. N’affiche aucun UUID ou détail d’erreur technique brut dans le DOM', async () => {
+      const mockQuery: any = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        order: vi.fn().mockResolvedValue({
+          data: null,
+          error: { message: 'PGRST200: Could not find relationship between school_fees and unknown' }
+        })
+      };
+      vi.mocked(supabase.from).mockReturnValueOnce(mockQuery);
+
+      render(<BulkIssueInvoiceModal isOpen={true} onClose={vi.fn()} schoolId="school-123" />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/Impossible de charger la liste des tarifs./i)).toBeInTheDocument();
+        expect(screen.queryByText(/PGRST200/i)).not.toBeInTheDocument();
+      });
+    });
+
+    it('94. Utilise la prop fees directement lorsqu’elle est fournie sans refaire d’appel Supabase', async () => {
+      const customFees = [
+        { id: 'custom-1', name: 'Tarif Test En Mémoire', amount: 10, currency: 'USD' as Currency }
+      ];
+
+      const { container } = render(<BulkIssueInvoiceModal isOpen={true} onClose={vi.fn()} fees={customFees} />);
+
+      const selectEl = container.querySelector('select');
+      expect(selectEl).toBeInTheDocument();
+      expect(selectEl?.textContent).toContain('Tarif Test En Mémoire');
+    });
+
+    it('95. Charge les tarifs actifs même si schoolId n’est pas spécifié explicitement (filtrage RLS)', async () => {
+      const mockQuery: any = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        order: vi.fn().mockResolvedValue({
+          data: [
+            { id: 'fee-auto-1', name: 'Tarif RLS Automatique', amount: 25, currency: 'USD' }
+          ],
+          error: null
+        })
+      };
+      vi.mocked(supabase.from).mockReturnValueOnce(mockQuery);
+
+      const { container } = render(<BulkIssueInvoiceModal isOpen={true} onClose={vi.fn()} />);
+
+      await waitFor(() => {
+        const selectEl = container.querySelector('select');
+        expect(selectEl).toBeInTheDocument();
+        expect(selectEl?.textContent).toContain('Tarif RLS Automatique');
+      });
+    });
+
+    it('96. Modale ouverte depuis StudentInvoicesModule sans prop fees charge correctement les tarifs', async () => {
+      const mockQuery: any = {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        order: vi.fn().mockResolvedValue({
+          data: [
+            { id: 'fee-test-manual', name: 'TEST MANUEL — Facturation groupée — 03 octobre 2026', amount: 5, currency: 'USD' }
+          ],
+          error: null
+        })
+      };
+      vi.mocked(supabase.from).mockReturnValueOnce(mockQuery);
+
+      const { container } = render(
+        <BulkIssueInvoiceModal isOpen={true} onClose={vi.fn()} schoolId="school-456" />
+      );
+
+      await waitFor(() => {
+        const selectEl = container.querySelector('select');
+        expect(selectEl).toBeInTheDocument();
+        expect(selectEl?.textContent).toContain('TEST MANUEL — Facturation groupée — 03 octobre 2026');
+      });
     });
   });
 });
