@@ -143,7 +143,10 @@ const MainLayout: React.FC = () => {
             const safeReturnTo = schoolInvitationService.sanitizeReturnTo(rawReturnTo);
             navigate(safeReturnTo);
           } else {
-            const targetPath = roleValidation.isValid ? roleValidation.sanitizedPath : getDefaultRolePath(realAuth.profile.role);
+            // Seule une route de portail /app/... autorisée est conservée ; une route publique (/connexion, /)
+            // est « valide » pour validateAndSanitizePathForRole mais n'est jamais une destination post-login.
+            const isAuthorizedPortalPath = roleValidation.isValid && roleValidation.sanitizedPath.startsWith('/app/');
+            const targetPath = isAuthorizedPortalPath ? roleValidation.sanitizedPath : getDefaultRolePath(realAuth.profile.role);
             if (window.location.pathname !== targetPath) {
               window.history.replaceState({}, '', targetPath);
             }
