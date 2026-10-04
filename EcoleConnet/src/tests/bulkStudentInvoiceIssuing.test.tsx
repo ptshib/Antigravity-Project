@@ -20,9 +20,12 @@ import type {
 } from '../types/finance';
 
 // Mock context de notifications
+// showToast doit garder une référence stable entre les rendus, comme le useCallback du vrai provider :
+// une nouvelle instance à chaque rendu recrée fetchSchoolFees et relance son useEffect en boucle infinie.
+const { showToastMock } = vi.hoisted(() => ({ showToastMock: vi.fn() }));
 vi.mock('../context/NotificationContext', () => ({
   useNotifications: () => ({
-    showToast: vi.fn()
+    showToast: showToastMock
   })
 }));
 
