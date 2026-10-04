@@ -9,7 +9,8 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:parent-calendar": "vitest run src/tests/parentCalendarModule.test.tsx"
+    "test:parent-calendar": "vitest run src/tests/parentCalendarModule.test.tsx",
+    "test:sql:local": "node scripts/sql-safety/run-sql-tests.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
