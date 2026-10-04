@@ -4198,6 +4198,7 @@ export async function createSchoolRealEmailCampaign(
   }
 }
 
+
 export async function scheduleSchoolRealEmailCampaign(
   request: ScheduleRealEmailCampaignRequest
 ): Promise<ScheduleRealEmailCampaignResponse> {
@@ -4239,4 +4240,386 @@ export async function scheduleSchoolRealEmailCampaign(
     if (err instanceof FinanceServiceError) throw err;
     throw mapPostgresError(err);
   }
+}
+
+// ============================================================================
+// MODULE CAISSE & ENCAISSEMENTS (Lot 2K-FIN-CASH-F)
+// ============================================================================
+
+import type {
+  CashRegisterJournalFilters,
+  CashRegisterJournalResponse,
+  CurrencyCashSummary,
+  CashJournalEntry,
+  CashJournalPaymentMethod,
+  PaymentMethodAggregate,
+  CategoryAggregate,
+  ClassAggregate,
+  SchoolClassOption,
+  AuthorizedCashierOption
+} from '../types/cashRegister';
+
+function safeString(val: unknown, defaultStr = ''): string {
+  if (typeof val === 'string') return val;
+  if (val === null || val === undefined) return defaultStr;
+  return String(val);
+}
+
+function safeNullableString(val: unknown): string | null {
+  if (typeof val === 'string' && val.trim().length > 0) return val.trim();
+  return null;
+}
+
+function safeBoolean(val: unknown): boolean {
+  return val === true;
+}
+
+export function sanitizeFinancialError(err: unknown): string {
+  if (!err) return 'Une erreur inconnue s’est produite.';
+  const msg = err instanceof Error ? err.message : String(err);
+  if (msg.includes('42501') || msg.includes('permission denied') || msg.includes('privilege')) {
+    return 'Accès refusé ou privilèges insuffisants.';
+  }
+  if (msg.includes('fetch') || msg.includes('network') || msg.includes('RPC endpoint') || msg.includes('Failed to fetch')) {
+    return 'Impossible d’accéder au service financier. Veuillez vérifier votre connexion.';
+  }
+  if (msg.includes('22023') || msg.includes('invalid') || msg.includes('VIOLATION') || msg.includes('FORBIDDEN')) {
+    return msg;
+  }
+  if (msg.includes('table') || msg.includes('schema') || msg.includes('column') || msg.includes('SQLSTATE')) {
+    return 'Erreur de base de données. Opération annulée.';
+  }
+  return msg;
+}
+
+const CASH_UUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+function checkNoUUID(val: unknown, fieldName: string): void {
+  if (typeof val === 'string' && CASH_UUID_REGEX.test(val.trim())) {
+    throw new FinanceServiceError(`UUID_FORBIDDEN_IN_CLIENT_FIELDS: Raw UUID in client field ${fieldName}.`, '22023');
+  }
+}
+
+function checkStrictNumber(val: unknown, fieldName: string): number {
+  if (typeof val === 'number') {
+    if (isNaN(val) || !isFinite(val)) {
+      throw new FinanceServiceError(`INVALID_MONETARY_VALUE: Non-finite number in ${fieldName}.`, '22023');
+    }
+    return val;
+  }
+  if (typeof val === 'string') {
+    const parsed = parseFloat(val);
+    if (isNaN(parsed) || !isFinite(parsed)) {
+      throw new FinanceServiceError(`INVALID_MONETARY_VALUE: Non-finite string number in ${fieldName}.`, '22023');
+    }
+    return parsed;
+  }
+  return 0;
+}
+
+export function parseAndValidateCashJournalResponse(data: unknown): CashRegisterJournalResponse {
+  if (!data || typeof data !== 'object') {
+    throw new FinanceServiceError('Format de réponse backend caisse invalide (objet attendu).', 'P0001');
+  }
+
+  const raw = data as Record<string, unknown>;
+
+  const periodObj = (raw.period && typeof raw.period === 'object') ? (raw.period as Record<string, unknown>) : {};
+  const period = {
+    start_date: safeString(periodObj.start_date, new Date().toISOString().split('T')[0]),
+    end_date: safeString(periodObj.end_date, new Date().toISOString().split('T')[0]),
+    school_timezone: safeString(periodObj.school_timezone, 'Africa/Kinshasa')
+  };
+
+  const pagObj = (raw.pagination && typeof raw.pagination === 'object') ? (raw.pagination as Record<string, unknown>) : {};
+  const pagination = {
+    page: Math.max(1, checkStrictNumber(pagObj.page, 'page') || 1),
+    page_size: Math.max(1, checkStrictNumber(pagObj.page_size, 'page_size') || 20),
+    total_records: Math.max(0, checkStrictNumber(pagObj.total_records, 'total_records')),
+    total_pages: Math.max(1, checkStrictNumber(pagObj.total_pages, 'total_pages') || 1),
+    has_next: safeBoolean(pagObj.has_next),
+    has_previous: safeBoolean(pagObj.has_previous)
+  };
+
+  const summaryObj = (raw.summary && typeof raw.summary === 'object') ? (raw.summary as Record<string, unknown>) : {};
+
+  const parseCurrencySummary = (currData: unknown, currencyLabel: string): CurrencyCashSummary => {
+    const cObj = (currData && typeof currData === 'object') ? (currData as Record<string, unknown>) : {};
+
+    const gross_collected = checkStrictNumber(cObj.gross_collected, `${currencyLabel}.gross_collected`);
+    const cancellations_amount = checkStrictNumber(cObj.cancellations_amount, `${currencyLabel}.cancellations_amount`);
+    const net_event_amount = checkStrictNumber(cObj.net_event_amount, `${currencyLabel}.net_event_amount`);
+
+    // Invariant check
+    if (Math.abs(net_event_amount - (gross_collected - cancellations_amount)) > 0.001) {
+      throw new FinanceServiceError(
+        `MONETARY_INVARIANT_VIOLATION: ${currencyLabel} net_event_amount (${net_event_amount}) != gross (${gross_collected}) - cancellations (${cancellations_amount}).`,
+        '22023'
+      );
+    }
+
+    const byMethodRaw = (cObj.by_payment_method && typeof cObj.by_payment_method === 'object')
+      ? (cObj.by_payment_method as Record<string, unknown>)
+      : {};
+
+    const validMethods: CashJournalPaymentMethod[] = [
+      'cash',
+      'bank_transfer',
+      'bank_deposit',
+      'check',
+      'mobile_money_manual',
+      'other'
+    ];
+
+    const by_payment_method: Record<CashJournalPaymentMethod, PaymentMethodAggregate> = {
+      cash: { gross: 0, cancelled: 0, net: 0, collections_count: 0, cancellations_count: 0 },
+      bank_transfer: { gross: 0, cancelled: 0, net: 0, collections_count: 0, cancellations_count: 0 },
+      bank_deposit: { gross: 0, cancelled: 0, net: 0, collections_count: 0, cancellations_count: 0 },
+      check: { gross: 0, cancelled: 0, net: 0, collections_count: 0, cancellations_count: 0 },
+      mobile_money_manual: { gross: 0, cancelled: 0, net: 0, collections_count: 0, cancellations_count: 0 },
+      other: { gross: 0, cancelled: 0, net: 0, collections_count: 0, cancellations_count: 0 }
+    };
+
+    validMethods.forEach(method => {
+      const mObj = (byMethodRaw[method] && typeof byMethodRaw[method] === 'object')
+        ? (byMethodRaw[method] as Record<string, unknown>)
+        : {};
+      by_payment_method[method] = {
+        gross: checkStrictNumber(mObj.gross, `${currencyLabel}.${method}.gross`),
+        cancelled: checkStrictNumber(mObj.cancelled, `${currencyLabel}.${method}.cancelled`),
+        net: checkStrictNumber(mObj.net, `${currencyLabel}.${method}.net`),
+        collections_count: Math.max(0, checkStrictNumber(mObj.collections_count, `${currencyLabel}.${method}.collections_count`)),
+        cancellations_count: Math.max(0, checkStrictNumber(mObj.cancellations_count, `${currencyLabel}.${method}.cancellations_count`))
+      };
+    });
+
+    const byCatRaw = Array.isArray(cObj.by_category) ? cObj.by_category : [];
+    const by_category: CategoryAggregate[] = byCatRaw.map((catItem: unknown) => {
+      const catObj = (catItem && typeof catItem === 'object') ? (catItem as Record<string, unknown>) : {};
+      return {
+        fee_type: safeString(catObj.fee_type, 'autre'),
+        gross_collected: checkStrictNumber(catObj.gross_collected, 'cat.gross_collected'),
+        cancellations_amount: checkStrictNumber(catObj.cancellations_amount, 'cat.cancellations_amount'),
+        net_event_amount: checkStrictNumber(catObj.net_event_amount, 'cat.net_event_amount'),
+        confirmed_current_total: checkStrictNumber(catObj.confirmed_current_total, 'cat.confirmed_current_total')
+      };
+    });
+
+    const byClassRaw = Array.isArray(cObj.by_class) ? cObj.by_class : [];
+    const by_class: ClassAggregate[] = byClassRaw.map((clsItem: unknown) => {
+      const clsObj = (clsItem && typeof clsItem === 'object') ? (clsItem as Record<string, unknown>) : {};
+      const className = safeString(clsObj.class_name, 'Autre');
+      checkNoUUID(className, 'class_name');
+      return {
+        class_name: className,
+        gross_collected: checkStrictNumber(clsObj.gross_collected, 'class.gross_collected'),
+        cancellations_amount: checkStrictNumber(clsObj.cancellations_amount, 'class.cancellations_amount'),
+        net_event_amount: checkStrictNumber(clsObj.net_event_amount, 'class.net_event_amount'),
+        confirmed_current_total: checkStrictNumber(clsObj.confirmed_current_total, 'class.confirmed_current_total'),
+        collections_count: Math.max(0, checkStrictNumber(clsObj.collections_count, 'class.collections_count')),
+        cancellations_count: Math.max(0, checkStrictNumber(clsObj.cancellations_count, 'class.cancellations_count'))
+      };
+    });
+
+    if (by_class.length > 0) {
+      const grossClassSum = by_class.reduce((s, c) => s + c.gross_collected, 0);
+      if (Math.abs(grossClassSum - gross_collected) > 0.01) {
+        throw new FinanceServiceError(
+          `MONETARY_INVARIANT_VIOLATION: ${currencyLabel} by_class gross sum (${grossClassSum}) != summary gross_collected (${gross_collected}).`,
+          '22023'
+        );
+      }
+    }
+
+    return {
+      gross_collected,
+      cancellations_amount,
+      net_event_amount,
+      confirmed_current_total: checkStrictNumber(cObj.confirmed_current_total, `${currencyLabel}.confirmed_current_total`),
+      cash_collected: checkStrictNumber(cObj.cash_collected, `${currencyLabel}.cash_collected`),
+      cash_cancellations: checkStrictNumber(cObj.cash_cancellations, `${currencyLabel}.cash_cancellations`),
+      cash_net_event: checkStrictNumber(cObj.cash_net_event, `${currencyLabel}.cash_net_event`),
+      collections_count: Math.max(0, checkStrictNumber(cObj.collections_count, `${currencyLabel}.collections_count`)),
+      cancellations_count: Math.max(0, checkStrictNumber(cObj.cancellations_count, `${currencyLabel}.cancellations_count`)),
+      by_payment_method,
+      by_category,
+      by_class
+    };
+  };
+
+  const entriesRaw = Array.isArray(raw.journal_entries) ? raw.journal_entries : [];
+  const journal_entries: CashJournalEntry[] = entriesRaw.map((entryItem: unknown) => {
+    const eObj = (entryItem && typeof entryItem === 'object') ? (entryItem as Record<string, unknown>) : {};
+
+    const payNum = safeString(eObj.payment_number);
+    const recNum = safeNullableString(eObj.receipt_number);
+    const invNum = safeString(eObj.invoice_number);
+    const matNum = safeString(eObj.student_matricule);
+    const stuName = safeString(eObj.student_name);
+
+    checkNoUUID(payNum, 'payment_number');
+    if (recNum) checkNoUUID(recNum, 'receipt_number');
+    checkNoUUID(invNum, 'invoice_number');
+    checkNoUUID(matNum, 'student_matricule');
+
+    const allocationsRaw = Array.isArray(eObj.category_allocations) ? eObj.category_allocations : [];
+    const category_allocations = allocationsRaw.map((allocItem: unknown) => {
+      const aObj = (allocItem && typeof allocItem === 'object') ? (allocItem as Record<string, unknown>) : {};
+      return {
+        fee_type: safeString(aObj.fee_type, 'autre'),
+        amount: checkStrictNumber(aObj.amount, 'alloc.amount'),
+        allocated_percentage: checkStrictNumber(aObj.allocated_percentage, 'alloc.allocated_percentage')
+      };
+    });
+
+    return {
+      event_type: eObj.event_type === 'cancellation' ? 'cancellation' : 'collection',
+      event_date: safeString(eObj.event_date),
+      payment_number: payNum,
+      receipt_number: recNum,
+      receipt_is_cancelled: safeBoolean(eObj.receipt_is_cancelled),
+      payment_status: safeString(eObj.payment_status, 'confirmed'),
+      invoice_number: invNum,
+      student_matricule: matNum,
+      student_name: stuName,
+      class_name: safeString(eObj.class_name),
+      cashier_name: safeString(eObj.cashier_name),
+      amount: checkStrictNumber(eObj.amount, 'entry.amount'),
+      currency: eObj.currency === 'CDF' ? 'CDF' : 'USD',
+      payment_method: (eObj.payment_method as CashJournalPaymentMethod) || 'cash',
+      payment_reference: safeNullableString(eObj.payment_reference),
+      payer_name: safeNullableString(eObj.payer_name),
+      cancellation_reason: safeNullableString(eObj.cancellation_reason),
+      category_allocations
+    };
+  });
+
+  return {
+    period,
+    pagination,
+    summary: {
+      USD: parseCurrencySummary(summaryObj.USD, 'USD'),
+      CDF: parseCurrencySummary(summaryObj.CDF, 'CDF')
+    },
+    journal_entries,
+    disclaimer: safeString(raw.disclaimer, 'Les ventilations par catégorie sont à titre analytique et calculées au prorata selon la méthode des plus grands restes.')
+  };
+}
+
+export async function getSchoolCashRegisterJournal(
+  filters: CashRegisterJournalFilters = {}
+): Promise<CashRegisterJournalResponse> {
+  if (filters.searchQuery && filters.searchQuery.trim().length > 100) {
+    throw new FinanceServiceError('La recherche ne peut pas dépasser 100 caractères.', '22023');
+  }
+
+  const rpcParams = {
+    p_start_date: filters.startDate ? filters.startDate : null,
+    p_end_date: filters.endDate ? filters.endDate : null,
+    p_page: filters.page || 1,
+    p_page_size: filters.pageSize || 20,
+    p_class_id: filters.classId || null,
+    p_fee_type: filters.feeType || null,
+    p_payment_method: filters.paymentMethod || null,
+    p_event_type: filters.eventType || null,
+    p_recorded_by: filters.recordedBy || null,
+    p_search_query: filters.searchQuery ? filters.searchQuery.trim() : null
+  };
+
+  try {
+    const { data, error } = await supabase.rpc('get_school_cash_register_journal', rpcParams);
+    if (error) throw mapPostgresError(error);
+    return parseAndValidateCashJournalResponse(data);
+  } catch (err: unknown) {
+    if (err instanceof FinanceServiceError) throw err;
+    throw mapPostgresError(err);
+  }
+}
+
+export interface CashRegisterFilterOptionsResponse {
+  classes: SchoolClassOption[];
+  cashiers: AuthorizedCashierOption[];
+}
+
+export async function fetchCashRegisterFilterOptions(): Promise<CashRegisterFilterOptionsResponse> {
+  try {
+    const { data, error } = await supabase.rpc('get_school_cash_register_filter_options');
+    if (error) throw mapPostgresError(error);
+
+    const classes: SchoolClassOption[] = (data?.classes || []).map((item: any) => ({
+      id: String(item.id),
+      name: String(item.name || '')
+    }));
+
+    const cashiers: AuthorizedCashierOption[] = (data?.cashiers || []).map((item: any) => ({
+      id: String(item.id),
+      first_name: '',
+      last_name: '',
+      email: '',
+      full_name: String(item.full_name || '')
+    }));
+
+    return { classes, cashiers };
+  } catch (err) {
+    console.error('Erreur lors du chargement des options de filtres de caisse:', err);
+    return { classes: [], cashiers: [] };
+  }
+}
+
+export async function fetchSchoolClasses(schoolId: string): Promise<SchoolClassOption[]> {
+  try {
+    const options = await fetchCashRegisterFilterOptions();
+    if (options.classes.length > 0) {
+      return options.classes;
+    }
+  } catch (_e) {
+    // Fallback to table query if RPC not deployed yet
+  }
+
+  const { data, error } = await supabase
+    .from('classes')
+    .select('id, name')
+    .eq('school_id', schoolId)
+    .eq('is_active', true)
+    .order('name', { ascending: true });
+
+  if (error) {
+    console.error('Erreur lors du chargement des classes:', error);
+    return [];
+  }
+  return (data || []).map((item: { id: string; name: string }) => ({
+    id: String(item.id),
+    name: String(item.name)
+  }));
+}
+
+export async function fetchSchoolAuthorizedCashiers(schoolId: string): Promise<AuthorizedCashierOption[]> {
+  try {
+    const options = await fetchCashRegisterFilterOptions();
+    if (options.cashiers.length > 0) {
+      return options.cashiers;
+    }
+  } catch (_e) {
+    // Fallback to table query if RPC not deployed yet
+  }
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, first_name, last_name')
+    .eq('school_id', schoolId)
+    .in('role', ['school_admin', 'finance_agent'])
+    .eq('is_active', true)
+    .order('last_name', { ascending: true });
+
+  if (error) {
+    console.error('Erreur lors du chargement des caissiers autorisés:', error);
+    return [];
+  }
+  return (data || []).map((item: { id: string; first_name: string; last_name: string }) => ({
+    id: String(item.id),
+    first_name: String(item.first_name || ''),
+    last_name: String(item.last_name || ''),
+    email: '',
+    full_name: `${item.first_name || ''} ${item.last_name || ''}`.trim()
+  }));
 }

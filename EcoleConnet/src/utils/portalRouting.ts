@@ -26,7 +26,12 @@ export type FinanceSubTab =
   | 'factures'
   | 'catalogue'
   | 'campagnes'
-  | 'email_delivery';
+  | 'email_delivery'
+  | 'caisse_overview'
+  | 'caisse_journal'
+  | 'caisse_categories'
+  | 'caisse_classes'
+  | 'caisse_cancellations';
 
 export type ParentTab =
   | 'dashboard'
@@ -86,7 +91,12 @@ export const FINANCE_SUBTAB_TO_PATH: Record<FinanceSubTab, string> = {
   factures: '/app/ecole/finance/factures',
   catalogue: '/app/ecole/finance/grille-tarifaire',
   campagnes: '/app/ecole/finance/campagnes',
-  email_delivery: '/app/ecole/finance/livraisons-email'
+  email_delivery: '/app/ecole/finance/livraisons-email',
+  caisse_overview: '/app/ecole/finance/caisse/vue-densemble',
+  caisse_journal: '/app/ecole/finance/caisse/encaissements',
+  caisse_categories: '/app/ecole/finance/caisse/categories',
+  caisse_classes: '/app/ecole/finance/caisse/classes',
+  caisse_cancellations: '/app/ecole/finance/caisse/annulations'
 };
 
 export const PARENT_TAB_TO_PATH: Record<ParentTab, string> = {
@@ -288,7 +298,22 @@ export function parseAdminPath(pathname: string): { tab: SchoolAdminTab; subTab?
     let subTab: FinanceSubTab = 'vue_densemble';
     let isAlias = false;
 
-    if (financeSub === 'balance-creances' || financeSub === 'creances') {
+    if (financeSub.startsWith('caisse')) {
+      const caisseSub = financeSub.replace(/^caisse/, '').replace(/^\//, '');
+      if (caisseSub === 'encaissements' || caisseSub === 'journal') {
+        subTab = 'caisse_journal';
+        if (caisseSub === 'journal') isAlias = true;
+      } else if (caisseSub === 'categories') {
+        subTab = 'caisse_categories';
+      } else if (caisseSub === 'classes') {
+        subTab = 'caisse_classes';
+      } else if (caisseSub === 'annulations') {
+        subTab = 'caisse_cancellations';
+      } else {
+        subTab = 'caisse_overview';
+        if (caisseSub !== 'vue-densemble') isAlias = true;
+      }
+    } else if (financeSub === 'balance-creances' || financeSub === 'creances') {
       subTab = 'creances';
       if (financeSub === 'creances') isAlias = true;
     } else if (financeSub === 'factures') {

@@ -7,6 +7,7 @@ import type { AgingSummaryResponse, CollectionDashboardResponse } from '../../..
 import { FormattedAmount } from '../../common/CurrencyBadge';
 import { SchoolFeesCatalogModule } from './SchoolFeesCatalogModule';
 import { StudentInvoicesModule } from './StudentInvoicesModule';
+import { SchoolCashRegisterModule } from './SchoolCashRegisterModule';
 import { CollectionCampaignsPanel } from './CollectionCampaignsPanel';
 import { StudentFinanceDossierModal } from './StudentFinanceDossierModal';
 import { AgingSummaryCard } from './AgingSummaryCard';
@@ -25,7 +26,8 @@ import {
   Layers,
   BarChart3,
   Clock,
-  Mail
+  Mail,
+  Wallet
 } from 'lucide-react';
 
 const RealEmailDeliveryDashboard = React.lazy(() =>
@@ -284,6 +286,20 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
           >
             <BarChart3 className="w-3.5 h-3.5 shrink-0" />
             <span>Vue d'ensemble</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeSubTab.startsWith('caisse_')}
+            onClick={() => handleSelectSubTab('caisse_overview')}
+            className={`px-3.5 py-2 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+              activeSubTab.startsWith('caisse_')
+                ? 'bg-white text-slate-900 shadow-xs font-extrabold'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+            }`}
+          >
+            <Wallet className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+            <span>Journal de Caisse</span>
           </button>
           <button
             type="button"
@@ -557,6 +573,14 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
 
       {activeSubTab === 'campagnes' && (
         <CollectionCampaignsPanel />
+      )}
+
+      {activeSubTab.startsWith('caisse_') && (
+        <SchoolCashRegisterModule
+          schoolId={schoolId}
+          activeSubTab={activeSubTab}
+          onSelectSubTab={handleSelectSubTab}
+        />
       )}
 
       {activeSubTab === 'email_delivery' && (
