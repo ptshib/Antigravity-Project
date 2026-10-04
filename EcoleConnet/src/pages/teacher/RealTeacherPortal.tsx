@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useRealAuth } from '../../contexts/RealAuthContext';
+import { parseTeacherPath, TEACHER_TAB_TO_PATH } from '../../utils/portalRouting';
 import { useNotifications } from '../../context/NotificationContext';
 import { Modal } from '../../components/common/Modal';
 import { 
@@ -88,9 +89,36 @@ export const RealTeacherPortal: React.FC = () => {
   const { profile, school, signOutReal } = useRealAuth();
   const { showToast } = useNotifications();
 
-  // Navigation & Mobile Drawer State
-  const [activeTab, setActiveTab] = useState<TeacherTab>('overview');
+  // Navigation & Mobile Drawer State synchronized with URL
+  const [activeTab, setActiveTabState] = useState<TeacherTab>(() => parseTeacherPath(window.location.pathname).tab);
   const [isOpenMobile, setIsOpenMobile] = useState<boolean>(false);
+
+  const handleSelectTab = useCallback((tab: TeacherTab) => {
+    const targetPath = TEACHER_TAB_TO_PATH[tab] || '/app/enseignant/tableau-de-bord';
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({}, '', targetPath);
+    }
+    setActiveTabState(tab);
+  }, []);
+
+  const setActiveTab = handleSelectTab;
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const parsed = parseTeacherPath(window.location.pathname);
+      setActiveTabState(parsed.tab);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+
+    const currentPath = window.location.pathname.replace(/\/$/, '');
+    if (currentPath === '/app/enseignant') {
+      const canonical = TEACHER_TAB_TO_PATH[activeTab] || '/app/enseignant/tableau-de-bord';
+      window.history.replaceState({}, '', canonical);
+    }
+
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [activeTab]);
   const [selectedClassId, setSelectedClassId] = useState<string>('');
   const [selectedFinanceClassId, setSelectedFinanceClassId] = useState<string>('');
 

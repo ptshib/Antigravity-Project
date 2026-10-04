@@ -5,6 +5,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRealAuth } from '../../contexts/RealAuthContext';
 import { supabase } from '../../lib/supabase';
+import { parseParentPath, PARENT_TAB_TO_PATH, type ParentTab } from '../../utils/portalRouting';
 import { useNotifications } from '../../context/NotificationContext';
 import { Modal } from '../../components/common/Modal';
 import { StatCard } from '../../components/common/StatCard';
@@ -101,9 +102,36 @@ export const RealParentPortal: React.FC = () => {
   const { profile, school, signOutReal } = useRealAuth();
   const { showToast } = useNotifications();
 
-  // Navigation State
-  const [activeTab, setActiveTab] = useState<string>('dashboard');
+  // Navigation State synchronized with URL
+  const [activeTab, setActiveTabState] = useState<string>(() => parseParentPath(window.location.pathname).tab);
   const [isOpenMobile, setIsOpenMobile] = useState<boolean>(false);
+
+  const handleSelectTab = useCallback((tab: string) => {
+    const targetPath = PARENT_TAB_TO_PATH[tab as ParentTab] || '/app/parent/tableau-de-bord';
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({}, '', targetPath);
+    }
+    setActiveTabState(tab);
+  }, []);
+
+  const setActiveTab = handleSelectTab;
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const parsed = parseParentPath(window.location.pathname);
+      setActiveTabState(parsed.tab);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+
+    const currentPath = window.location.pathname.replace(/\/$/, '');
+    if (currentPath === '/app/parent') {
+      const canonical = PARENT_TAB_TO_PATH[activeTab as ParentTab] || '/app/parent/tableau-de-bord';
+      window.history.replaceState({}, '', canonical);
+    }
+
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [activeTab]);
 
   // Parent Links & Children State
   const [loading, setLoading] = useState<boolean>(true);

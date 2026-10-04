@@ -29,7 +29,8 @@ import { AcceptSchoolInvitationPage } from './pages/auth/AcceptSchoolInvitationP
 import { AccountSuspendedPage } from './pages/auth/AccountSuspendedPage';
 import { ConfigRequiredPage } from './pages/auth/ConfigRequiredPage';
 import { SuperAdminDashboard } from './pages/superadmin/SuperAdminDashboard';
-import { getRoleRedirectPath, isSchoolPortalRole } from './utils/roleRouting';
+import { isSchoolPortalRole } from './utils/roleRouting';
+import { validateAndSanitizePathForRole, getDefaultRolePath } from './utils/portalRouting';
 import { SchoolSupervisionPage } from './pages/superadmin/SchoolSupervisionPage';
 import { RealSchoolAdminPortal } from './pages/admin/RealSchoolAdminPortal';
 import { RealTeacherPortal } from './pages/teacher/RealTeacherPortal';
@@ -117,19 +118,20 @@ const MainLayout: React.FC = () => {
       return;
     }
 
-    // 2. If signed in, handle post-login redirects ONLY when on /connexion, /, or on non-canonical /app routes
+    // 2. If signed in, handle post-login redirects ONLY when on /connexion, /, or on unauthorized role routes
     if (realAuth.user && realAuth.session) {
       if (realAuth.profile && (!realAuth.profile.is_active || realAuth.school?.status === 'suspended' || realAuth.school?.status === 'archived')) {
         if (pathname !== '/acces-suspendu') {
           navigate('/acces-suspendu');
         }
       } else if (realAuth.profile) {
-        const targetRolePath = getRoleRedirectPath(realAuth.profile.role);
         const isSuperAdminSubRoute = realAuth.profile.role === 'super_admin' && pathname.startsWith('/app/superadmin/ecoles/');
+        const roleValidation = validateAndSanitizePathForRole(pathname, realAuth.profile.role);
+
         if (
           pathname === '/connexion' ||
           pathname === '/' ||
-          (pathname.startsWith('/app') && pathname !== targetRolePath && !isSuperAdminSubRoute)
+          (!roleValidation.isValid && !isSuperAdminSubRoute)
         ) {
           const urlParams = new URLSearchParams(window.location.search);
           const rawReturnTo = urlParams.get('returnTo');
@@ -141,7 +143,11 @@ const MainLayout: React.FC = () => {
             const safeReturnTo = schoolInvitationService.sanitizeReturnTo(rawReturnTo);
             navigate(safeReturnTo);
           } else {
-            navigate(targetRolePath);
+            const targetPath = roleValidation.isValid ? roleValidation.sanitizedPath : getDefaultRolePath(realAuth.profile.role);
+            if (window.location.pathname !== targetPath) {
+              window.history.replaceState({}, '', targetPath);
+            }
+            setCurrentView(parsePathToView(targetPath));
           }
         }
       }

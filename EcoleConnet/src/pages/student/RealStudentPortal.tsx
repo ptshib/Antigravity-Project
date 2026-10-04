@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRealAuth } from '../../contexts/RealAuthContext';
 import { supabase } from '../../lib/supabase';
+import { parseStudentPath, STUDENT_TAB_TO_PATH, type StudentTab } from '../../utils/portalRouting';
 import { useNotifications } from '../../context/NotificationContext';
 import { Modal } from '../../components/common/Modal';
 import { StudentPortalSidebar } from '../../components/student/portal/StudentPortalSidebar';
@@ -103,8 +104,36 @@ export const RealStudentPortal: React.FC = () => {
   const { profile, school, signOutReal } = useRealAuth();
   const { showToast } = useNotifications();
 
-  const [activeTab, setActiveTab] = useState<StudentPortalTab>('resultats');
+  // Navigation State synchronized with URL
+  const [activeTab, setActiveTabState] = useState<StudentPortalTab>(() => parseStudentPath(window.location.pathname).tab as StudentPortalTab);
   const [isOpenMobile, setIsOpenMobile] = useState<boolean>(false);
+
+  const handleSelectTab = useCallback((tab: StudentPortalTab) => {
+    const targetPath = STUDENT_TAB_TO_PATH[tab as StudentTab] || '/app/eleve/resultats';
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({}, '', targetPath);
+    }
+    setActiveTabState(tab);
+  }, []);
+
+  const setActiveTab = handleSelectTab;
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const parsed = parseStudentPath(window.location.pathname);
+      setActiveTabState(parsed.tab as StudentPortalTab);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+
+    const currentPath = window.location.pathname.replace(/\/$/, '');
+    if (currentPath === '/app/eleve') {
+      const canonical = STUDENT_TAB_TO_PATH[activeTab as StudentTab] || '/app/eleve/resultats';
+      window.history.replaceState({}, '', canonical);
+    }
+
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [activeTab]);
 
   const [loading, setLoading] = useState<boolean>(true);
   const [portalError, setPortalError] = useState<string | null>(null);

@@ -220,6 +220,7 @@ vi.mock('../lib/supabase', () => {
 describe('RealStudentPortal — Lot 2K-T5 (Validation Visuelle & Sécurité Élève)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.pushState({}, '', '/app/eleve/resultats');
   });
 
   afterEach(() => {

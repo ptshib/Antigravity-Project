@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef, type ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import type { RealProfile, RealSchool } from '../types/auth';
@@ -27,7 +27,28 @@ export const RealAuthProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [loading, setLoading] = useState<boolean>(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
+  const activeUserIdRef = useRef<string | null>(null);
+  const authRequestGenerationRef = useRef<number>(0);
+  const isMountedRef = useRef<boolean>(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      authRequestGenerationRef.current += 1;
+      activeUserIdRef.current = null;
+    };
+  }, []);
+
   const fetchProfileAndSchool = async (userId: string) => {
+    const fetchGen = (authRequestGenerationRef.current += 1);
+    activeUserIdRef.current = userId;
+
+    const isRequestValid = () =>
+      isMountedRef.current &&
+      authRequestGenerationRef.current === fetchGen &&
+      activeUserIdRef.current === userId;
+
     try {
       setAuthError(null);
       // Fetch Profile
@@ -36,6 +57,8 @@ export const RealAuthProvider: React.FC<{ children: ReactNode }> = ({ children }
         .select('*')
         .eq('id', userId)
         .single();
+
+      if (!isRequestValid()) return;
 
       // Auto-récupération d'un compte invité venant de définir son mot de passe
       if (profileErr || !profileData || !profileData.is_active) {
@@ -67,6 +90,8 @@ export const RealAuthProvider: React.FC<{ children: ReactNode }> = ({ children }
         }
       }
 
+      if (!isRequestValid()) return;
+
       if (profileErr || !profileData) {
         setProfile(null);
         setSchool(null);
@@ -91,6 +116,8 @@ export const RealAuthProvider: React.FC<{ children: ReactNode }> = ({ children }
           .eq('id', profileData.school_id)
           .single();
 
+        if (!isRequestValid()) return;
+
         if (!schoolErr && schoolData) {
           setSchool(schoolData as RealSchool);
           if (schoolData.status === 'suspended' || schoolData.status === 'archived') {
@@ -102,9 +129,11 @@ export const RealAuthProvider: React.FC<{ children: ReactNode }> = ({ children }
           }
         }
       } else {
+        if (!isRequestValid()) return;
         setSchool(null);
       }
     } catch (err: any) {
+      if (!isRequestValid()) return;
       console.error('Error fetching profile:', err);
       setAuthError('Erreur de connexion au serveur d’authentification.');
     }
@@ -121,23 +150,48 @@ export const RealAuthProvider: React.FC<{ children: ReactNode }> = ({ children }
       setSession(initSession);
       setUser(initSession?.user ?? null);
       if (initSession?.user) {
-        fetchProfileAndSchool(initSession.user.id).finally(() => setLoading(false));
+        activeUserIdRef.current = initSession.user.id;
+        fetchProfileAndSchool(initSession.user.id).finally(() => {
+          if (isMountedRef.current) setLoading(false);
+        });
       } else {
+        activeUserIdRef.current = null;
         setLoading(false);
       }
     });
 
     // Listen to Auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
-      setSession(newSession);
-      setUser(newSession?.user ?? null);
-      if (newSession?.user) {
-        setLoading(true);
-        await fetchProfileAndSchool(newSession.user.id);
-        setLoading(false);
-      } else {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+      // If SIGNED_OUT or no user, immediately invalidate authRequestGenerationRef and activeUserIdRef
+      if (!newSession?.user) {
+        authRequestGenerationRef.current += 1;
+        activeUserIdRef.current = null;
+        setSession(null);
+        setUser(null);
         setProfile(null);
         setSchool(null);
+        setLoading(false);
+        return;
+      }
+
+      // If TOKEN_REFRESHED for same user with existing profile, update session/user silently without setting loading: true
+      if (event === 'TOKEN_REFRESHED' && newSession.user.id && user?.id === newSession.user.id && profile) {
+        activeUserIdRef.current = newSession.user.id;
+        setSession(newSession);
+        setUser(newSession.user);
+        // Refresh profile in background without full unmount
+        fetchProfileAndSchool(newSession.user.id).catch(err => console.error('Background profile refresh error:', err));
+        return;
+      }
+
+      authRequestGenerationRef.current += 1;
+      activeUserIdRef.current = newSession.user.id;
+      setSession(newSession);
+      setUser(newSession.user);
+      // Full profile fetch with loading indicator for new logins or user switches
+      setLoading(true);
+      await fetchProfileAndSchool(newSession.user.id);
+      if (isMountedRef.current) {
         setLoading(false);
       }
     });

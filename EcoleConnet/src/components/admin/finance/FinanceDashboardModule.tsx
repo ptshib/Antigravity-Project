@@ -32,16 +32,41 @@ const RealEmailDeliveryDashboard = React.lazy(() =>
   import('./RealEmailDeliveryDashboard').then(m => ({ default: m.RealEmailDeliveryDashboard }))
 );
 
+import { parseAdminPath, FINANCE_SUBTAB_TO_PATH, type FinanceSubTab } from '../../../utils/portalRouting';
+
 interface FinanceDashboardModuleProps {
   schoolId: string;
   userRole?: string;
   isSchoolAdmin?: boolean;
 }
 
-type FinanceSubTab = 'vue_densemble' | 'creances' | 'factures' | 'catalogue' | 'campagnes' | 'email_delivery';
-
 export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ schoolId, userRole = 'school_admin', isSchoolAdmin }) => {
-  const [activeSubTab, setActiveSubTab] = useState<FinanceSubTab>('vue_densemble');
+  const [activeSubTab, setActiveSubTab] = useState<FinanceSubTab>(() => {
+    return parseAdminPath(window.location.pathname).subTab || 'vue_densemble';
+  });
+
+  const handleSelectSubTab = useCallback((subTab: FinanceSubTab) => {
+    const path = FINANCE_SUBTAB_TO_PATH[subTab];
+    if (window.location.pathname !== path) {
+      window.history.pushState({}, '', path);
+    }
+    setActiveSubTab(subTab);
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const sub = parseAdminPath(window.location.pathname).subTab || 'vue_densemble';
+      setActiveSubTab(sub);
+    };
+    window.addEventListener('popstate', handlePopState);
+
+    const cleanPath = window.location.pathname.replace(/\/$/, '');
+    if (cleanPath === '/app/ecole/finance') {
+      window.history.replaceState({}, '', FINANCE_SUBTAB_TO_PATH[activeSubTab]);
+    }
+
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [activeSubTab]);
 
   // USD Financial KPIs
   const [totalIssuedUSD, setTotalIssuedUSD] = useState<number>(0);
@@ -250,7 +275,7 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
             type="button"
             role="tab"
             aria-selected={activeSubTab === 'vue_densemble'}
-            onClick={() => setActiveSubTab('vue_densemble')}
+            onClick={() => handleSelectSubTab('vue_densemble')}
             className={`px-3.5 py-2 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
               activeSubTab === 'vue_densemble'
                 ? 'bg-white text-slate-900 shadow-xs font-extrabold'
@@ -264,7 +289,7 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
             type="button"
             role="tab"
             aria-selected={activeSubTab === 'creances'}
-            onClick={() => setActiveSubTab('creances')}
+            onClick={() => handleSelectSubTab('creances')}
             className={`px-3.5 py-2 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
               activeSubTab === 'creances'
                 ? 'bg-white text-slate-900 shadow-xs font-extrabold'
@@ -278,7 +303,7 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
             type="button"
             role="tab"
             aria-selected={activeSubTab === 'factures'}
-            onClick={() => setActiveSubTab('factures')}
+            onClick={() => handleSelectSubTab('factures')}
             className={`px-3.5 py-2 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
               activeSubTab === 'factures'
                 ? 'bg-white text-slate-900 shadow-xs font-extrabold'
@@ -292,7 +317,7 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
             type="button"
             role="tab"
             aria-selected={activeSubTab === 'catalogue'}
-            onClick={() => setActiveSubTab('catalogue')}
+            onClick={() => handleSelectSubTab('catalogue')}
             className={`px-3.5 py-2 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
               activeSubTab === 'catalogue'
                 ? 'bg-white text-slate-900 shadow-xs font-extrabold'
@@ -306,7 +331,7 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
             type="button"
             role="tab"
             aria-selected={activeSubTab === 'campagnes'}
-            onClick={() => setActiveSubTab('campagnes')}
+            onClick={() => handleSelectSubTab('campagnes')}
             className={`px-3.5 py-2 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
               activeSubTab === 'campagnes'
                 ? 'bg-white text-slate-900 shadow-xs font-extrabold'
@@ -320,7 +345,7 @@ export const FinanceDashboardModule: React.FC<FinanceDashboardModuleProps> = ({ 
             type="button"
             role="tab"
             aria-selected={activeSubTab === 'email_delivery'}
-            onClick={() => setActiveSubTab('email_delivery')}
+            onClick={() => handleSelectSubTab('email_delivery')}
             className={`px-3.5 py-2 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
               activeSubTab === 'email_delivery'
                 ? 'bg-white text-slate-900 shadow-xs font-extrabold'

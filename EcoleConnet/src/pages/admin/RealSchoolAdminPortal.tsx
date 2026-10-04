@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useRealAuth } from '../../contexts/RealAuthContext';
 import { useNotifications } from '../../context/NotificationContext';
 import { supabase } from '../../lib/supabase';
+import { parseAdminPath, ADMIN_TAB_TO_PATH } from '../../utils/portalRouting';
 import { Modal } from '../../components/common/Modal';
 import {
   Calendar,
@@ -297,16 +298,48 @@ export const RealSchoolAdminPortal: React.FC = () => {
 
   const isFinanceAgent = profile?.role === 'finance_agent';
 
-  // Active Tab State (finance_agent defaults and is locked to 'finance')
-  const [activeTab, setActiveTab] = useState<SchoolAdminTab>(() =>
-    profile?.role === 'finance_agent' ? 'finance' : 'vue_densemble'
-  );
+  // Active Tab State synchronized with URL (finance_agent defaults and is locked to 'finance')
+  const [activeTab, setActiveTabState] = useState<SchoolAdminTab>(() => {
+    if (profile?.role === 'finance_agent') return 'finance';
+    return parseAdminPath(window.location.pathname).tab;
+  });
   const [isOpenMobile, setIsOpenMobile] = useState<boolean>(false);
+
+  const handleSelectTab = useCallback((tab: SchoolAdminTab) => {
+    const targetTab = isFinanceAgent ? 'finance' : tab;
+    const targetPath = ADMIN_TAB_TO_PATH[targetTab];
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({}, '', targetPath);
+    }
+    setActiveTabState(targetTab);
+  }, [isFinanceAgent]);
+
+  const setActiveTab = handleSelectTab;
 
   useEffect(() => {
     if (isFinanceAgent && activeTab !== 'finance') {
-      setActiveTab('finance');
+      handleSelectTab('finance');
     }
+  }, [isFinanceAgent, activeTab, handleSelectTab]);
+
+  // Keep activeTab in sync with browser Back/Forward (popstate) & sanitize root route
+  useEffect(() => {
+    const handlePopState = () => {
+      const parsed = parseAdminPath(window.location.pathname);
+      const targetTab = isFinanceAgent ? 'finance' : parsed.tab;
+      setActiveTabState(targetTab);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+
+    // Sanitize root /app/ecole or /app/ecole/ on mount
+    const currentPath = window.location.pathname.replace(/\/$/, '');
+    if (currentPath === '/app/ecole') {
+      const canonical = isFinanceAgent ? '/app/ecole/finance/vue-densemble' : ADMIN_TAB_TO_PATH[activeTab];
+      window.history.replaceState({}, '', canonical);
+    }
+
+    return () => window.removeEventListener('popstate', handlePopState);
   }, [isFinanceAgent, activeTab]);
 
   const [loading, setLoading] = useState<boolean>(true);

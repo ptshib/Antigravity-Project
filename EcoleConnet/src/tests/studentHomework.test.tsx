@@ -142,6 +142,7 @@ describe('StudentHomework Frontend Suite — Lot 2K-T7-F', () => {
   const todayTimeIso = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 0).toISOString();
 
   beforeEach(() => {
+    window.history.pushState({}, '', '/app/eleve/resultats');
     vi.clearAllMocks();
     mockRpcCalls.length = 0;
     mockHomeworkRpcError = null;

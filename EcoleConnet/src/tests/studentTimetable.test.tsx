@@ -216,6 +216,7 @@ vi.mock('../lib/supabase', () => {
 describe('StudentTimetable Frontend Suite — Lot 2K-T6-F', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.pushState({}, '', '/app/eleve/resultats');
     mockRpcCalls.length = 0;
     mockFromQueries.length = 0;
     mockTimetableErrorResponse = null;
