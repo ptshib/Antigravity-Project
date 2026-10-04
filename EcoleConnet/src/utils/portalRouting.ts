@@ -30,11 +30,13 @@ export type FinanceSubTab =
 
 export type ParentTab =
   | 'dashboard'
+  | 'mes_enfants'
   | 'enfants'
   | 'presences'
   | 'resultats'
   | 'devoirs'
   | 'emploi_du_temps'
+  | 'paiements'
   | 'finance'
   | 'messages'
   | 'calendrier'
@@ -89,11 +91,13 @@ export const FINANCE_SUBTAB_TO_PATH: Record<FinanceSubTab, string> = {
 
 export const PARENT_TAB_TO_PATH: Record<ParentTab, string> = {
   dashboard: '/app/parent/tableau-de-bord',
+  mes_enfants: '/app/parent/enfants',
   enfants: '/app/parent/enfants',
   presences: '/app/parent/presences',
   resultats: '/app/parent/resultats',
   devoirs: '/app/parent/devoirs',
   emploi_du_temps: '/app/parent/emploi-du-temps',
+  paiements: '/app/parent/finance',
   finance: '/app/parent/finance',
   messages: '/app/parent/messages',
   calendrier: '/app/parent/calendrier',
@@ -385,10 +389,14 @@ export function parseParentPath(pathname: string): { tab: ParentTab; canonicalPa
       isAlias = true;
       break;
     case 'enfants':
-      tab = 'enfants';
+      tab = 'mes_enfants';
       break;
     case 'mes-enfants':
-      tab = 'enfants';
+      tab = 'mes_enfants';
+      isAlias = true;
+      break;
+    case 'mes_enfants':
+      tab = 'mes_enfants';
       isAlias = true;
       break;
     case 'presences': tab = 'presences'; break;
@@ -402,10 +410,10 @@ export function parseParentPath(pathname: string): { tab: ParentTab; canonicalPa
       isAlias = true;
       break;
     case 'finance':
-      tab = 'finance';
+      tab = 'paiements';
       break;
     case 'paiements':
-      tab = 'finance';
+      tab = 'paiements';
       isAlias = true;
       break;
     case 'messages': tab = 'messages'; break;
