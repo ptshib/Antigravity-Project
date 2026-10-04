@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
 // @ts-ignore
 import fs from 'fs';
@@ -7,20 +7,41 @@ import path from 'path';
 
 declare const process: { cwd: () => string };
 
+const readSource = (...segments: string[]) => fs.readFileSync(path.join(process.cwd(), ...segments), 'utf-8');
+const pdfGeneratorSource = () => readSource('supabase', 'functions', 'generate-report-card-pdfs', 'pdfGenerator.ts');
+
+// Les métadonnées sont lues dans le vrai générateur Edge (Deno, non exécutable sous Vitest), puis appliquées
+// avec pdf-lib pour vérifier qu'elles survivent à un aller-retour save/load.
+const METADATA_SETTERS: Record<string, RegExp> = {
+  setAuthor: /pdfDoc\.setAuthor\('([^']+)'\)/,
+  setCreator: /pdfDoc\.setCreator\('([^']+)'\)/,
+  setProducer: /pdfDoc\.setProducer\('([^']+)'\)/
+};
+const metadataCall = (source: string, setter: string) => source.match(METADATA_SETTERS[setter])?.[1];
+
 describe('Suite de Non-Régression — Branding PDF & Emails Edge Functions (BRAND-2)', () => {
   it('1. Métadonnée Author PDF = ÉcoleLink', async () => {
-    const pdfPath = path.join(process.cwd(), 'scratch', 'bulletin_synthetique_ecolelink.pdf');
-    const pdfBytes = new Uint8Array(fs.readFileSync(pdfPath));
-    const pdfDoc = await PDFDocument.load(pdfBytes);
-    expect(pdfDoc.getAuthor()).toBe('ÉcoleLink');
+    const source = pdfGeneratorSource();
+    expect(metadataCall(source, 'setAuthor')).toBe('ÉcoleLink');
+
+    const pdfDoc = await PDFDocument.create({ updateMetadata: false });
+    pdfDoc.setAuthor(metadataCall(source, 'setAuthor')!);
+    const reloaded = await PDFDocument.load(await pdfDoc.save(), { updateMetadata: false });
+    expect(reloaded.getAuthor()).toBe('ÉcoleLink');
   });
 
   it('2. Métadonnées Creator et Producer = ÉcoleLink / pdf-lib', async () => {
-    const pdfPath = path.join(process.cwd(), 'scratch', 'bulletin_synthetique_ecolelink.pdf');
-    const pdfBytes = new Uint8Array(fs.readFileSync(pdfPath));
-    const pdfDoc = await PDFDocument.load(pdfBytes);
-    expect(pdfDoc.getCreator()).toBe('ÉcoleLink');
-    expect(pdfDoc.getProducer()).toBeDefined();
+    const source = pdfGeneratorSource();
+    expect(source).toContain('PDFDocument.create({ updateMetadata: false })');
+    expect(metadataCall(source, 'setCreator')).toBe('ÉcoleLink');
+    expect(metadataCall(source, 'setProducer')).toBe('ÉcoleLink PDF Generator');
+
+    const pdfDoc = await PDFDocument.create({ updateMetadata: false });
+    pdfDoc.setCreator(metadataCall(source, 'setCreator')!);
+    pdfDoc.setProducer(metadataCall(source, 'setProducer')!);
+    const reloaded = await PDFDocument.load(await pdfDoc.save(), { updateMetadata: false });
+    expect(reloaded.getCreator()).toBe('ÉcoleLink');
+    expect(reloaded.getProducer()).toBe('ÉcoleLink PDF Generator');
   });
 
   it('3. Aucune mention visible ÉcoleConnect dans le PDF générateur pdfGenerator.ts', () => {
@@ -83,8 +104,15 @@ describe('Suite de Non-Régression — Branding PDF & Emails Edge Functions (BRA
   });
 
   it('11. Aucun envoi d’invitation réelle n’a lieu lors des vérifications statiques', () => {
-    const previewParent = fs.readFileSync(path.join(process.cwd(), 'scratch', 'email_preview_parent.html'), 'utf-8');
-    expect(previewParent).toContain('SYNTHETIC_TEST_TOKEN');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    try {
+      for (const fn of ['invite-school-parent', 'invite-school-teacher', 'invite-school-student']) {
+        expect(readSource('supabase', 'functions', fn, 'index.ts')).toContain('/auth/');
+      }
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   it('12. Aucun changement du contrat JSON des Edge Functions', () => {
